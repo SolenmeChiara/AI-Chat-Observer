@@ -1,0 +1,302 @@
+/* Base styles */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom overrides if needed */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Text selection styling */
+::selection {
+  background-color: #3b82f6; /* blue-500 */
+  color: #ffffff;
+}
+
+::-moz-selection {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+/* Dark mode selection */
+.dark ::selection {
+  background-color: #60a5fa; /* blue-400 */
+  color: #18181b;
+}
+
+.dark ::-moz-selection {
+  background-color: #60a5fa;
+  color: #18181b;
+}
+
+/* Mobile optimizations */
+@supports (height: 100dvh) {
+  .h-screen {
+    height: 100dvh !important;
+  }
+}
+
+/* Safe area padding for notched devices */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent iOS rubber banding on main container */
+html, body, #root {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Touch-friendly tap targets */
+@media (max-width: 640px) {
+  button, [role="button"], input[type="submit"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Larger close buttons on mobile */
+  .sidebar-close {
+    width: 48px;
+    height: 48px;
+  }
+
+  /* Better input styling on mobile */
+  input[type="text"], textarea, select {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+  }
+}
+
+/* Hide scrollbar on mobile for cleaner look */
+@media (max-width: 640px) {
+  ::-webkit-scrollbar {
+    display: none;
+  }
+  * {
+    scrollbar-width: none;
+  }
+}
+
+/* Slim scrollbar styling (desktop) */
+@media (min-width: 641px) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+  }
+
+  /* Dark mode scrollbar */
+  .dark ::-webkit-scrollbar-thumb {
+    background: #52525b;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #71717a;
+  }
+
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #d1d5db transparent;
+  }
+
+  .dark * {
+    scrollbar-color: #52525b transparent;
+  }
+}
+
+/* Markdown content styling */
+.markdown-content {
+  line-height: 1.6;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.markdown-content p {
+  margin-bottom: 0.5em;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content code {
+  background: rgba(0, 0, 0, 0.1);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  word-break: break-all;
+}
+
+.markdown-content pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.markdown-content a {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+
+.markdown-content a:hover {
+  color: #2563eb;
+}
+
+.markdown-content ul, .markdown-content ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.markdown-content li {
+  margin: 0.25em 0;
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.markdown-content h1, .markdown-content h2, .markdown-content h3 {
+  font-weight: 600;
+  margin: 0.5em 0 0.25em;
+}
+
+.markdown-content h1 { font-size: 1.25em; }
+.markdown-content h2 { font-size: 1.125em; }
+.markdown-content h3 { font-size: 1em; }
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.markdown-content th, .markdown-content td {
+  border: 1px solid #e5e7eb;
+  padding: 0.5em;
+  text-align: left;
+}
+
+.markdown-content th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+/* Dark mode (user messages) */
+.bg-zinc-900 .markdown-content code {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.bg-zinc-900 .markdown-content blockquote {
+  border-left-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.bg-zinc-900 .markdown-content th, .bg-zinc-900 .markdown-content td {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.bg-zinc-900 .markdown-content th {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Slim range slider styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 8px;
+  border-radius: 4px;
+  background: #18181b;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 8px;
+  border-radius: 4px;
+  background: #18181b;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* Dark mode thumb */
+.dark input[type="range"]::-webkit-slider-thumb {
+  background: #fff;
+}
+
+.dark input[type="range"]::-moz-range-thumb {
+  background: #fff;
+}
+
+/* Select dropdown styling for dark mode */
+.dark select {
+  color-scheme: dark;
+}
+
+.dark select option {
+  background-color: #3f3f46; /* zinc-700 */
+  color: #e4e4e7; /* zinc-200 */
+}
+
+.dark select option:checked,
+.dark select option:hover {
+  background-color: #52525b; /* zinc-600 */
+}
+
+/* Light mode select option styling */
+select option {
+  background-color: #f9fafb; /* gray-50 */
+  color: #374151; /* gray-700 */
+}
+
+select option:checked {
+  background-color: #dbeafe; /* blue-100 */
+}

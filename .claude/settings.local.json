@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm run dev:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsc:*)",
+      "WebFetch(domain:ai-logos-svg.vercel.app)",
+      "WebFetch(domain:svgstack.com)",
+      "Bash(curl:*)",
+      "Bash(npx vite:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

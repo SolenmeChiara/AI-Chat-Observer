@@ -1,0 +1,5 @@
+{
+  "name": "ai-chat-observer",
+  "description": "A multi-agent group chat platform where humans observe or participate in AI debates. Features auto-play 'Cyber Cricket' mode.",
+  "requestFramePermissions": []
+}
