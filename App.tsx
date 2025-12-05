@@ -759,6 +759,7 @@ const App: React.FC = () => {
       let accumulatedText = "";
       let accumulatedReasoning = "";
       let accumulatedUsage = { input: 0, output: 0 };
+      let capturedSignature: string | undefined;
       let isPass = false;
       let detectedReplyId: string | undefined = undefined;
 
@@ -848,6 +849,7 @@ const App: React.FC = () => {
           }));
         }
         if (chunk.usage) accumulatedUsage = chunk.usage;
+        if (chunk.reasoningSignature) capturedSignature = chunk.reasoningSignature;
       }
 
       clearTimeout(timeoutId);
@@ -933,6 +935,7 @@ const App: React.FC = () => {
                 ...m,
                 text: finalText,
                 reasoningText: accumulatedReasoning || undefined,
+                reasoningSignature: capturedSignature,
                 tokens: accumulatedUsage,
                 cost: cost,
                 replyToId: detectedReplyId,

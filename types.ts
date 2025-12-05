@@ -87,6 +87,7 @@ export interface Message {
   senderId: string;
   text: string;
   reasoningText?: string; // The "Thought Chain" content
+  reasoningSignature?: string; // Anthropic thinking signature (required for multi-turn)
   timestamp: number;
   cost?: number; // Cost of this specific message
   tokens?: { input: number; output: number };
@@ -171,6 +172,7 @@ export interface GlobalSettings {
 export interface StreamChunk {
   text?: string;
   reasoning?: string; // Chunk of reasoning text
+  reasoningSignature?: string; // Anthropic thinking signature
   usage?: { input: number; output: number };
   isComplete: boolean;
 }

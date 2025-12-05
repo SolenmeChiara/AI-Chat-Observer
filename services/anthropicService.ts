@@ -296,11 +296,12 @@ export async function* streamAnthropicReply(
     const contentBlocks: any[] = [];
 
     // For assistant messages when thinking is enabled: add thinking block FIRST (required by Anthropic)
-    // If no reasoningText exists (e.g., from before thinking was enabled), use a placeholder
-    if (isSelf && agent.config.enableReasoning) {
+    // Must include signature if available (required for multi-turn conversations)
+    if (isSelf && agent.config.enableReasoning && m.reasoningText && m.reasoningSignature) {
       contentBlocks.push({
         type: "thinking",
-        thinking: m.reasoningText || "(No recorded thinking for this historical message)"
+        thinking: m.reasoningText,
+        signature: m.reasoningSignature
       });
     }
 
@@ -445,6 +446,7 @@ export async function* streamAnthropicReply(
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let capturedUsage = { input: 0, output: 0 };
+    let capturedSignature: string | undefined;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -476,6 +478,10 @@ export async function* streamAnthropicReply(
                     if (json.delta?.type === 'thinking_delta' && json.delta.thinking) {
                         yield { reasoning: json.delta.thinking, isComplete: false };
                     }
+                    // Capture signature delta (Anthropic streams signature in thinking block)
+                    if (json.delta?.type === 'signature_delta' && json.delta.signature) {
+                        capturedSignature = (capturedSignature || '') + json.delta.signature;
+                    }
                 }
 
                 // Capture output usage from message_delta
@@ -484,7 +490,7 @@ export async function* streamAnthropicReply(
                 }
 
                 if (json.type === 'message_stop') {
-                    yield { isComplete: true, usage: capturedUsage };
+                    yield { isComplete: true, usage: capturedUsage, reasoningSignature: capturedSignature };
                     return;
                 }
             } catch (e) {
@@ -494,7 +500,7 @@ export async function* streamAnthropicReply(
       }
     }
 
-    yield { isComplete: true, usage: capturedUsage };
+    yield { isComplete: true, usage: capturedUsage, reasoningSignature: capturedSignature };
 
   } catch (error) {
     console.error("Anthropic Stream Reading Error", error);
