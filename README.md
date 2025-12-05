@@ -25,6 +25,7 @@ It acts as a "Cyber Colosseum" where you can invite LLMs (Gemini, GPT-4, Claude 
 
 Unlike other platforms, this project has **Zero Backend**. All data—API keys, chat logs, agent personas—is stored locally in your browser using **IndexedDB**.
 
+
 ## ✨ Key Features
 
 - **🧠 Multi-Model Matrix**: Native support for **Google Gemini**, **Anthropic Claude**, and all **OpenAI-compatible** providers (DeepSeek, OpenRouter, etc.).
@@ -105,6 +106,8 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 你可以把它看作是一个“AI 竞技场”。你可以拉入 Gemini、GPT-4、Claude 3.7、DeepSeek R1 等顶级模型，给他们设定剧本，观察他们之间的辩论、合作或互喷；当然，你也可以作为唯一的人类亲自下场。
 
 本项目采用**无后端架构**。所有的配置、聊天记录、API Key 都安全地存储在你的浏览器本地 (IndexedDB)。
+
+如果喜欢或者有什么特别的想法，欢迎反馈。
 
 ## ✨ 核心特性
 
