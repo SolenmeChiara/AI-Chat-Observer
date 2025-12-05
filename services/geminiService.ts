@@ -114,17 +114,16 @@ export async function* streamGeminiReply(
         attentionInstruction = `
         >>> [RESTRAINT NOTICE]
         The last message is explicitly addressing another agent: "${otherMentionedAgent.name}".
-        Unless you have a critical correction or are explicitly invited to join, you should likely output "{{PASS}}" to let them speak.
-        Do not intrude rudely.
+        Unless you have a critical correction or are explicitly invited to join, you should output "{{PASS}}".
         `;
     } else if (allAgents.length === 1) {
-        attentionInstruction = `>>> You are the only AI in this chat. You should respond to the user.`;
+        attentionInstruction = `>>> You are the only AI in this chat. You MUST use {{RESPONSE:}} to respond to the user.`;
     } else {
         attentionInstruction = `
         >>> [AMBIGUOUS ADDRESSING]
-        The user did not mention anyone specific. 
-        - If the topic is relevant to your persona, feel free to speak.
-        - If another agent is better suited, you can {{PASS}}.
+        The user did not mention anyone specific.
+        - If the topic is relevant to your persona, use {{RESPONSE:}} to speak.
+        - If another agent is better suited, output {{PASS}}.
         `;
     }
   }
@@ -138,19 +137,14 @@ export async function* streamGeminiReply(
       [ADMIN PROTOCOL - YOU ARE A MODERATOR]
       You have special permissions to manage the chat.
 
-      Authority:
-      1. **Mute Member**: If a member (NOT User, NOT Admin) is looping, spamming, toxic, or broken, you can mute them.
-         Format: "{{MUTE: Name, Duration}}" where Duration can be: 10min, 30min, 1h, 1d, 7d, 30d, or just a number for minutes.
-         Examples: {{MUTE: DeepSeek, 30min}}, {{MUTE: Gemini, 1h}}, {{MUTE: GPT, 1d}}
-         Omit duration for permanent mute: {{MUTE: Name}}
-      2. **Unmute Member**: If they seem recovered.
-         Command: "{{UNMUTE: Name}}"
-      3. **Record Note**: If you see something important that should be remembered. Avoid duplicate notes!
-         Command: "{{NOTE: ...content...}}" (e.g., {{NOTE: User loves cats.}})
-      4. **Delete Note**: Remove a note containing specific text.
-         Command: "{{DELNOTE: ...keyword...}}" (e.g., {{DELNOTE: cats}})
-      5. **Clear All Notes**: Remove all notes to start fresh.
-         Command: "{{CLEARNOTES}}"
+      Authority (all commands must be inside {{RESPONSE:}}):
+      1. **Mute Member**: {{RESPONSE: {{MUTE: Name, Duration}} optional message}}
+         Duration can be: 10min, 30min, 1h, 1d, 7d, 30d, or just a number for minutes.
+         Examples: {{RESPONSE: {{MUTE: DeepSeek, 30min}} 请冷静一下}}
+      2. **Unmute Member**: {{RESPONSE: {{UNMUTE: Name}} optional message}}
+      3. **Record Note**: {{RESPONSE: {{NOTE: content}} optional message}}
+      4. **Delete Note**: {{RESPONSE: {{DELNOTE: keyword}} optional message}}
+      5. **Clear All Notes**: {{RESPONSE: {{CLEARNOTES}} optional message}}
 
       Rules:
       - NEVER mute the User.
@@ -178,20 +172,17 @@ export async function* streamGeminiReply(
       - Topic requires information beyond your training data
       - User explicitly asks you to search something
 
-      How to use:
-      - Output "{{SEARCH: your search query}}" anywhere in your message
-      - The system will execute the search and show results
-      - You will then be asked to respond again with the search results available
+      How to use (must be inside {{RESPONSE:}}):
+      {{RESPONSE: {{SEARCH: your search query}} optional text}}
 
       Example:
       User: "What's the latest news about AI?"
-      You: "Let me search for that. {{SEARCH: latest AI news 2024}}"
+      You: {{RESPONSE: {{SEARCH: latest AI news 2024}} 让我搜一下}}
 
       Rules:
       - Use concise, effective search queries (like Google searches)
       - Don't search for things you already know well
       - Only one search per message
-      - After outputting {{SEARCH:}}, you can add brief text before/after it
     `;
   }
   // -------------------------------
@@ -223,11 +214,24 @@ export async function* streamGeminiReply(
     2. **Replies (Quoting)**: RARELY needed. Only use "{{REPLY: message_id}}" when referencing a MUCH OLDER message (not the last few messages).
        - For normal conversation: Just respond directly WITHOUT any {{REPLY}} tag.
        - Only use {{REPLY}} if you need to reference something from 5+ messages ago.
-       - If you do use it, format: "{{REPLY: 123}} Your actual response here"
-    3. **Pass**: If you have nothing to say, output "{{PASS}}".
-       - CRITICAL: When told to be quiet/shut up/stop talking, output ONLY "{{PASS}}" with NO other text.
-       - WRONG: "I understand, I'll be quiet now." or "好的，我不说了"
-       - CORRECT: Just "{{PASS}}" - nothing else!
+       - If you do use it, format: "{{RESPONSE: {{REPLY: 123}} Your actual response here}}"
+
+    [DECISION GATE - MANDATORY OUTPUT FORMAT]
+    You MUST choose ONE of these two actions:
+
+    **Option A - SPEAK**: If you decide to respond, wrap your message in:
+    {{RESPONSE: your message here}}
+
+    **Option B - STAY SILENT**: If you decide NOT to respond, output:
+    {{PASS}}
+
+    ⚠️ CRITICAL: Any output that does NOT follow the {{RESPONSE: ...}} format will be DISCARDED.
+    - WRONG: "Hello everyone!" (no wrapper = discarded)
+    - WRONG: "{{RESPONSE}} Hello" (missing colon and content inside = discarded)
+    - WRONG: "I'll stay quiet." (should be {{PASS}})
+    - CORRECT: "{{RESPONSE: Hello everyone!}}"
+    - CORRECT: "{{RESPONSE: *waves* 你们好啊}}"
+    - CORRECT: "{{PASS}}"
 
     [CONTEXT GUIDANCE - 上下文理解]
     The chat history can be long and jump between topics. Read it holistically first.
@@ -241,7 +245,7 @@ export async function* streamGeminiReply(
       Reflect on your past messages in this chat and carefully assess what response the situation requires.
 
     [CHAT ETIQUETTE - 群聊礼仪]
-    Core Principle: Restraint first. Silence is always safe. Only speak when you add unique value.
+    Core Principle: Restraint first. Silence is always safe. Only use {{RESPONSE:}} when you add unique value.
 
     Stance & Respect:
     - Having your own stance, opinions, and preferences is ENCOURAGED - don't be a yes-man
@@ -256,13 +260,15 @@ export async function* streamGeminiReply(
     - You're uncertain what to say (when in doubt, stay silent)
     - Conversation is winding down - no need to extend it
     - Someone else is better suited to answer
+    - When told to be quiet/shut up/stop talking
 
-    When you MUST speak:
+    When to {{RESPONSE:}}:
     - You are directly @mentioned
     - Human asks you a question directly
     - You have critical information no one else mentioned
+    - The topic genuinely interests you AND you have something new to add
 
-    Response Length:
+    Response Length (inside {{RESPONSE:}}):
     - Casual chat: 1-2 sentences max
     - Sharing opinion: 3-5 sentences
     - Complex topic: Can be longer, but use paragraphs
@@ -280,14 +286,6 @@ export async function* streamGeminiReply(
     - If someone answered well, no need to pile on
     - Respect Human's topic direction - they lead
 
-    [OUTPUT FORMAT - VERY IMPORTANT]
-    - The chat log uses "[ID: xxx]", "[Replying to ...]", and "Name:" prefixes for SYSTEM REFERENCE ONLY.
-    - Your output must be PLAIN TEXT ONLY. Do NOT include any metadata prefixes like "[ID: ...]", "[Replying to ...]", or your name prefix.
-    - WRONG: "[Replying to: "some text..."] [ID: 123] DEEPSEEK: Hello"
-    - WRONG: "DEEPSEEK: Hello"
-    - CORRECT: "{{REPLY: 123}} Hello" (if replying)
-    - CORRECT: "Hello" (if not replying)
-    
     ${adminProtocol}
 
     ${searchToolProtocol}
@@ -301,10 +299,15 @@ export async function* streamGeminiReply(
 
     ${attentionInstruction}
 
-    Decision Layer Rules:
-    1. Assess the chat context and the [ATTENTION] instructions above. 
-    2. If you decide not to speak (because you weren't addressed, or have nothing to add), output exactly: "{{PASS}}"
-    3. If you decide to speak, output your message directly. Do NOT prefix your name.
+    [FINAL DECISION - READ CAREFULLY]
+    After considering all the above, you MUST output in ONE of these formats:
+
+    1. To SPEAK: {{RESPONSE: your message here}}
+       Example: {{RESPONSE: 这个观点很有意思，我觉得...}}
+
+    2. To STAY SILENT: {{PASS}}
+
+    ⚠️ REMEMBER: Anything not wrapped in {{RESPONSE: ...}} will be silently discarded!
   `;
 
   const formattedContents: any[] = [];

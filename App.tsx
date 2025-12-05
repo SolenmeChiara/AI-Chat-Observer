@@ -828,8 +828,17 @@ const App: React.FC = () => {
             }
           }
 
+          // Extract content from {{RESPONSE:...}} for streaming display
+          let displayText = accumulatedText;
+
+          // Try to extract content from partial {{RESPONSE: ...
+          const partialResponseMatch = accumulatedText.match(/\{\{RESPONSE:\s*([\s\S]*?)(\}\})?$/);
+          if (partialResponseMatch) {
+            displayText = partialResponseMatch[1] || '';
+          }
+
           // Clean Text (Remove commands)
-          let cleanText = accumulatedText
+          let cleanText = displayText
              .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
              .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{UNMUTE:\s*(.+?)\}\}/, '')
@@ -839,7 +848,7 @@ const App: React.FC = () => {
              .replace(/\{\{SEARCH:\s*(.+?)\}\}/, '')
              .trimStart();
 
-          const replyMatch = accumulatedText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
+          const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
           if (replyMatch) detectedReplyId = replyMatch[1];
 
           // Update streaming message
@@ -904,8 +913,41 @@ const App: React.FC = () => {
          }
       }
 
+      // === DECISION GATE: Extract content from {{RESPONSE:...}} or treat as PASS ===
+      // Match {{RESPONSE: content}} - need to handle nested braces carefully
+      const responseMatch = accumulatedText.match(/\{\{RESPONSE:\s*([\s\S]*)\}\}$/);
+      let extractedContent = '';
+
+      if (responseMatch) {
+        // Extract content from inside {{RESPONSE: ... }}
+        extractedContent = responseMatch[1].trim();
+        // Handle case where content might have trailing }}
+        // Count braces to handle nested ones like {{RESPONSE: {{MUTE: x}} text}}
+        let braceCount = 0;
+        let endIndex = extractedContent.length;
+        for (let i = 0; i < extractedContent.length; i++) {
+          if (extractedContent[i] === '{' && extractedContent[i+1] === '{') {
+            braceCount++;
+            i++;
+          } else if (extractedContent[i] === '}' && extractedContent[i+1] === '}') {
+            braceCount--;
+            i++;
+            if (braceCount < 0) {
+              endIndex = i - 1;
+              break;
+            }
+          }
+        }
+        extractedContent = extractedContent.substring(0, endIndex).trim();
+      }
+
+      // If no valid RESPONSE content found, treat as PASS
+      if (!extractedContent || isPass) {
+        isPass = true;
+      }
+
       if (isPass) {
-        // Agent passed, remove placeholder message and update yield tracking
+        // Agent passed (or invalid format), remove placeholder message and update yield tracking
         updateThisSession(s => ({
             ...s,
             messages: s.messages.filter(m => m.id !== newMessageId),
@@ -917,8 +959,8 @@ const App: React.FC = () => {
         const cost = calculateCost(accumulatedUsage, provider, agent.modelId);
         setTotalCost(prev => prev + cost);
 
-        // Final text cleanup
-        let finalText = accumulatedText
+        // Final text cleanup - use extracted content from RESPONSE
+        let finalText = extractedContent
              .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
              .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{UNMUTE:\s*(.+?)\}\}/, '')
