@@ -363,10 +363,16 @@ export async function* streamAnthropicReply(
   let temperatureConfig = agent.config.temperature;
   let maxTokensConfig = agent.config.maxTokens;
 
-  if (agent.config.enableReasoning) {
+  // Check if all assistant messages with reasoningText have signatures
+  // If any is missing, we cannot safely enable thinking mode
+  const hasIncompleteThinking = visibleMessages.some(m =>
+    m.senderId === agent.id && m.reasoningText && !m.reasoningSignature
+  );
+
+  if (agent.config.enableReasoning && !hasIncompleteThinking) {
       // Claude 3.7 Thinking mode requires temperature to be 1.0 (or not sent, defaulting to 1)
-      temperatureConfig = 1.0; 
-      
+      temperatureConfig = 1.0;
+
       thinkingConfig = {
           type: "enabled",
           budget_tokens: agent.config.reasoningBudget || 2048
@@ -491,6 +497,11 @@ export async function* streamAnthropicReply(
                     if (json.delta?.type === 'signature_delta' && json.delta.signature) {
                         capturedSignature = (capturedSignature || '') + json.delta.signature;
                     }
+                }
+
+                // Capture signature from content_block_stop (alternative location)
+                if (json.type === 'content_block_stop' && json.content_block?.signature) {
+                    capturedSignature = json.content_block.signature;
                 }
 
                 // Capture output usage from message_delta
