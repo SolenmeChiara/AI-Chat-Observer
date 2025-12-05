@@ -133,6 +133,19 @@
 - `App.tsx` - 创建占位符时 `isStreaming: true`，完成后清除
 - 三个 Service 文件 - 过滤掉 `isStreaming` 的消息
 
+### 9. 群组级别管理员 (已完成)
+
+**改动：** 管理员权限从 Agent 级别移到 Group 级别。
+
+**相关文件：**
+- `types.ts` - `ChatGroup.adminIds?: string[]`
+- `components/RightSidebar.tsx` - 成员卡片加管理员徽章和切换按钮
+- `components/Sidebar.tsx` - 移除角色编辑器里的管理员开关
+- `App.tsx` - `handleToggleAdmin` 函数，传 `groupAdminIds` 给 services
+- 三个 Service 文件 - 用 `groupAdminIds?.includes(agent.id)` 替代 `agent.role === ADMIN`
+
+**效果：** 同一个角色在不同群组可以有不同权限。
+
 ---
 
 ## 注意事项
