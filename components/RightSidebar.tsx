@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Agent, MuteInfo } from '../types';
-import { X, Plus, Minus, User, VolumeX, Clock } from 'lucide-react';
+import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff } from 'lucide-react';
 
 // Mute duration options (in minutes)
 const MUTE_DURATIONS = [
@@ -20,16 +20,18 @@ interface RightSidebarProps {
   onClose: () => void;
   agents: Agent[];           // 当前在群聊中的角色 (isActive = true)
   inactiveAgents: Agent[];   // 未加入群聊的角色 (isActive = false)
+  adminIds: string[];        // 当前群的管理员列表
   mutedAgents: MuteInfo[];
   onRemoveAgent: (id: string) => void;
   onMuteAgent: (agentId: string, durationMinutes: number, mutedBy: string) => void;
   onUnmuteAgent: (agentId: string) => void;
   onActivateAgent: (agentId: string) => void;  // 激活角色加入群聊
+  onToggleAdmin: (agentId: string) => void;    // 切换管理员状态
   userName: string;
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
-  isOpen, onClose, agents, inactiveAgents, mutedAgents, onRemoveAgent, onMuteAgent, onUnmuteAgent, onActivateAgent, userName
+  isOpen, onClose, agents, inactiveAgents, adminIds, mutedAgents, onRemoveAgent, onMuteAgent, onUnmuteAgent, onActivateAgent, onToggleAdmin, userName
 }) => {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -87,8 +89,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         {agents.map(agent => {
           const muteInfo = getMuteInfo(agent.id);
           const isMuted = !!muteInfo;
+          const isAdmin = adminIds.includes(agent.id);
           return (
-            <div key={agent.id} className={`bg-white dark:bg-zinc-800 p-3 rounded-xl border shadow-sm relative group transition-all hover:shadow-md ${isMuted ? 'opacity-60 border-gray-100 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-700' : 'border-gray-100 dark:border-zinc-700'}`}>
+            <div key={agent.id} className={`bg-white dark:bg-zinc-800 p-3 rounded-xl border shadow-sm relative group transition-all hover:shadow-md ${isMuted ? 'opacity-60 border-gray-100 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-700' : 'border-gray-100 dark:border-zinc-700'} ${isAdmin ? 'ring-1 ring-amber-300 dark:ring-amber-600' : ''}`}>
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <img src={agent.avatar} className="w-10 h-10 rounded-full bg-white object-contain border border-gray-200 dark:border-zinc-600 p-1" />
@@ -100,10 +103,20 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       <Minus size={12} strokeWidth={4} />
                     </button>
                   )}
+                  {isAdmin && !isDeleteMode && (
+                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-amber-500 text-white rounded-full flex items-center justify-center shadow-sm">
+                      <Shield size={10} />
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <h4 className="font-semibold text-sm text-gray-900 dark:text-white truncate flex items-center gap-2">
                     {agent.name}
+                    {isAdmin && (
+                      <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                        <Shield size={10} /> 管理员
+                      </span>
+                    )}
                     {isMuted && (
                       <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                         <VolumeX size={10} /> 禁言中
@@ -121,6 +134,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                 </div>
                 {!isDeleteMode && (
                   <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => onToggleAdmin(agent.id)}
+                      className={`px-2 py-1 text-[10px] rounded transition-colors flex items-center gap-1 ${isAdmin ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50' : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'}`}
+                    >
+                      {isAdmin ? <ShieldOff size={10} /> : <Shield size={10} />}
+                      {isAdmin ? '撤销' : '管理'}
+                    </button>
                     {isMuted ? (
                       <button
                         onClick={() => onUnmuteAgent(agent.id)}

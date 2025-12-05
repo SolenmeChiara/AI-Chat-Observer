@@ -123,6 +123,7 @@ export interface ChatGroup {
   id: string;
   name: string;
   memberIds: string[];        // 共享的成员列表
+  adminIds?: string[];        // 该群的管理员列表
   scenario?: string;          // 共享的场景设定
   memoryConfig: MemoryConfig; // 共享的记忆配置
   createdAt: number;

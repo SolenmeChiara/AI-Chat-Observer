@@ -35,7 +35,8 @@ export async function* streamOpenAIReply(
   adminNotes?: string[],
   userName?: string,
   userPersona?: string,
-  hasSearchTool?: boolean
+  hasSearchTool?: boolean,
+  groupAdminIds?: string[]
 ): AsyncGenerator<StreamChunk> {
   
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -61,7 +62,7 @@ export async function* streamOpenAIReply(
 
   // 4. Build Group Member List
   const memberList = allAgents.map(a => {
-      const roleBadge = a.role === AgentRole.ADMIN ? " [ADMIN]" : "";
+      const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
       return `- ${a.name} (AI Robot)${roleBadge}`;
   }).join('\n');
 
@@ -108,7 +109,8 @@ export async function* streamOpenAIReply(
 
   // --- 6. ADMIN & MEMORY LOGIC ---
   let adminProtocol = "";
-  if (agent.role === AgentRole.ADMIN) {
+  const isGroupAdmin = groupAdminIds?.includes(agent.id);
+  if (isGroupAdmin) {
       adminProtocol = `
       [ADMIN PROTOCOL - YOU ARE A MODERATOR]
       Authority:

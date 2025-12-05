@@ -693,24 +693,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       </div>
 
                       <div className="space-y-3">
-                     {/* Role Selection */}
-                     <div className="flex items-center gap-2 text-xs">
-                        <span className="text-gray-500 dark:text-gray-400">身份权限:</span>
-                        <div className="flex bg-gray-50 dark:bg-zinc-700 rounded-lg p-0.5 border border-gray-100 dark:border-zinc-600">
-                           <button
-                             onClick={() => updateDraftAgent(agent.id, { role: AgentRole.MEMBER })}
-                             className={`px-3 py-1 rounded-md transition-all ${editData.role === AgentRole.MEMBER ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
-                           >
-                             成员
-                           </button>
-                           <button
-                             onClick={() => updateDraftAgent(agent.id, { role: AgentRole.ADMIN })}
-                             className={`px-3 py-1 rounded-md transition-all flex items-center gap-1 ${editData.role === AgentRole.ADMIN ? 'bg-zinc-800 text-white shadow-sm' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
-                           >
-                             <Shield size={10} /> 管理员
-                           </button>
-                        </div>
-                     </div>
+                     {/* 管理员权限现在在群组成员列表中设置 */}
 
                      <textarea
                         className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500"

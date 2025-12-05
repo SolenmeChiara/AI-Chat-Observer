@@ -58,7 +58,8 @@ export async function* streamGeminiReply(
   userName?: string,
   userPersona?: string,
   hasSearchTool?: boolean,
-  enableGoogleSearch?: boolean
+  enableGoogleSearch?: boolean,
+  groupAdminIds?: string[]
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
   
@@ -83,7 +84,7 @@ export async function* streamGeminiReply(
 
   // 4. Build Group Member List for Context
   const memberList = allAgents.map(a => {
-      const roleBadge = a.role === AgentRole.ADMIN ? " [ADMIN]" : "";
+      const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
       return `- ${a.name} (AI Robot)${roleBadge}`;
   }).join('\n');
 
@@ -131,7 +132,8 @@ export async function* streamGeminiReply(
 
   // --- 6. ADMIN & MEMORY LOGIC ---
   let adminProtocol = "";
-  if (agent.role === AgentRole.ADMIN) {
+  const isGroupAdmin = groupAdminIds?.includes(agent.id);
+  if (isGroupAdmin) {
       adminProtocol = `
       [ADMIN PROTOCOL - YOU ARE A MODERATOR]
       You have special permissions to manage the chat.

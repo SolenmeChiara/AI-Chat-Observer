@@ -387,6 +387,38 @@ const App: React.FC = () => {
     updateActiveSession(s => ({ ...s, messages: [...s.messages, joinMessage] }));
   };
 
+  // 切换群组管理员状态
+  const handleToggleAdmin = (agentId: string) => {
+    const agent = agents.find(a => a.id === agentId);
+    if (!agent) return;
+
+    setGroups(prev => prev.map(g => {
+      if (g.id !== activeGroupId) return g;
+      const currentAdmins = g.adminIds || [];
+      const isCurrentlyAdmin = currentAdmins.includes(agentId);
+
+      return {
+        ...g,
+        adminIds: isCurrentlyAdmin
+          ? currentAdmins.filter(id => id !== agentId)
+          : [...currentAdmins, agentId]
+      };
+    }));
+
+    // 添加系统消息
+    const isNowAdmin = !(activeGroup?.adminIds || []).includes(agentId);
+    const systemMessage: Message = {
+      id: `admin-${Date.now()}`,
+      senderId: 'system',
+      text: isNowAdmin
+        ? `${agent.name} 被设为群管理员`
+        : `${agent.name} 的管理员权限已撤销`,
+      timestamp: Date.now(),
+      isSystem: true
+    };
+    updateActiveSession(s => ({ ...s, messages: [...s.messages, systemMessage] }));
+  };
+
   // Format duration for display
   const formatDuration = (minutes: number): string => {
     if (minutes === 0) return '永久';
@@ -698,6 +730,8 @@ const App: React.FC = () => {
       const hasSearchTool = !disableSearch && !!(agent.searchConfig?.enabled && agent.searchConfig?.apiKey);
 
       // Pass userName and userPersona from settings (using processedMessages for vision proxy)
+      const groupAdminIds = currentGroup?.adminIds || [];
+
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(
           agent, agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
@@ -708,17 +742,17 @@ const App: React.FC = () => {
             vertexLocation: provider.vertexLocation
           },
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
-          agent.enableGoogleSearch  // Gemini 原生 Google 搜索
+          agent.enableGoogleSearch, groupAdminIds
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds
         );
       } else {
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds
         );
       }
 
@@ -1325,11 +1359,13 @@ const App: React.FC = () => {
         isOpen={isRightSidebarOpen} onClose={() => setIsRightSidebarOpen(false)}
         agents={sessionMembers}
         inactiveAgents={agents.filter(a => a.providerId && a.modelId && !sessionMembers.some(m => m.id === a.id))}
+        adminIds={activeGroup?.adminIds || []}
         mutedAgents={activeSession.mutedAgents || []}
         onRemoveAgent={handleRemoveAgent}
         onMuteAgent={handleMuteAgent}
         onUnmuteAgent={handleUnmuteAgent}
         onActivateAgent={handleActivateAgent}
+        onToggleAdmin={handleToggleAdmin}
         userName={settings.userName || 'User'}
       />
 
