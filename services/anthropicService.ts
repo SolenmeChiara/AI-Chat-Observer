@@ -295,6 +295,15 @@ export async function* streamAnthropicReply(
     // Build Content Block (Text + Image)
     const contentBlocks: any[] = [];
 
+    // For assistant messages when thinking is enabled: add thinking block FIRST (required by Anthropic)
+    // If no reasoningText exists (e.g., from before thinking was enabled), use a placeholder
+    if (isSelf && agent.config.enableReasoning) {
+      contentBlocks.push({
+        type: "thinking",
+        thinking: m.reasoningText || "(No recorded thinking for this historical message)"
+      });
+    }
+
     // Image First (Anthropic best practice often puts image first)
     if (m.attachment && m.attachment.type === 'image') {
         // Extract base64 data from data URL
