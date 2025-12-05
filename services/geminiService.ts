@@ -57,7 +57,8 @@ export async function* streamGeminiReply(
   adminNotes?: string[],
   userName?: string,
   userPersona?: string,
-  hasSearchTool?: boolean
+  hasSearchTool?: boolean,
+  enableGoogleSearch?: boolean
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
   
@@ -366,6 +367,8 @@ export async function* streamGeminiReply(
           systemInstruction: systemPrompt,
           temperature: agent.config.temperature,
           maxOutputTokens: agent.config.maxTokens,
+          // Gemini 原生 Google 搜索 (Grounding)
+          tools: enableGoogleSearch ? [{ googleSearch: {} }] : undefined,
         }
       });
       break; // Success, exit retry loop

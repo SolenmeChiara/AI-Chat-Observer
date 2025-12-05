@@ -904,6 +904,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     </div>
                                 </div>
                             )}
+
+                            {/* Gemini 原生 Google 搜索 (仅 Gemini 模型可用) */}
+                            {currentProvider?.type === AgentType.GEMINI && (
+                                <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                            <Search size={10} /> Google 搜索 (原生)
+                                        </span>
+                                        <input
+                                            type="checkbox"
+                                            className="accent-zinc-900"
+                                            checked={editData.enableGoogleSearch || false}
+                                            onChange={(e) => updateDraftAgent(agent.id, { enableGoogleSearch: e.target.checked })}
+                                        />
+                                    </div>
+                                    <p className="text-[9px] text-gray-400 mt-0.5">
+                                        Gemini 内置搜索，无需额外 API Key
+                                    </p>
+                                </div>
+                            )}
                         </div>
                       </div>
 

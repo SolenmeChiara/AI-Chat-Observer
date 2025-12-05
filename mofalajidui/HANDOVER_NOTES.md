@@ -105,6 +105,34 @@
 - Dexie 版本2自动为每个旧 session 创建一个同名 group
 - 旧数据的 memberIds/scenario/memoryConfig 迁移到 group
 
+### 6. 图片自动压缩 (已完成)
+
+- `types.ts` - `GlobalSettings.compressImages`, `maxImageSizeMB`
+- `services/fileParser.ts` - Canvas 压缩逻辑
+- `components/Sidebar.tsx` - 设置页开关和阈值滑动条
+
+### 7. Gemini 原生 Google 搜索 (已完成)
+
+**功能：** Gemini 模型可使用内置 Google Search Grounding，无需额外 API Key。
+
+**相关文件：**
+- `types.ts` - `Agent.enableGoogleSearch?: boolean`
+- `services/geminiService.ts` - 传入 `tools: [{ googleSearch: {} }]`
+- `components/Sidebar.tsx` - 仅 Gemini 供应商的角色显示开关
+
+**与 searchConfig 的区别：**
+- `searchConfig`: 第三方搜索 (Serper/Tavily)，需 API Key，结果作为单独消息
+- `enableGoogleSearch`: Gemini 原生，无需 API Key，结果融入回复
+
+### 8. 流式占位符对 AI 不可见 (已完成)
+
+**问题：** AI 生成时的占位符（空内容）会让其他 AI 困惑。
+
+**解决：**
+- `types.ts` - `Message.isStreaming?: boolean`
+- `App.tsx` - 创建占位符时 `isStreaming: true`，完成后清除
+- 三个 Service 文件 - 过滤掉 `isStreaming` 的消息
+
 ---
 
 ## 注意事项

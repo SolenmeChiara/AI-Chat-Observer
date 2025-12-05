@@ -71,6 +71,7 @@ export interface Agent {
   role: AgentRole;    // MEMBER or ADMIN
   isActive?: boolean; // If false, agent won't participate in chat until manually activated
   searchConfig?: SearchConfig; // 搜索工具配置
+  enableGoogleSearch?: boolean; // Gemini 原生 Google 搜索 (仅 Gemini 模型可用)
 }
 
 export interface Attachment {

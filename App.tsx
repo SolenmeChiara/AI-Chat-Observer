@@ -707,7 +707,8 @@ const App: React.FC = () => {
             vertexProject: provider.vertexProject,
             vertexLocation: provider.vertexLocation
           },
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
+          agent.enableGoogleSearch  // Gemini 原生 Google 搜索
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         streamGenerator = streamAnthropicReply(
