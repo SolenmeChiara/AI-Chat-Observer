@@ -103,7 +103,8 @@ export async function* streamAnthropicReply(
 
   // --- 6. ADMIN & MEMORY LOGIC ---
   let adminProtocol = "";
-  const isGroupAdmin = groupAdminIds?.includes(agent.id);
+  // Check both: agent role AND group admin list (for backwards compatibility)
+  const isGroupAdmin = agent.role === AgentRole.ADMIN || groupAdminIds?.includes(agent.id);
   if (isGroupAdmin) {
       adminProtocol = `
       [ADMIN PROTOCOL - YOU ARE A MODERATOR]
