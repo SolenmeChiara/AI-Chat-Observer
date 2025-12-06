@@ -363,13 +363,26 @@ export async function* streamGeminiReply(
   const MAX_RETRIES = 3;
   let streamResult;
 
+  // Check if model supports system instruction (Gemma models don't)
+  const modelLower = modelId.toLowerCase();
+  const supportsSystemInstruction = !modelLower.includes('gemma');
+
+  // If model doesn't support system instruction, prepend it as first user message
+  const finalContents = supportsSystemInstruction
+    ? formattedContents
+    : [
+        { role: 'user', parts: [{ text: `[SYSTEM INSTRUCTION]\n${systemPrompt}\n[END SYSTEM INSTRUCTION]` }] },
+        { role: 'model', parts: [{ text: 'Understood. I will follow these instructions.' }] },
+        ...formattedContents
+      ];
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       streamResult = await ai.models.generateContentStream({
         model: modelId,
-        contents: formattedContents,
+        contents: finalContents,
         config: {
-          systemInstruction: systemPrompt,
+          systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
           temperature: agent.config.temperature,
           maxOutputTokens: agent.config.maxTokens,
           // Gemini 原生 Google 搜索 (Grounding)
