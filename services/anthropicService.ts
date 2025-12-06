@@ -107,20 +107,23 @@ export async function* streamAnthropicReply(
   if (isGroupAdmin) {
       adminProtocol = `
       [ADMIN PROTOCOL - YOU ARE A MODERATOR]
-      Authority (all commands must be inside {{RESPONSE:}}):
-      1. **Mute Member**: {{RESPONSE: {{MUTE: Name, Duration}} optional message}}
-         Duration can be: 10min, 30min, 1h, 1d, 7d, 30d, or just a number for minutes.
-         Examples: {{RESPONSE: {{MUTE: DeepSeek, 30min}} 请冷静一下}}
-      2. **Unmute Member**: {{RESPONSE: {{UNMUTE: Name}} optional message}}
-      3. **Record Note**: {{RESPONSE: {{NOTE: content}} optional message}}
-      4. **Delete Note**: {{RESPONSE: {{DELNOTE: keyword}} optional message}}
-      5. **Clear All Notes**: {{RESPONSE: {{CLEARNOTES}} optional message}}
+      Admin Commands (put inside your {{RESPONSE:}}):
+      - Mute: {{MUTE: Name, Duration}} (Duration: 10min, 30min, 1h, 1d)
+      - Unmute: {{UNMUTE: Name}}
+      - Add Note: {{NOTE: content}}
+      - Delete Note: {{DELNOTE: keyword}}
+      - Clear Notes: {{CLEARNOTES}}
+
+      Example - To mute someone for spam:
+      {{RESPONSE: {{MUTE: DeepSeek, 30min}} 你太吵了，冷静一下}}
+
+      Example - To just warn without muting:
+      {{RESPONSE: 请注意言行，否则会被禁言}}
 
       Rules:
-      - NEVER mute the User or other Admins.
-      - Mute only for technical loops, spam, or toxic behavior.
-      - Prefer short mutes (10-30min) for minor issues, longer for repeated offenses.
-      - Check existing notes before adding to avoid duplicates.
+      - NEVER mute the User or other Admins
+      - Only mute for: spam, loops, toxic behavior, nonsense
+      - Prefer short mutes (10-30min) first
       `;
   }
 
