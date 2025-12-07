@@ -5,6 +5,20 @@ import { USER_ID } from '../constants';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper: Detect Gemini 3+ models (use thinking_level instead of thinkingBudget)
+function isGemini3Model(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return lower.includes('gemini-3') || lower.includes('gemini3');
+}
+
+// Helper: Map reasoningBudget to Gemini 3 thinking_level
+// LOW: minimizes latency/cost, HIGH: maximizes reasoning depth
+function mapBudgetToThinkingLevel(budget: number): 'LOW' | 'HIGH' {
+  // If budget is low (< 8000), use LOW level for faster responses
+  // Otherwise use HIGH for deeper reasoning
+  return budget < 8000 ? 'LOW' : 'HIGH';
+}
+
 // Format timestamp for display in chat history (e.g., "01-15 14:30")
 function formatMessageTime(timestamp: number): string {
   const date = new Date(timestamp);
@@ -330,23 +344,42 @@ export async function* streamGeminiReply(
     parts: [{ text: `[START OF CHAT LOG]` }]
   });
 
+  // Detect if we're using Gemini 3 (needs thought signatures for multi-turn)
+  const isGemini3 = isGemini3Model(modelId);
+
+  // Check if any of agent's messages have incomplete thinking (has reasoning but no signature)
+  // For Gemini 3, this would cause errors, so we need to handle it
+  const hasIncompleteThinking = isGemini3 && visibleMessages.some(m =>
+    m.senderId === agent.id && m.reasoningText && !m.reasoningSignature
+  );
+
   for (const m of visibleMessages) {
-    const role = (m.senderId === agent.id) ? 'model' : 'user';
+    const isSelf = m.senderId === agent.id;
+    const role = isSelf ? 'model' : 'user';
     const senderName = m.senderId === USER_ID ? (userName || "User") : (m.isSystem ? "SYSTEM" : allAgents.find(a => a.id === m.senderId)?.name || "Bot");
-    
+
     const parts: any[] = [];
-    
+
+    // For Gemini 3: Include thought signature in model's own messages (required for multi-turn)
+    if (isGemini3 && isSelf && m.reasoningText && m.reasoningSignature && !hasIncompleteThinking) {
+      parts.push({
+        thought: true,
+        text: m.reasoningText,
+        thoughtSignature: m.reasoningSignature
+      });
+    }
+
     // Text Part WITH ID AND TIMESTAMP INJECTION
     const timeStr = formatMessageTime(m.timestamp);
-    let textContent = `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
-    
+    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
+
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);
         if (replyTarget) {
             textContent = `[Replying to ${replyTarget.text.substring(0,20)}...] ` + textContent;
         }
     }
-    
+
     // Document Attachment
     if (m.attachment && m.attachment.type === 'document' && m.attachment.textContent) {
         textContent += `\n\n[Attached File: ${m.attachment.fileName}]\n${m.attachment.textContent}\n[End of File]`;
@@ -392,16 +425,44 @@ export async function* streamGeminiReply(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      // Detect Gemini 3 model
+      const isGemini3 = isGemini3Model(modelId);
+
+      // Build config object
+      // Note: Gemini 3 recommends using default temperature (1.0) for thinking mode
+      const apiConfig: any = {
+        systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
+        temperature: isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature,
+        maxOutputTokens: agent.config.maxTokens,
+        // Gemini 原生 Google 搜索 (Grounding)
+        tools: enableGoogleSearch ? [{ googleSearch: {} }] : undefined,
+      };
+
+      // Add thinkingConfig based on model version
+      // For Gemini 3: skip if there's incomplete thinking in history (missing signatures)
+      if (agent.config.enableReasoning && !(isGemini3 && hasIncompleteThinking)) {
+        if (isGemini3) {
+          // Gemini 3: use thinking_level (LOW/HIGH), NOT thinkingBudget
+          // includeThoughts: true enables visible thought summaries
+          apiConfig.thinkingConfig = {
+            thinkingLevel: mapBudgetToThinkingLevel(agent.config.reasoningBudget || 8000),
+            includeThoughts: true  // Required to see thinking output
+          };
+        } else {
+          // Gemini 2.5 and earlier: use thinkingBudget
+          // thinkingBudget: -1 = dynamic, 0 = disabled, >0 = specific budget
+          // includeThoughts: true enables visible thought summaries
+          apiConfig.thinkingConfig = {
+            thinkingBudget: agent.config.reasoningBudget || -1,  // Default to dynamic
+            includeThoughts: true  // Required to see thinking output
+          };
+        }
+      }
+
       streamResult = await ai.models.generateContentStream({
         model: modelId,
         contents: finalContents,
-        config: {
-          systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
-          temperature: agent.config.temperature,
-          maxOutputTokens: agent.config.maxTokens,
-          // Gemini 原生 Google 搜索 (Grounding)
-          tools: enableGoogleSearch ? [{ googleSearch: {} }] : undefined,
-        }
+        config: apiConfig
       });
       break; // Success, exit retry loop
     } catch (error: any) {
@@ -438,26 +499,60 @@ export async function* streamGeminiReply(
   try {
     let totalText = "";
     let capturedUsage = null;
+    let capturedThoughtSignature: string | undefined;
+
+    // Check if thinking might be enabled (thinking model OR enableReasoning config)
+    const isThinkingModel = modelId.toLowerCase().includes('thinking');
+    const isGemini3 = isGemini3Model(modelId);
+    const mayHaveThinking = isThinkingModel || agent.config.enableReasoning;
 
     if (streamResult) {
       for await (const chunk of streamResult) {
-        const text = chunk.text;
-        if (text) {
-          totalText += text;
-          yield { text: text, isComplete: false };
+        // For thinking-enabled models, parse parts to separate thought from response
+        if (mayHaveThinking && chunk.candidates?.[0]?.content?.parts) {
+          for (const part of chunk.candidates[0].content.parts) {
+            if (part.text) {
+              if (part.thought) {
+                // This is thinking/reasoning content
+                yield { reasoning: part.text, isComplete: false };
+              } else {
+                // This is regular response content
+                totalText += part.text;
+                yield { text: part.text, isComplete: false };
+              }
+            }
+            // Capture thought signature for Gemini 3 (required for multi-turn)
+            if (part.thoughtSignature) {
+              capturedThoughtSignature = part.thoughtSignature;
+            }
+          }
+        } else {
+          // Non-thinking model or fallback: use simple text extraction
+          const text = chunk.text;
+          if (text) {
+            totalText += text;
+            yield { text: text, isComplete: false };
+          }
         }
+
+        // Also check for thought signature at candidate level (Gemini 3)
+        if (chunk.candidates?.[0]?.thoughtSignature) {
+          capturedThoughtSignature = chunk.candidates[0].thoughtSignature;
+        }
+
         if (chunk.usageMetadata) {
           capturedUsage = chunk.usageMetadata;
         }
       }
     }
-    
-    yield { 
-      isComplete: true, 
-      usage: { 
+
+    yield {
+      isComplete: true,
+      reasoningSignature: capturedThoughtSignature,  // Gemini 3 thought signature
+      usage: {
         input: capturedUsage?.promptTokenCount || 0,
         output: capturedUsage?.candidatesTokenCount || 0
-      } 
+      }
     };
 
   } catch (error) {
