@@ -1306,8 +1306,12 @@ const App: React.FC = () => {
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.isError) return;
-    if (lastMessage.isSystem) return;  // Don't auto-trigger on system messages (e.g., mute notifications)
     if (lastMessage.isStreaming) return;  // Don't trigger while another agent is still streaming
+
+    // For system messages, find the actual last speaker to avoid re-triggering them
+    // System messages are visible to AI but shouldn't re-trigger the command sender
+    const lastNonSystemMessage = [...messages].reverse().find(m => !m.isSystem);
+    const lastSpeakerId = lastNonSystemMessage?.senderId || lastMessage.senderId;
 
     // 5-MESSAGE COOLDOWN: Clear yielded agents after 5 any messages
     if ((activeSession.yieldedAgentIds || []).length > 0 && activeSession.yieldedAtCount !== undefined) {
@@ -1328,7 +1332,7 @@ const App: React.FC = () => {
         if (pendingTriggerRef.current.has(a.id)) return false; // Also check pending
         if ((activeSession.mutedAgentIds || []).includes(a.id)) return false;
         if ((activeSession.yieldedAgentIds || []).includes(a.id)) return false;
-        if (sessionMembers.length > 1 && a.id === lastMessage.senderId) return false;
+        if (sessionMembers.length > 1 && a.id === lastSpeakerId) return false;  // Use lastSpeakerId to handle system messages
         return true;
     });
 
