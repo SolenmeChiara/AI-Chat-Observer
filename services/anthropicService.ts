@@ -292,11 +292,19 @@ export async function* streamAnthropicReply(
 
   // Anthropic Format Prep
   const formattedMessages: any[] = [];
-  
+
+  // Pre-calculate: Can we safely enable thinking mode?
+  // When thinking is enabled, ALL assistant messages must have thinking blocks with signatures
+  const myMessages = visibleMessages.filter(m => m.senderId === agent.id && !m.isSystem);
+  const hasIncompleteThinking = myMessages.length > 0 && myMessages.some(m =>
+    !m.reasoningText || !m.reasoningSignature  // Either missing thinking OR missing signature
+  );
+  const shouldEnableThinking = agent.config.enableReasoning && !hasIncompleteThinking;
+
   for (const m of visibleMessages) {
     const isSelf = m.senderId === agent.id;
     const senderName = m.senderId === USER_ID ? (userName || "User") : (m.isSystem ? "SYSTEM" : allAgents.find(a => a.id === m.senderId)?.name || "Bot");
-    
+
     // INJECT ID AND TIMESTAMP INTO CONTENT
     const timeStr = formatMessageTime(m.timestamp);
     let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
@@ -308,7 +316,7 @@ export async function* streamAnthropicReply(
             textContent = `[Replying to: "${replyTarget.text.substring(0, 50)}..."]\n${textContent}`;
         }
     }
-    
+
     // Handle Document Attachment
     if (m.attachment && m.attachment.type === 'document' && m.attachment.textContent) {
         textContent += `\n\n[Attached File: ${m.attachment.fileName}]\n${m.attachment.textContent}\n[End of File]`;
@@ -321,7 +329,7 @@ export async function* streamAnthropicReply(
 
     // For assistant messages when thinking is enabled: add thinking block FIRST (required by Anthropic)
     // Must include signature if available (required for multi-turn conversations)
-    if (isSelf && agent.config.enableReasoning && m.reasoningText && m.reasoningSignature) {
+    if (isSelf && shouldEnableThinking && m.reasoningText && m.reasoningSignature) {
       contentBlocks.push({
         type: "thinking",
         thinking: m.reasoningText,
@@ -378,13 +386,8 @@ export async function* streamAnthropicReply(
   let temperatureConfig = agent.config.temperature;
   let maxTokensConfig = agent.config.maxTokens;
 
-  // Check if all assistant messages with reasoningText have signatures
-  // If any is missing, we cannot safely enable thinking mode
-  const hasIncompleteThinking = visibleMessages.some(m =>
-    m.senderId === agent.id && m.reasoningText && !m.reasoningSignature
-  );
-
-  if (agent.config.enableReasoning && !hasIncompleteThinking) {
+  // Use the pre-calculated shouldEnableThinking flag
+  if (shouldEnableThinking) {
       // Claude 3.7 Thinking mode requires temperature to be 1.0 (or not sent, defaulting to 1)
       temperatureConfig = 1.0;
 
