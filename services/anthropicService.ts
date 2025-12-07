@@ -293,13 +293,8 @@ export async function* streamAnthropicReply(
   // Anthropic Format Prep
   const formattedMessages: any[] = [];
 
-  // Pre-calculate: Can we safely enable thinking mode?
-  // When thinking is enabled, ALL assistant messages must have thinking blocks with signatures
-  const myMessages = visibleMessages.filter(m => m.senderId === agent.id && !m.isSystem);
-  const hasIncompleteThinking = myMessages.length > 0 && myMessages.some(m =>
-    !m.reasoningText || !m.reasoningSignature  // Either missing thinking OR missing signature
-  );
-  const shouldEnableThinking = agent.config.enableReasoning && !hasIncompleteThinking;
+  // Whether thinking mode should be enabled (based on user config)
+  const shouldEnableThinking = agent.config.enableReasoning;
 
   for (const m of visibleMessages) {
     const isSelf = m.senderId === agent.id;
@@ -328,13 +323,23 @@ export async function* streamAnthropicReply(
     const contentBlocks: any[] = [];
 
     // For assistant messages when thinking is enabled: add thinking block FIRST (required by Anthropic)
-    // Must include signature if available (required for multi-turn conversations)
-    if (isSelf && shouldEnableThinking && m.reasoningText && m.reasoningSignature) {
-      contentBlocks.push({
-        type: "thinking",
-        thinking: m.reasoningText,
-        signature: m.reasoningSignature
-      });
+    // Use redacted_thinking as fallback for messages without complete thinking
+    if (isSelf && shouldEnableThinking && !m.isSystem) {
+      if (m.reasoningText && m.reasoningSignature) {
+        // Complete thinking - use normal thinking block
+        contentBlocks.push({
+          type: "thinking",
+          thinking: m.reasoningText,
+          signature: m.reasoningSignature
+        });
+      } else {
+        // Missing thinking or signature - use redacted_thinking as placeholder
+        // This allows thinking mode to continue working with old/incomplete messages
+        contentBlocks.push({
+          type: "redacted_thinking",
+          data: "placeholder"  // Anthropic requires some data field
+        });
+      }
     }
 
     // Image First (Anthropic best practice often puts image first)
