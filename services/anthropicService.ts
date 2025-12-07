@@ -15,6 +15,16 @@ function detectImageFormat(base64Data: string): string {
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Format timestamp for display in chat history (e.g., "01-15 14:30")
+function formatMessageTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
 export async function* streamAnthropicReply(
   agent: Agent,
   baseUrl: string,
@@ -287,8 +297,9 @@ export async function* streamAnthropicReply(
     const isSelf = m.senderId === agent.id;
     const senderName = m.senderId === USER_ID ? (userName || "User") : (m.isSystem ? "SYSTEM" : allAgents.find(a => a.id === m.senderId)?.name || "Bot");
     
-    // INJECT ID INTO CONTENT
-    let textContent = isSelf ? m.text : `[ID: ${m.id}] ${senderName}: ${m.text}`;
+    // INJECT ID AND TIMESTAMP INTO CONTENT
+    const timeStr = formatMessageTime(m.timestamp);
+    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
 
     // Handle Reply Reference
     if (m.replyToId) {

@@ -5,6 +5,16 @@ import { USER_ID } from '../constants';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Format timestamp for display in chat history (e.g., "01-15 14:30")
+function formatMessageTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
 export interface GeminiConfig {
   apiKey?: string;
   geminiMode?: GeminiMode;
@@ -326,8 +336,9 @@ export async function* streamGeminiReply(
     
     const parts: any[] = [];
     
-    // Text Part WITH ID INJECTION
-    let textContent = `[ID: ${m.id}] ${senderName}: ${m.text}`;
+    // Text Part WITH ID AND TIMESTAMP INJECTION
+    const timeStr = formatMessageTime(m.timestamp);
+    let textContent = `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
     
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);
