@@ -68,6 +68,10 @@ const App: React.FC = () => {
   // Maps agentId -> AbortController to kill stuck requests
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
+  // Cooldown tracking: Maps agentId -> timestamp of last message
+  // Prevents agents from being triggered again too quickly after speaking
+  const agentCooldowns = useRef<Map<string, number>>(new Map());
+
   // Ref to prevent duplicate triggers (sync check before async state update)
   const pendingTriggerRef = useRef<Set<string>>(new Set());
 
@@ -1056,6 +1060,7 @@ const App: React.FC = () => {
     } finally {
       clearTimeout(timeoutId);
       pendingTriggerRef.current.delete(agentId); // Clear pending flag
+      agentCooldowns.current.set(agentId, Date.now()); // Set cooldown timestamp
       setProcessingAgents(prev => {
           const next = new Set(prev);
           next.delete(agentId);
@@ -1326,6 +1331,9 @@ const App: React.FC = () => {
         }
     }
 
+    // Cooldown duration: at least 5 seconds, or 2x breathing time
+    const cooldownDuration = Math.max(5000, settings.breathingTime * 2);
+
     const eligibleAgents = sessionMembers.filter(a => {
         if (!a.providerId || !a.modelId) return false; // Skip unconfigured agents
         if (processingAgents.has(a.id)) return false;
@@ -1333,6 +1341,11 @@ const App: React.FC = () => {
         if ((activeSession.mutedAgentIds || []).includes(a.id)) return false;
         if ((activeSession.yieldedAgentIds || []).includes(a.id)) return false;
         if (sessionMembers.length > 1 && a.id === lastSpeakerId) return false;  // Use lastSpeakerId to handle system messages
+
+        // Cooldown check: Don't trigger agents who spoke recently
+        const lastSpoke = agentCooldowns.current.get(a.id);
+        if (lastSpoke && (Date.now() - lastSpoke) < cooldownDuration) return false;
+
         return true;
     });
 
