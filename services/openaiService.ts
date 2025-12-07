@@ -31,6 +31,14 @@ function useMaxCompletionTokens(modelId: string): boolean {
   return false;
 }
 
+// Helper: Map reasoningBudget to OpenAI reasoning_effort level
+// reasoning_effort: "low" | "medium" | "high"
+function mapBudgetToEffort(budget: number): 'low' | 'medium' | 'high' {
+  if (budget < 4000) return 'low';
+  if (budget < 16000) return 'medium';
+  return 'high';
+}
+
 export async function* streamOpenAIReply(
   agent: Agent,
   baseUrl: string,
@@ -362,6 +370,11 @@ export async function* streamOpenAIReply(
         requestBody.max_completion_tokens = agent.config.maxTokens;
       } else {
         requestBody.max_tokens = agent.config.maxTokens;
+      }
+
+      // Add reasoning_effort for o1/o3 models when reasoning is enabled
+      if (isReasoningModel && agent.config.enableReasoning) {
+        requestBody.reasoning_effort = mapBudgetToEffort(agent.config.reasoningBudget || 8000);
       }
 
       response = await fetch(`${baseUrl}/chat/completions`, {
