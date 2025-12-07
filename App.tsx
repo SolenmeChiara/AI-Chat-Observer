@@ -68,9 +68,9 @@ const App: React.FC = () => {
   // Maps agentId -> AbortController to kill stuck requests
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
-  // Cooldown tracking: Maps agentId -> timestamp of last message
-  // Prevents agents from being triggered again too quickly after speaking
-  const agentCooldowns = useRef<Map<string, number>>(new Map());
+  // Cooldown tracking: Maps agentId -> message count when they last spoke
+  // Prevents agents from being triggered again until N messages have passed
+  const agentLastSpokeAt = useRef<Map<string, number>>(new Map());
 
   // Ref to prevent duplicate triggers (sync check before async state update)
   const pendingTriggerRef = useRef<Set<string>>(new Set());
@@ -1060,7 +1060,8 @@ const App: React.FC = () => {
     } finally {
       clearTimeout(timeoutId);
       pendingTriggerRef.current.delete(agentId); // Clear pending flag
-      agentCooldowns.current.set(agentId, Date.now()); // Set cooldown timestamp
+      // Record message count when this agent finished speaking (for cooldown)
+      agentLastSpokeAt.current.set(agentId, messages.length);
       setProcessingAgents(prev => {
           const next = new Set(prev);
           next.delete(agentId);
@@ -1331,8 +1332,9 @@ const App: React.FC = () => {
         }
     }
 
-    // Cooldown duration: at least 5 seconds, or 2x breathing time
-    const cooldownDuration = Math.max(5000, settings.breathingTime * 2);
+    // Message-based cooldown: agents can't be triggered again until N other messages have been sent
+    // Minimum 2 messages must pass before the same agent can speak again
+    const cooldownMessages = Math.max(2, Math.floor(sessionMembers.length / 2));
 
     const eligibleAgents = sessionMembers.filter(a => {
         if (!a.providerId || !a.modelId) return false; // Skip unconfigured agents
@@ -1342,9 +1344,9 @@ const App: React.FC = () => {
         if ((activeSession.yieldedAgentIds || []).includes(a.id)) return false;
         if (sessionMembers.length > 1 && a.id === lastSpeakerId) return false;  // Use lastSpeakerId to handle system messages
 
-        // Cooldown check: Don't trigger agents who spoke recently
-        const lastSpoke = agentCooldowns.current.get(a.id);
-        if (lastSpoke && (Date.now() - lastSpoke) < cooldownDuration) return false;
+        // Message-count cooldown: Don't trigger agents until enough messages have passed
+        const spokeAtCount = agentLastSpokeAt.current.get(a.id);
+        if (spokeAtCount !== undefined && (messages.length - spokeAtCount) < cooldownMessages) return false;
 
         return true;
     });
