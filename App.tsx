@@ -1306,6 +1306,8 @@ const App: React.FC = () => {
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.isError) return;
+    if (lastMessage.isSystem) return;  // Don't auto-trigger on system messages (e.g., mute notifications)
+    if (lastMessage.isStreaming) return;  // Don't trigger while another agent is still streaming
 
     // 5-MESSAGE COOLDOWN: Clear yielded agents after 5 any messages
     if ((activeSession.yieldedAgentIds || []).length > 0 && activeSession.yieldedAtCount !== undefined) {
