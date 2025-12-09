@@ -565,6 +565,35 @@ const App: React.FC = () => {
     checkAndRename();
   }, [activeSession.messages.length, activeSessionId, activeSession.isAutoRenamed, providers, agents]);
 
+  // --- ONE-TIME RENAME FOR OLD SESSIONS ---
+  const hasRenamedOldSessions = useRef(false);
+  useEffect(() => {
+    if (hasRenamedOldSessions.current || !isDbLoaded || providers.length === 0) return;
+    hasRenamedOldSessions.current = true;
+
+    const renameOldSessions = async () => {
+      const eligibleSessions = sessions.filter(s => {
+        const chatMsgs = s.messages.filter(m => !m.isSystem);
+        return chatMsgs.length >= 2 && !s.isAutoRenamed;
+      });
+
+      if (eligibleSessions.length === 0) return;
+      console.log("[Auto-Rename] Found", eligibleSessions.length, "old sessions to rename");
+
+      for (const session of eligibleSessions) {
+        const chatMsgs = session.messages.filter(m => !m.isSystem);
+        setSessions(prev => prev.map(s => s.id === session.id ? { ...s, isAutoRenamed: true } : s));
+        const newName = await generateSessionName(chatMsgs, providers, agents);
+        console.log("[Auto-Rename] Old session", session.id, "->", newName);
+        if (newName) {
+          setSessions(prev => prev.map(s => s.id === session.id ? { ...s, name: newName } : s));
+        }
+      }
+    };
+
+    renameOldSessions();
+  }, [isDbLoaded, providers, agents, sessions]);
+
   // --- MEMORY SUMMARIZATION TRIGGER ---
   useEffect(() => {
     const checkAndSummarize = async () => {
