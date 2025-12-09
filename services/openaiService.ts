@@ -453,8 +453,16 @@ export async function* streamOpenAIReply(
 
         try {
           const json = JSON.parse(dataStr);
+
+          // Check for error in stream (some APIs return 200 with error in body)
+          if (json.error) {
+            const errMsg = json.error.message || json.error.code || JSON.stringify(json.error);
+            console.error("[OpenAI Stream] Error in response:", errMsg);
+            throw new Error(errMsg);
+          }
+
           const delta = json.choices?.[0]?.delta;
-          
+
           if (delta) {
              // 1. Explicit Reasoning Content (DeepSeek standard)
              if (delta.reasoning_content) {
@@ -464,19 +472,19 @@ export async function* streamOpenAIReply(
              // 2. Standard Content (check for <think> tags if not using dedicated field)
              if (delta.content) {
                 let text = delta.content;
-                
+
                 // Very basic streaming parser for <think>...</think>
                 if (text.includes('<think>')) {
                     insideThinkTag = true;
                     text = text.replace('<think>', '');
                 }
-                
+
                 if (text.includes('</think>')) {
                     const parts = text.split('</think>');
                     if (parts[0]) yield { reasoning: parts[0], isComplete: false };
                     insideThinkTag = false;
                     if (parts[1]) yield { text: parts[1], isComplete: false };
-                    continue; 
+                    continue;
                 }
 
                 if (insideThinkTag) {
@@ -493,8 +501,15 @@ export async function* streamOpenAIReply(
               output: json.usage.completion_tokens || 0
             };
           }
-        } catch (e) {
-          // ignore parse errors
+        } catch (e: any) {
+          // Re-throw actual errors, only ignore JSON parse errors for malformed chunks
+          if (e.message && !e.message.includes('JSON')) {
+            throw e;
+          }
+          // Log unexpected parse issues for debugging
+          if (dataStr.length > 10) {
+            console.warn("[OpenAI Stream] Parse issue on chunk:", dataStr.substring(0, 200));
+          }
         }
       }
     }
