@@ -1074,20 +1074,28 @@ const App: React.FC = () => {
       }
 
     } catch (error: any) {
+      console.error(`[${agent.name}] Error caught:`, error.name, error.message, error);
+
       if (error.name === 'AbortError' || error.message === 'Request aborted') {
           // User cancelled, remove placeholder
+          console.log(`[${agent.name}] Request aborted by user - removing placeholder`);
           updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
       }
-      else if (error.message !== "Request aborted by timeout") {
-          console.error(`Error processing reply for ${agent.name}`, error);
+      else if (error.message === "Request aborted by timeout") {
+          // Timeout already handled in timeout callback
+          console.log(`[${agent.name}] Request aborted by timeout - already handled`);
+      }
+      else {
+          // All other errors - show in chat and keep the message
           const errorMsg = error.message || '未知错误';
-          // Update placeholder with error
+          console.error(`[${agent.name}] Showing error in chat:`, errorMsg);
           updateThisSession(s => ({
               ...s,
               messages: s.messages.map(m => m.id === newMessageId ? {
                   ...m,
-                  text: `[错误: ${errorMsg}]`,
-                  isError: true
+                  text: m.text ? `${m.text}\n\n[错误: ${errorMsg}]` : `[错误: ${errorMsg}]`,
+                  isError: true,
+                  isStreaming: false
               } : m)
           }));
       }
