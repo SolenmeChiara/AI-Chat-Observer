@@ -148,32 +148,47 @@ export const updateSessionSummary = async (
     : 'None';
 
   const prompt = `
-    [MEMORY UPDATE TASK]
-    You are the memory manager for a group chat.
-    Your goal is to update the long-term summary of the conversation.
+    [CONVERSATION CHRONICLE TASK]
+    You are the archivist for a group chat, responsible for maintaining a detailed conversation record.
+    Your goal is to merge new dialogue into the existing archive, creating a comprehensive timeline.
 
-    [OLD SUMMARY]
-    ${currentSummary || "No previous summary."}
+    [EXISTING ARCHIVE]
+    ${currentSummary || "No previous records."}
 
-    [ADMIN NOTES (Important Highlights)]
+    [ADMIN NOTES (Priority Highlights)]
     ${notesText}
 
     [RECENT CONVERSATION LOG]
     ${transcript}
 
-    [INSTRUCTIONS]
-    1. Read the OLD SUMMARY, ADMIN NOTES, and RECENT LOG.
-    2. Merge them into a NEW SUMMARY.
-    3. The NEW SUMMARY should preserve important context from the old summary and incorporate key events from the recent log.
-    4. Pay special attention to ADMIN NOTES. These are high-priority points manually recorded by AI Admins.
-    5. Keep the summary concise (approx 200-300 words).
-    6. Output ONLY the new summary text.
+    [RECORDING PRINCIPLES]
+    1. Chronological Order: Record events in the order they occurred, maintaining a clear timeline.
+    2. Character Portrayal: Document each participant's speaking style, tone, personality traits, and behavioral patterns.
+    3. Detail Preservation:
+       - Retain important dialogue content and viewpoints
+       - Record interesting interactions and conflicts
+       - Preserve key decisions and conclusions
+       - Note emotional shifts and relationship developments
+    4. Admin Notes: These are manually highlighted priorities - must be fully preserved.
+    5. Content Continuity: Do NOT discard important content from the existing archive. Naturally integrate new content into it.
+    6. Format Guidelines:
+       - Use clear temporal segments
+       - Brief headings to summarize each phase are welcome
+       - Maintain narrative coherence and readability
+
+    [OUTPUT]
+    Output ONLY the updated complete archive with no additional commentary.
+    The archive should be thorough and well-organized, allowing readers to fully understand the conversation's context and progression.
   `;
 
   try {
      if (provider.type === AgentType.GEMINI) {
         const ai = getGeminiClient(provider);
-        const res = await ai.models.generateContent({ model: modelId, contents: prompt });
+        const res = await ai.models.generateContent({
+           model: modelId,
+           contents: prompt,
+           config: { maxOutputTokens: 2000 }
+        });
         return res.text?.trim() || null;
      } else {
         if (!provider.baseUrl || !provider.apiKey) return null;
@@ -184,7 +199,7 @@ export const updateSessionSummary = async (
             body: JSON.stringify({
                 model: modelId,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 500
+                max_tokens: 2000
             })
         });
         if (!res.ok) return null;
