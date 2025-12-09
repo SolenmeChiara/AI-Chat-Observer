@@ -552,9 +552,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkAndRename = async () => {
       const chatMsgs = activeSession.messages.filter(m => !m.isSystem);
-      if (chatMsgs.length === 2 && !activeSession.isAutoRenamed && providers.length > 0) {
+      if (chatMsgs.length >= 2 && !activeSession.isAutoRenamed && providers.length > 0) {
+        console.log("[Auto-Rename] Triggering for session:", activeSessionId, "with", chatMsgs.length, "messages");
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, isAutoRenamed: true } : s));
         const newName = await generateSessionName(chatMsgs, providers, agents);
+        console.log("[Auto-Rename] Generated name:", newName);
         if (newName) {
           setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, name: newName } : s));
         }
