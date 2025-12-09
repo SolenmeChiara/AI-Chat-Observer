@@ -72,6 +72,9 @@ const App: React.FC = () => {
   // Prevents agents from being triggered again until N messages have passed
   const agentLastSpokeAt = useRef<Map<string, number>>(new Map());
 
+  // Queue for multi-mention triggers (e.g., @A @B @C or @全体成员)
+  const mentionQueueRef = useRef<string[]>([]);
+
   // Ref to prevent duplicate triggers (sync check before async state update)
   const pendingTriggerRef = useRef<Set<string>>(new Set());
 
@@ -1160,6 +1163,9 @@ const App: React.FC = () => {
     e?.preventDefault();
     if (!inputText.trim() && !attachment) return;
 
+    // Clear mention queue when user sends a new message (fresh start)
+    mentionQueueRef.current = [];
+
     const trimmedText = inputText.trim();
 
     // 检测 /search 命令
@@ -1382,32 +1388,105 @@ const App: React.FC = () => {
         return true;
     });
 
+    // --- PROCESS MENTION QUEUE ---
+    // If there's a queue from multi-mention, process next in queue
+    if (mentionQueueRef.current.length > 0) {
+        // In concurrency mode, trigger all remaining queue members at once
+        if (settings.enableConcurrency) {
+            const agentsToTrigger: string[] = [];
+            while (mentionQueueRef.current.length > 0) {
+                const nextAgentId = mentionQueueRef.current.shift()!;
+                const nextAgent = eligibleAgents.find(a => a.id === nextAgentId);
+                if (nextAgent) {
+                    agentsToTrigger.push(nextAgent.id);
+                }
+            }
+            if (agentsToTrigger.length > 0) {
+                const timeoutId = setTimeout(() => {
+                    agentsToTrigger.forEach(id => triggerAgentReply(id));
+                }, settings.breathingTime);
+                return () => clearTimeout(timeoutId);
+            }
+        } else {
+            // Sequential mode: trigger one at a time
+            const nextAgentId = mentionQueueRef.current[0];
+            const nextAgent = eligibleAgents.find(a => a.id === nextAgentId);
+            if (nextAgent) {
+                mentionQueueRef.current.shift(); // Remove from queue
+                const timeoutId = setTimeout(() => {
+                    triggerAgentReply(nextAgent.id);
+                }, settings.breathingTime);
+                return () => clearTimeout(timeoutId);
+            } else {
+                // Agent not eligible (muted/already speaking), skip and try next
+                mentionQueueRef.current.shift();
+                return; // Let next cycle handle it
+            }
+        }
+    }
+
     if (eligibleAgents.length === 0) return;
 
-    // --- @MENTION PRIORITY: Check if someone is @mentioned in last message ---
-    let selectedAgent = null;
+    // --- @MENTION PRIORITY: Check for @全体成员 or multiple @mentions ---
     const lastTextLower = lastMessage.text.toLowerCase();
+    let selectedAgent = null;
+    let agentsToQueue: typeof eligibleAgents = [];
 
-    // Find @mentioned agent that is eligible
-    const mentionedAgent = eligibleAgents.find(a => {
-        const nameLower = a.name.toLowerCase();
-        return lastTextLower.includes(`@${nameLower}`) ||
-               // Also match partial @mention like "@gem" for "Gemini"
-               (lastTextLower.match(/@(\S+)/) && nameLower.startsWith(lastTextLower.match(/@(\S+)/)?.[1] || ''));
-    });
+    // Check for @全体成员
+    if (lastTextLower.includes('@全体成员') || lastTextLower.includes('@all')) {
+        // Shuffle all eligible agents randomly
+        agentsToQueue = [...eligibleAgents].sort(() => Math.random() - 0.5);
+    } else {
+        // Extract all @mentions in order
+        const mentionMatches = lastMessage.text.matchAll(/@(\S+)/g);
+        const mentionedNames: string[] = [];
+        for (const match of mentionMatches) {
+            mentionedNames.push(match[1].toLowerCase());
+        }
 
-    if (mentionedAgent) {
-        selectedAgent = mentionedAgent;
+        if (mentionedNames.length > 0) {
+            // Find agents matching each mention in order (no duplicates)
+            const seenIds = new Set<string>();
+            for (const mentionName of mentionedNames) {
+                const matchedAgent = eligibleAgents.find(a => {
+                    if (seenIds.has(a.id)) return false;
+                    const nameLower = a.name.toLowerCase();
+                    return nameLower === mentionName || nameLower.startsWith(mentionName);
+                });
+                if (matchedAgent && !seenIds.has(matchedAgent.id)) {
+                    agentsToQueue.push(matchedAgent);
+                    seenIds.add(matchedAgent.id);
+                }
+            }
+        }
+    }
+
+    // If we have multiple agents to trigger
+    if (agentsToQueue.length > 1) {
+        if (settings.enableConcurrency) {
+            // Concurrency mode: trigger all at once
+            const timeoutId = setTimeout(() => {
+                agentsToQueue.forEach(a => triggerAgentReply(a.id));
+            }, settings.breathingTime);
+            return () => clearTimeout(timeoutId);
+        } else {
+            // Sequential mode: put all except first into queue
+            mentionQueueRef.current = agentsToQueue.slice(1).map(a => a.id);
+            selectedAgent = agentsToQueue[0];
+        }
+    } else if (agentsToQueue.length === 1) {
+        selectedAgent = agentsToQueue[0];
     } else {
         // No mention, pick randomly
         selectedAgent = eligibleAgents[Math.floor(Math.random() * eligibleAgents.length)];
     }
 
-    const timeoutId = setTimeout(() => {
-       triggerAgentReply(selectedAgent.id);
-    }, settings.breathingTime);
-
-    return () => clearTimeout(timeoutId);
+    if (selectedAgent) {
+        const timeoutId = setTimeout(() => {
+           triggerAgentReply(selectedAgent.id);
+        }, settings.breathingTime);
+        return () => clearTimeout(timeoutId);
+    }
 
   }, [isAutoPlay, messages, agents, processingAgents, triggerAgentReply, settings.breathingTime, settings.enableConcurrency, activeSession.mutedAgentIds, activeSession.yieldedAgentIds, activeSession.yieldedAtCount]);
 
@@ -1688,11 +1767,24 @@ const App: React.FC = () => {
             )}
 
             {/* MENTION POPUP */}
-            {showMentionPopup && mentionFilteredAgents.length > 0 && (
+            {showMentionPopup && (mentionFilteredAgents.length > 0 || mentionQuery === '' || '全体成员'.includes(mentionQuery)) && (
                 <div className="absolute bottom-full left-4 mb-2 bg-white dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-64 max-h-48 overflow-y-auto z-50">
                    <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-800">
                        提及成员 (@)
                    </div>
+                   {/* @全体成员 option */}
+                   {(mentionQuery === '' || '全体成员'.includes(mentionQuery) || 'all'.includes(mentionQuery.toLowerCase())) && (
+                       <button
+                           onClick={() => handleSelectMention('全体成员')}
+                           className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors border-b border-gray-50 dark:border-zinc-700
+                               ${selectedMentionIndex === 0 && mentionFilteredAgents.length === 0 ? 'bg-zinc-100 dark:bg-zinc-700 text-zinc-900 dark:text-white' : 'text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-zinc-700'}
+                           `}
+                       >
+                           <Users size={16} className="text-blue-500" />
+                           <span className="font-medium">全体成员</span>
+                           <span className="text-xs text-gray-400 ml-auto">随机顺序</span>
+                       </button>
+                   )}
                    {mentionFilteredAgents.map((agent, index) => (
                        <button
                            key={agent.id}
