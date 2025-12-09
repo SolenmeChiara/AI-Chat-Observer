@@ -1109,22 +1109,48 @@ const Sidebar: React.FC<SidebarProps> = ({
                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block flex justify-between">
                          <span>可用模型列表 ({provider.models.length})</span>
                        </label>
-                       <div className="space-y-2 max-h-48 overflow-y-auto p-2 rounded-lg bg-gray-100 dark:bg-zinc-900/50">
+                       <div className="space-y-3 max-h-64 overflow-y-auto p-2 rounded-lg bg-gray-100 dark:bg-zinc-900/50">
                          {provider.models.map((model, idx) => (
-                           <div key={idx} className="grid grid-cols-[1fr_1fr_24px] gap-2 items-center">
-                              <input
-                                placeholder="模型ID"
-                                className="w-full text-xs px-2 py-1 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
-                                value={model.id}
-                                onChange={(e) => updateModelInProvider(provider.id, idx, 'id', e.target.value)}
-                              />
-                              <input
-                                placeholder="显示名称"
-                                className="w-full text-xs px-2 py-1 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
-                                value={model.name}
-                                onChange={(e) => updateModelInProvider(provider.id, idx, 'name', e.target.value)}
-                              />
-                              <button onClick={() => removeModelFromProvider(provider.id, idx)} className="text-gray-400 hover:text-red-500 flex items-center justify-center"><X size={14}/></button>
+                           <div key={idx} className="space-y-1.5 p-2 bg-white dark:bg-zinc-800 rounded-lg border border-gray-200 dark:border-zinc-600">
+                              <div className="grid grid-cols-[1fr_1fr_24px] gap-2 items-center">
+                                <input
+                                  placeholder="模型ID"
+                                  className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                  value={model.id}
+                                  onChange={(e) => updateModelInProvider(provider.id, idx, 'id', e.target.value)}
+                                />
+                                <input
+                                  placeholder="显示名称"
+                                  className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                  value={model.name}
+                                  onChange={(e) => updateModelInProvider(provider.id, idx, 'name', e.target.value)}
+                                />
+                                <button onClick={() => removeModelFromProvider(provider.id, idx)} className="text-gray-400 hover:text-red-500 flex items-center justify-center"><X size={14}/></button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">输入$/1M:</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="0.00"
+                                    className="w-full text-xs px-2 py-0.5 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                    value={model.inputPricePer1M || ''}
+                                    onChange={(e) => updateModelInProvider(provider.id, idx, 'inputPricePer1M', parseFloat(e.target.value) || 0)}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">输出$/1M:</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="0.00"
+                                    className="w-full text-xs px-2 py-0.5 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                    value={model.outputPricePer1M || ''}
+                                    onChange={(e) => updateModelInProvider(provider.id, idx, 'outputPricePer1M', parseFloat(e.target.value) || 0)}
+                                  />
+                                </div>
+                              </div>
                            </div>
                          ))}
                          <button onClick={() => addModelToProvider(provider.id)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">+ 添加模型定义</button>
