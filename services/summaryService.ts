@@ -63,17 +63,20 @@ const findSummaryAgent = (providers: ApiProvider[]) => {
 
 export const generateSessionName = async (
   messages: Message[],
-  providers: ApiProvider[]
+  providers: ApiProvider[],
+  allAgents: any[] = []
 ): Promise<string | null> => {
-  
+
   const target = findSummaryAgent(providers);
   if (!target) return null;
 
   const { provider, modelId } = target;
 
-  // Prepare simple context
+  // Prepare simple context with agent names
   const transcript = messages.slice(-5).map(m => {
-    return `${m.senderId === USER_ID ? 'User' : 'Bot'}: ${m.text}`;
+    const sender = allAgents.find((a: any) => a.id === m.senderId);
+    const name = sender ? sender.name : (m.senderId === USER_ID ? 'User' : 'Bot');
+    return `${name}: ${m.text}`;
   }).join('\n');
 
   const prompt = `

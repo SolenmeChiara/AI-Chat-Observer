@@ -554,14 +554,14 @@ const App: React.FC = () => {
       const chatMsgs = activeSession.messages.filter(m => !m.isSystem);
       if (chatMsgs.length === 2 && !activeSession.isAutoRenamed && providers.length > 0) {
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, isAutoRenamed: true } : s));
-        const newName = await generateSessionName(chatMsgs, providers);
+        const newName = await generateSessionName(chatMsgs, providers, agents);
         if (newName) {
           setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, name: newName } : s));
         }
       }
     };
     checkAndRename();
-  }, [activeSession.messages.length, activeSessionId, activeSession.isAutoRenamed, providers]);
+  }, [activeSession.messages.length, activeSessionId, activeSession.isAutoRenamed, providers, agents]);
 
   // --- MEMORY SUMMARIZATION TRIGGER ---
   useEffect(() => {
