@@ -182,6 +182,8 @@ export const updateSessionSummary = async (
     [OUTPUT]
     Output ONLY the updated complete archive with no additional commentary.
     The archive should be thorough and well-organized, allowing readers to fully understand the conversation's context and progression.
+
+    IMPORTANT: Keep the total length under 800 words (approximately 1500 Chinese characters). If the archive grows too long, prioritize recent events and condense older content into brief summaries while preserving key character details and turning points.
   `;
 
   try {
