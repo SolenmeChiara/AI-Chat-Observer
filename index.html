@@ -10,8 +10,10 @@
     <!-- Tailwind CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      tailwindcss.config = {
-        darkMode: 'class'
+      if (typeof tailwindcss !== 'undefined') {
+        tailwindcss.config = {
+          darkMode: 'class'
+        }
       }
     </script>
     <style>
