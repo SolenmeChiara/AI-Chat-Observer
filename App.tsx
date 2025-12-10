@@ -1554,12 +1554,11 @@ const App: React.FC = () => {
 
         if (mentionedNames.length > 0) {
             // Find agents matching each mention in order (no duplicates)
-            // Match against ALL session members first, then check eligibility
+            // Match against ALL session members, @mention bypasses cooldown
             const seenIds = new Set<string>();
-            let hasIneligibleMention = false;
 
             for (const mentionName of mentionedNames) {
-                // First, find the agent in ALL session members (not just eligible)
+                // Find the agent in ALL session members (not just eligible)
                 const matchedAgent = sessionMembers.find(a => {
                     if (seenIds.has(a.id)) return false;
                     const nameLower = a.name.toLowerCase();
@@ -1568,21 +1567,24 @@ const App: React.FC = () => {
 
                 if (matchedAgent) {
                     seenIds.add(matchedAgent.id);
-                    // Check if this agent is eligible
-                    if (eligibleAgents.find(a => a.id === matchedAgent.id)) {
-                        agentsToQueue.push(matchedAgent);
+                    // Check basic blockers (can't bypass these)
+                    const isProcessing = processingAgents.has(matchedAgent.id);
+                    const isPending = pendingTriggerRef.current.has(matchedAgent.id);
+                    const isMuted = (activeSession.mutedAgentIds || []).includes(matchedAgent.id);
+                    const isUnconfigured = !matchedAgent.providerId || !matchedAgent.modelId;
+
+                    if (isProcessing || isPending) {
+                        console.log('[Mention] Agent busy (processing/pending):', matchedAgent.name);
+                    } else if (isMuted) {
+                        console.log('[Mention] Agent is muted:', matchedAgent.name);
+                    } else if (isUnconfigured) {
+                        console.log('[Mention] Agent not configured:', matchedAgent.name);
                     } else {
-                        // Mentioned agent is not eligible (on cooldown, processing, etc.)
-                        hasIneligibleMention = true;
-                        console.log('[Mention] Agent mentioned but not eligible:', matchedAgent.name);
+                        // @mention bypasses cooldown and yield status!
+                        agentsToQueue.push(matchedAgent);
+                        console.log('[Mention] Agent queued (bypassing cooldown):', matchedAgent.name);
                     }
                 }
-            }
-
-            // If any mentioned agent is not eligible, wait instead of random selection
-            if (hasIneligibleMention && agentsToQueue.length === 0) {
-                console.log('[Mention] Waiting for mentioned agents to become eligible');
-                return;
             }
         }
     }
