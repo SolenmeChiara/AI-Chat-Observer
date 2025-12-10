@@ -27,7 +27,7 @@ export const AVATAR_MAP: Record<string, string> = {
   claude: '/logos/claude-logo-6FGW382926.webp',
   deepseek: 'https://avatars.githubusercontent.com/u/148330874?s=200&v=4',
   meta: '/logos/ollama-logo_svgstack_com_71401764879779.png',
-  grok: 'https://avatars.githubusercontent.com/u/144426995?s=200&v=4',
+  grok: '/logos/GROK.png',
   perplexity: 'https://avatars.githubusercontent.com/u/79275775?s=200&v=4',
   qwen: '/logos/qwen-color.png',
   mistral: '/logos/mistral-ai-logo-1N5p386073.webp',
