@@ -1407,6 +1407,22 @@ const App: React.FC = () => {
         return true;
     });
 
+    // Debug: Log why chat might be silent
+    if (eligibleAgents.length === 0 && sessionMembers.length > 0) {
+        console.warn('[AutoPlay] No eligible agents! Reasons:', sessionMembers.map(a => {
+            const reasons = [];
+            if (!a.providerId || !a.modelId) reasons.push('unconfigured');
+            if (processingAgents.has(a.id)) reasons.push('processing');
+            if (pendingTriggerRef.current.has(a.id)) reasons.push('pending');
+            if ((activeSession.mutedAgentIds || []).includes(a.id)) reasons.push('muted');
+            if ((activeSession.yieldedAgentIds || []).includes(a.id)) reasons.push('yielded');
+            if (sessionMembers.length > 1 && a.id === lastSpeakerId) reasons.push('lastSpeaker');
+            const spokeAt = agentLastSpokeAt.current.get(a.id);
+            if (spokeAt !== undefined && (messages.length - spokeAt) < cooldownMessages) reasons.push(`cooldown(${messages.length - spokeAt}/${cooldownMessages})`);
+            return `${a.name}: ${reasons.join(', ') || 'unknown'}`;
+        }));
+    }
+
     // --- PROCESS MENTION QUEUE ---
     // If there's a queue from multi-mention, process next in queue
     if (mentionQueueRef.current.length > 0) {
@@ -1426,21 +1442,21 @@ const App: React.FC = () => {
                 }, settings.breathingTime);
                 return () => clearTimeout(timeoutId);
             }
+            // If no agents were eligible, fall through to normal selection
         } else {
-            // Sequential mode: trigger one at a time
-            const nextAgentId = mentionQueueRef.current[0];
-            const nextAgent = eligibleAgents.find(a => a.id === nextAgentId);
-            if (nextAgent) {
-                mentionQueueRef.current.shift(); // Remove from queue
-                const timeoutId = setTimeout(() => {
-                    triggerAgentReply(nextAgent.id);
-                }, settings.breathingTime);
-                return () => clearTimeout(timeoutId);
-            } else {
-                // Agent not eligible (muted/already speaking), skip and try next
-                mentionQueueRef.current.shift();
-                return; // Let next cycle handle it
+            // Sequential mode: trigger one at a time, skip ineligible agents
+            while (mentionQueueRef.current.length > 0) {
+                const nextAgentId = mentionQueueRef.current.shift()!;
+                const nextAgent = eligibleAgents.find(a => a.id === nextAgentId);
+                if (nextAgent) {
+                    const timeoutId = setTimeout(() => {
+                        triggerAgentReply(nextAgent.id);
+                    }, settings.breathingTime);
+                    return () => clearTimeout(timeoutId);
+                }
+                // Agent not eligible, continue to next in queue
             }
+            // Queue exhausted with no eligible agents, fall through to normal selection
         }
     }
 
