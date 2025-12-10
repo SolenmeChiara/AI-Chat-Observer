@@ -149,6 +149,14 @@ const App: React.FC = () => {
     }
   }, [settings.darkMode]);
 
+  // Clear cooldown and queue when switching sessions
+  useEffect(() => {
+    agentLastSpokeAt.current.clear();
+    mentionQueueRef.current = [];
+    pendingTriggerRef.current.clear();
+    console.log('[Session] Switched to session:', activeSessionId, '- cleared cooldowns and queues');
+  }, [activeSessionId]);
+
   // 3. Save Watchers (Debounced for Sessions)
   useEffect(() => {
     if (!isDbLoaded) return;
