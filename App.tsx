@@ -616,36 +616,58 @@ const App: React.FC = () => {
     const checkAndSummarize = async () => {
         // 从群组获取记忆配置
         const conf = activeGroup?.memoryConfig;
-        if (!conf || !conf.enabled || !conf.summaryModelId) return;
+        if (!conf || !conf.enabled || !conf.summaryModelId) {
+            // Debug: Log why summary is not enabled
+            if (activeSession.messages.length > 0 && activeSession.messages.length % 10 === 0) {
+                console.log('[Summary] Not configured:', {
+                    hasConf: !!conf,
+                    enabled: conf?.enabled,
+                    modelId: conf?.summaryModelId,
+                    providerId: conf?.summaryProviderId
+                });
+            }
+            return;
+        }
 
         const count = activeSession.messages.length;
+        console.log(`[Summary] Message count: ${count}, threshold: ${conf.threshold}, trigger: ${count > 0 && count % conf.threshold === 0}`);
+
         if (count > 0 && count % conf.threshold === 0) {
             // Trigger Summarization
             const provider = providers.find(p => p.id === conf.summaryProviderId);
-            if (!provider) return;
+            if (!provider) {
+                console.error('[Summary] Provider not found:', conf.summaryProviderId);
+                return;
+            }
 
             // Take recent messages
             const recent = activeSession.messages.slice(-conf.threshold);
             const notes = activeSession.adminNotes;
 
-            console.log("Triggering Automatic Memory Summary...");
+            console.log("[Summary] Triggering with", recent.length, "messages, provider:", provider.name, "model:", conf.summaryModelId);
 
-            const newSummary = await updateSessionSummary(
-                activeSession.summary,
-                notes,
-                recent,
-                provider,
-                conf.summaryModelId,
-                agents
-            );
+            try {
+                const newSummary = await updateSessionSummary(
+                    activeSession.summary,
+                    notes,
+                    recent,
+                    provider,
+                    conf.summaryModelId,
+                    agents
+                );
 
-            if (newSummary) {
-                console.log("Memory Updated:", newSummary);
-                setSessions(prev => prev.map(s => s.id === activeSessionId ? {
-                    ...s,
-                    summary: newSummary,
-                    adminNotes: [] // Clear notes after processing
-                }: s));
+                if (newSummary) {
+                    console.log("[Summary] Updated successfully:", newSummary.substring(0, 100) + "...");
+                    setSessions(prev => prev.map(s => s.id === activeSessionId ? {
+                        ...s,
+                        summary: newSummary,
+                        adminNotes: [] // Clear notes after processing
+                    }: s));
+                } else {
+                    console.error('[Summary] updateSessionSummary returned null');
+                }
+            } catch (err) {
+                console.error('[Summary] Error:', err);
             }
         }
     };
