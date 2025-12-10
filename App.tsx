@@ -84,6 +84,9 @@ const App: React.FC = () => {
   // Ref to prevent duplicate triggers (sync check before async state update)
   const pendingTriggerRef = useRef<Set<string>>(new Set());
 
+  // Track last message count when summary was triggered (per session)
+  const lastSummaryCountRef = useRef<Map<string, number>>(new Map());
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -648,9 +651,12 @@ const App: React.FC = () => {
         }
 
         const count = activeSession.messages.length;
-        console.log(`[Summary] Message count: ${count}, threshold: ${conf.threshold}, trigger: ${count > 0 && count % conf.threshold === 0}`);
+        const lastCount = lastSummaryCountRef.current.get(activeSessionId) || 0;
+        const shouldTrigger = count >= lastCount + conf.threshold;
 
-        if (count > 0 && count % conf.threshold === 0) {
+        console.log(`[Summary] Message count: ${count}, lastSummary: ${lastCount}, threshold: ${conf.threshold}, trigger: ${shouldTrigger}`);
+
+        if (shouldTrigger) {
             // Trigger Summarization
             const provider = providers.find(p => p.id === conf.summaryProviderId);
             if (!provider) {
@@ -658,8 +664,11 @@ const App: React.FC = () => {
                 return;
             }
 
-            // Take recent messages
-            const recent = activeSession.messages.slice(-conf.threshold);
+            // Update last summary count immediately to prevent duplicate triggers
+            lastSummaryCountRef.current.set(activeSessionId, count);
+
+            // Take recent messages (from last summary point)
+            const recent = activeSession.messages.slice(lastCount);
             const notes = activeSession.adminNotes;
 
             console.log("[Summary] Triggering with", recent.length, "messages, provider:", provider.name, "model:", conf.summaryModelId);
@@ -683,9 +692,13 @@ const App: React.FC = () => {
                     }: s));
                 } else {
                     console.error('[Summary] updateSessionSummary returned null');
+                    // Reset count so it can retry
+                    lastSummaryCountRef.current.set(activeSessionId, lastCount);
                 }
             } catch (err) {
                 console.error('[Summary] Error:', err);
+                // Reset count so it can retry
+                lastSummaryCountRef.current.set(activeSessionId, lastCount);
             }
         }
     };
