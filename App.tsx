@@ -1133,13 +1133,16 @@ const App: React.FC = () => {
       console.error(`[${agent.name}] Error caught:`, error.name, error.message, error);
 
       if (error.name === 'AbortError' || error.message === 'Request aborted') {
-          // User cancelled, remove placeholder
-          console.log(`[${agent.name}] Request aborted by user - removing placeholder`);
-          updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
-      }
-      else if (error.message === "Request aborted by timeout") {
-          // Timeout already handled in timeout callback
-          console.log(`[${agent.name}] Request aborted by timeout - already handled`);
+          // Check if this was a timeout (abortController already deleted by timeout handler)
+          // vs user cancel (abortController still exists)
+          if (abortControllers.current.has(agentId)) {
+              // User cancelled - remove placeholder
+              console.log(`[${agent.name}] Request aborted by user - removing placeholder`);
+              updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
+          } else {
+              // Timeout - already handled by timeout callback, do nothing
+              console.log(`[${agent.name}] Request aborted by timeout - already handled`);
+          }
       }
       else {
           // All other errors - show in chat and keep the message
