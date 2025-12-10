@@ -113,18 +113,19 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
         .sort((a, b) => b.length - a.length);
 
       for (const name of sortedNames) {
-        // Escape special regex characters in name
-        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const mentionRegex = new RegExp(`@${escapedName}(?=\\s|$|[,，。！？!?.])`, 'gi');
+        // Escape special regex characters in name (including slash and colon which are common in model names)
+        const escapedName = name.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+        // Match @name followed by whitespace, end of string, or common punctuation (including colon which may follow mentions)
+        const mentionRegex = new RegExp(`@${escapedName}(?=\\s|$|[,，。！？!?.:;：；])`, 'gi');
         processedText = processedText.replace(
           mentionRegex,
           `<span class="text-blue-400 font-bold">@${name}</span>`
         );
       }
     } else {
-      // Fallback: simple regex for when agents list not available
+      // Fallback: simple regex for when agents list not available (supports slashes, colons, dots in names)
       processedText = processedText.replace(
-        /(@[\w\u4e00-\u9fa5\-]+)/g,
+        /(@[\w\u4e00-\u9fa5\-\/:._]+)/g,
         '<span class="text-blue-400 font-bold">$1</span>'
       );
     }
