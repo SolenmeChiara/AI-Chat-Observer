@@ -107,6 +107,12 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
 
     // Highlight @mentions - match known agent names (supports spaces in names)
     if (allAgents && allAgents.length > 0) {
+      // First, highlight @全体成员 and @all
+      processedText = processedText.replace(
+        /@(全体成员|all)(?=\s|$|[,，。！？!?.:;：；])/gi,
+        '<span class="text-blue-400 font-bold bg-blue-500/10 px-1 rounded">@$1</span>'
+      );
+
       // Sort by name length descending to match longer names first (e.g., "Claude 3.5" before "Claude")
       const sortedNames = [...allAgents.map(a => a.name), userProfile?.userName || 'User']
         .filter(Boolean)

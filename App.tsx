@@ -1348,16 +1348,27 @@ const App: React.FC = () => {
 
   // --- AUTOPLAY LOOP ---
   useEffect(() => {
-    if (!isAutoPlay) return;
+    if (!isAutoPlay) {
+      // console.log('[AutoPlay] Disabled');
+      return;
+    }
     // Check both processing and pending to prevent race conditions
     const totalActive = processingAgents.size + pendingTriggerRef.current.size;
-    if (!settings.enableConcurrency && totalActive > 0) return;
+    if (!settings.enableConcurrency && totalActive > 0) {
+      // console.log('[AutoPlay] Waiting for current agent to finish');
+      return;
+    }
 
     if (messages.length === 0) return;
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.isError) return;
     if (lastMessage.isStreaming) return;  // Don't trigger while another agent is still streaming
+
+    // Debug: Log mention detection
+    if (lastMessage.text.includes('@')) {
+      console.log('[AutoPlay] Message with @ detected:', lastMessage.text.substring(0, 100));
+    }
 
     // For system messages, find the actual last speaker to avoid re-triggering them
     // System messages are visible to AI but shouldn't re-trigger the command sender
@@ -1444,6 +1455,7 @@ const App: React.FC = () => {
     if (lastTextLower.includes('@全体成员') || lastTextLower.includes('@all')) {
         // Shuffle all eligible agents randomly
         agentsToQueue = [...eligibleAgents].sort(() => Math.random() - 0.5);
+        console.log('[Mention] @全体成员 detected, queuing', agentsToQueue.length, 'agents:', agentsToQueue.map(a => a.name));
     } else {
         // Extract all @mentions in order
         const mentionMatches = lastMessage.text.matchAll(/@(\S+)/g);
