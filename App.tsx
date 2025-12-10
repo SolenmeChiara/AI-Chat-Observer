@@ -103,7 +103,17 @@ const App: React.FC = () => {
 
       setAgents(data.agents);
       setProviders(data.providers);
-      setGroups(data.groups);
+      // Ensure all groups have a valid memoryConfig (handle old data)
+      const groupsWithMemoryConfig = data.groups.map(g => ({
+        ...g,
+        memoryConfig: g.memoryConfig || {
+          enabled: false,
+          threshold: 20,
+          summaryModelId: '',
+          summaryProviderId: ''
+        }
+      }));
+      setGroups(groupsWithMemoryConfig);
       setSessions(data.sessions);
       // Merge with defaults to ensure new fields like enableConcurrency exist
       setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
@@ -385,6 +395,14 @@ const App: React.FC = () => {
       ...g,
       memberIds: g.memberIds.filter(mid => mid !== id)
     } : g));
+
+    // Also clean up mute records for this agent in all sessions of this group
+    // to prevent "unmuted" notifications for kicked members
+    setSessions(prev => prev.map(s => s.groupId === activeGroupId ? {
+      ...s,
+      mutedAgentIds: (s.mutedAgentIds || []).filter(mid => mid !== id),
+      mutedAgents: (s.mutedAgents || []).filter(m => m.agentId !== id)
+    } : s));
   };
 
   // 添加角色到当前群组
