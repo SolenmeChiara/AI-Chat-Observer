@@ -860,12 +860,13 @@ const App: React.FC = () => {
              const unmuteMatch = accumulatedText.match(/\{\{UNMUTE:\s*(.+?)\}\}/);
              if (unmuteMatch) detectedAdminAction = { type: 'UNMUTE', target: unmuteMatch[1] };
 
-             const noteMatch = accumulatedText.match(/\{\{NOTE:\s*(.+?)\}\}/);
-             if (noteMatch) detectedAdminAction = { type: 'NOTE', target: noteMatch[1] };
+             // Use [\s\S]+? to match multi-line content (. doesn't match newlines)
+             const noteMatch = accumulatedText.match(/\{\{NOTE:\s*([\s\S]+?)\}\}/);
+             if (noteMatch) detectedAdminAction = { type: 'NOTE', target: noteMatch[1].trim() };
 
              // New: Delete note command
-             const delNoteMatch = accumulatedText.match(/\{\{DELNOTE:\s*(.+?)\}\}/);
-             if (delNoteMatch) detectedAdminAction = { type: 'DELNOTE', target: delNoteMatch[1] };
+             const delNoteMatch = accumulatedText.match(/\{\{DELNOTE:\s*([\s\S]+?)\}\}/);
+             if (delNoteMatch) detectedAdminAction = { type: 'DELNOTE', target: delNoteMatch[1].trim() };
 
              // New: Clear all notes command
              if (accumulatedText.includes('{{CLEARNOTES}}')) {
