@@ -696,7 +696,8 @@ const App: React.FC = () => {
     const abortController = new AbortController();
     abortControllers.current.set(agentId, abortController);
 
-    const newMessageId = Date.now().toString();
+    // Use agent ID in message ID to prevent collisions when multiple agents trigger simultaneously
+    const newMessageId = `${Date.now()}-${agentId}`;
     const placeholderMessage: Message = {
       id: newMessageId, senderId: agent.id, text: '', timestamp: Date.now(),
       isStreaming: true  // 占位符标记，对其他AI不可见
