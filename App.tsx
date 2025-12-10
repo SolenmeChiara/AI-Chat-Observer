@@ -17,6 +17,12 @@ import { initDB, loadAllData, saveCollection, saveSettings } from './services/db
 import { describeImage } from './services/visionProxyService';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 
+// Helper to format timestamp for error messages (HH:MM:SS)
+const formatErrorTimestamp = () => {
+  const now = new Date();
+  return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+};
+
 const App: React.FC = () => {
   // --- STATE ---
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
@@ -665,7 +671,7 @@ const App: React.FC = () => {
     if (!provider) {
       pendingTriggerRef.current.delete(agentId); // Clear pending on error
       updateActiveSessionMessages(prev => [...prev, {
-        id: Date.now().toString(), senderId: agent.id, text: `[系统错误] 找不到供应商配置。`, timestamp: Date.now(), isError: true
+        id: Date.now().toString(), senderId: agent.id, text: `[${formatErrorTimestamp()}] [系统错误] 找不到供应商配置。`, timestamp: Date.now(), isError: true
       }]);
       return;
     }
@@ -697,7 +703,7 @@ const App: React.FC = () => {
             updateThisSession(s => ({
                 ...s,
                 messages: s.messages.map(m => m.id === newMessageId ? {
-                    ...m, isError: true, text: m.text + `\n[系统: 响应超时 (${settings.timeoutDuration/1000}s), 已强制终止]`
+                    ...m, isError: true, text: m.text + `\n[${formatErrorTimestamp()}] [系统: 响应超时 (${settings.timeoutDuration/1000}s), 已强制终止]`
                 } : m)
             }));
             setProcessingAgents(prev => {
@@ -1059,7 +1065,7 @@ const App: React.FC = () => {
             const errorMsg: Message = {
               id: `search-error-${Date.now()}`,
               senderId: 'SYSTEM',
-              text: `搜索失败: ${searchError.message || '网络请求错误'}`,
+              text: `[${formatErrorTimestamp()}] 搜索失败: ${searchError.message || '网络请求错误'}`,
               timestamp: Date.now(),
               isSystem: true
             };
@@ -1093,7 +1099,7 @@ const App: React.FC = () => {
               ...s,
               messages: s.messages.map(m => m.id === newMessageId ? {
                   ...m,
-                  text: m.text ? `${m.text}\n\n[错误: ${errorMsg}]` : `[错误: ${errorMsg}]`,
+                  text: m.text ? `${m.text}\n\n[${formatErrorTimestamp()}] [错误: ${errorMsg}]` : `[${formatErrorTimestamp()}] [错误: ${errorMsg}]`,
                   isError: true,
                   isStreaming: false
               } : m)
@@ -1193,7 +1199,7 @@ const App: React.FC = () => {
         const errorMsg: Message = {
           id: Date.now().toString(),
           senderId: 'SYSTEM',
-          text: `无法执行搜索：没有配置搜索工具的角色。请在侧边栏的角色设置中启用搜索功能。`,
+          text: `[${formatErrorTimestamp()}] 无法执行搜索：没有配置搜索工具的角色。请在侧边栏的角色设置中启用搜索功能。`,
           timestamp: Date.now(),
           isSystem: true
         };
