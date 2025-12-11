@@ -295,6 +295,10 @@ const App: React.FC = () => {
   };
 
   const handleSwitchGroup = (id: string) => {
+    // Turn off AutoPlay when switching groups (it's session-specific)
+    if (isAutoPlay) {
+      setIsAutoPlay(false);
+    }
     setActiveGroupId(id);
     // Switch to the first session of this group
     const groupSessions = sessions.filter(s => s.groupId === id);
@@ -351,6 +355,14 @@ const App: React.FC = () => {
 
   const handleRenameSession = (id: string, name: string) => {
     setSessions(prev => prev.map(s => s.id === id ? { ...s, name, isAutoRenamed: true } : s));
+  };
+
+  const handleSwitchSession = (id: string) => {
+    // Turn off AutoPlay when switching sessions (it's session-specific)
+    if (isAutoPlay && id !== activeSessionId) {
+      setIsAutoPlay(false);
+    }
+    setActiveSessionId(id);
   };
 
   const handleUpdateSummary = (id: string, summary: string) => {
@@ -1882,7 +1894,7 @@ const App: React.FC = () => {
         onUpdateGroupMemoryConfig={handleUpdateGroupMemoryConfig}
         onUpdateGroupEntertainmentConfig={handleUpdateGroupEntertainmentConfig}
         sessions={sessions} activeSessionId={activeSessionId}
-        onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId}
+        onCreateSession={handleCreateSession} onSwitchSession={handleSwitchSession}
         onDeleteSession={handleDeleteSession} onRenameSession={handleRenameSession}
         onUpdateSummary={handleUpdateSummary}
         isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)}
