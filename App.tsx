@@ -1212,6 +1212,10 @@ const App: React.FC = () => {
       }
 
       console.log(`[${agent.name}] ✅ Stream completed (${chunkCount} chunks, ${accumulatedText.length} chars)`);
+      console.log(`[${agent.name}] 📝 Raw output:`, accumulatedText.substring(0, 500) + (accumulatedText.length > 500 ? '...' : ''));
+      if (accumulatedReasoning) {
+        console.log(`[${agent.name}] 🧠 Reasoning:`, accumulatedReasoning.substring(0, 300) + (accumulatedReasoning.length > 300 ? '...' : ''));
+      }
       clearTimeout(timeoutId);
 
       // EXECUTE ADMIN ACTIONS
@@ -1298,6 +1302,7 @@ const App: React.FC = () => {
       }
 
       if (isPass) {
+        console.log(`[${agent.name}] ⏸️ PASS - agent chose to skip this turn`);
         // Agent passed (or invalid format), remove placeholder message and update yield tracking
         updateThisSession(s => ({
             ...s,
@@ -1322,6 +1327,11 @@ const App: React.FC = () => {
              .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .trimStart();
+
+        console.log(`[${agent.name}] 💬 Final text (${finalText.length} chars):`, finalText.substring(0, 300) + (finalText.length > 300 ? '...' : ''));
+        if (detectedAdminAction) console.log(`[${agent.name}] 🔧 Admin action:`, detectedAdminAction);
+        if (detectedSearchQuery) console.log(`[${agent.name}] 🔍 Search query:`, detectedSearchQuery);
+        if (detectedReplyId) console.log(`[${agent.name}] ↩️ Reply to:`, detectedReplyId);
 
         // Update the placeholder message with final data (clear isStreaming)
         updateThisSession(s => ({
