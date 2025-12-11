@@ -731,12 +731,13 @@ const App: React.FC = () => {
       const chatMsgs = activeSession.messages.filter(m => !m.isSystem);
       if (chatMsgs.length >= 2 && !activeSession.isAutoRenamed && providers.length > 0) {
         console.log("[Auto-Rename] Triggering for session:", activeSessionId, "with", chatMsgs.length, "messages");
-        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, isAutoRenamed: true } : s));
         const newName = await generateSessionName(chatMsgs, providers, agents);
         console.log("[Auto-Rename] Generated name:", newName);
         if (newName) {
-          setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, name: newName } : s));
+          // Only mark as auto-renamed if we actually got a valid name
+          setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, name: newName, isAutoRenamed: true } : s));
         }
+        // If newName is null (no provider with credentials), don't mark as renamed so it can retry later
       }
     };
     checkAndRename();
@@ -759,11 +760,11 @@ const App: React.FC = () => {
 
       for (const session of eligibleSessions) {
         const chatMsgs = session.messages.filter(m => !m.isSystem);
-        setSessions(prev => prev.map(s => s.id === session.id ? { ...s, isAutoRenamed: true } : s));
         const newName = await generateSessionName(chatMsgs, providers, agents);
         console.log("[Auto-Rename] Old session", session.id, "->", newName);
         if (newName) {
-          setSessions(prev => prev.map(s => s.id === session.id ? { ...s, name: newName } : s));
+          // Only mark as auto-renamed if we got a valid name
+          setSessions(prev => prev.map(s => s.id === session.id ? { ...s, name: newName, isAutoRenamed: true } : s));
         }
       }
     };

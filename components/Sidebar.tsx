@@ -698,6 +698,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   // 展开的群组ID集合
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(activeGroupId ? [activeGroupId] : []));
 
+  // Auto-expand group when active session changes
+  useEffect(() => {
+    if (activeSessionId) {
+      const session = sessions.find(s => s.id === activeSessionId);
+      if (session?.groupId && !expandedGroups.has(session.groupId)) {
+        setExpandedGroups(prev => new Set([...prev, session.groupId]));
+      }
+    }
+  }, [activeSessionId, sessions]);
+
   const toggleGroupExpand = (groupId: string) => {
     setExpandedGroups(prev => {
       const next = new Set(prev);
@@ -745,8 +755,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                    <div
                      className={`p-3 flex items-center gap-2 cursor-pointer transition-colors ${isActiveGroup ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}`}
                      onClick={() => {
-                       toggleGroupExpand(group.id);
-                       if (!isActiveGroup) onSwitchGroup(group.id);
+                       // Always expand when clicking (don't toggle if not expanded)
+                       if (!isExpanded) {
+                         setExpandedGroups(prev => new Set([...prev, group.id]));
+                       } else if (isActiveGroup) {
+                         // Only collapse if clicking on already-active group
+                         toggleGroupExpand(group.id);
+                       }
+                       // Switch to group and select first session if not active
+                       if (!isActiveGroup) {
+                         onSwitchGroup(group.id);
+                         // Select first session in this group
+                         if (groupSessions.length > 0) {
+                           onSwitchSession(groupSessions[0].id);
+                         }
+                       }
                      }}
                    >
                      <button

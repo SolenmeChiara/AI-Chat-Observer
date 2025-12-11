@@ -34,28 +34,49 @@ const getGeminiClient = (provider: ApiProvider) => {
   return new GoogleGenAI({ apiKey });
 };
 
+// Helper to check if a provider has valid credentials
+const hasValidCredentials = (provider: ApiProvider): boolean => {
+  // Gemini requires API key (or Vertex config)
+  if (provider.type === AgentType.GEMINI) {
+    if (provider.geminiMode === 'vertex') {
+      return !!(provider.vertexProject && provider.vertexLocation);
+    }
+    return !!provider.apiKey;
+  }
+  // OpenAI-compatible requires baseUrl and apiKey
+  return !!(provider.baseUrl && provider.apiKey);
+};
+
 // Helper to find the best model for summarization (Prefer Qwen/Small models)
 const findSummaryAgent = (providers: ApiProvider[]) => {
+  // Filter to only providers with valid credentials
+  const validProviders = providers.filter(hasValidCredentials);
+
+  if (validProviders.length === 0) {
+    console.warn('[findSummaryAgent] No providers with valid credentials found');
+    return null;
+  }
+
   // 1. Try to find a model with 'qwen' in id
-  for (const p of providers) {
+  for (const p of validProviders) {
     const qwenModel = p.models.find(m => m.id.toLowerCase().includes('qwen'));
     if (qwenModel) return { provider: p, modelId: qwenModel.id };
   }
-  
+
   // 2. Try to find a model with 'flash' or 'mini' or '7b' or 'haiku' (fast models)
-  for (const p of providers) {
-    const fastModel = p.models.find(m => 
-      m.id.toLowerCase().includes('flash') || 
-      m.id.toLowerCase().includes('mini') || 
+  for (const p of validProviders) {
+    const fastModel = p.models.find(m =>
+      m.id.toLowerCase().includes('flash') ||
+      m.id.toLowerCase().includes('mini') ||
       m.id.toLowerCase().includes('7b') ||
       m.id.toLowerCase().includes('haiku')
     );
     if (fastModel) return { provider: p, modelId: fastModel.id };
   }
 
-  // 3. Fallback to first available
-  if (providers.length > 0 && providers[0].models.length > 0) {
-    return { provider: providers[0], modelId: providers[0].models[0].id };
+  // 3. Fallback to first available with credentials
+  if (validProviders[0].models.length > 0) {
+    return { provider: validProviders[0], modelId: validProviders[0].models[0].id };
   }
 
   return null;
