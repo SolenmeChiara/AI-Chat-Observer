@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX, MoreHorizontal, Megaphone } from 'lucide-react';
+import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
 import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile } from './types';
 import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
 import Sidebar from './components/Sidebar';
@@ -61,9 +61,6 @@ const App: React.FC = () => {
   const [showMentionPopup, setShowMentionPopup] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
-
-  // Profile Switcher State
-  const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
@@ -1867,6 +1864,24 @@ const App: React.FC = () => {
         onActivateAgent={handleActivateAgent}
         onToggleAdmin={handleToggleAdmin}
         userName={settings.userName || 'User'}
+        userProfiles={settings.userProfiles}
+        activeProfileId={settings.activeProfileId}
+        onSwitchProfile={(profileId) => {
+          if (profileId === 'narrator') {
+            setSettings({ ...settings, activeProfileId: 'narrator' });
+          } else {
+            const profile = (settings.userProfiles || []).find(p => p.id === profileId);
+            if (profile) {
+              setSettings({
+                ...settings,
+                activeProfileId: profileId,
+                userName: profile.name,
+                userAvatar: profile.avatar,
+                userPersona: profile.persona
+              });
+            }
+          }
+        }}
       />
 
       {/* Stats Panel */}
@@ -2146,79 +2161,11 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {/* PROFILE SWITCHER POPUP */}
-            {showProfileSwitcher && (
-              <div className="absolute bottom-full left-4 mb-2 bg-white dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-56 max-h-64 overflow-y-auto z-50">
-                <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-800">
-                  切换身份
-                </div>
-                {/* Narrator Mode */}
-                <button
-                  onClick={() => {
-                    setSettings({ ...settings, activeProfileId: 'narrator' });
-                    setShowProfileSwitcher(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors border-b border-gray-50 dark:border-zinc-700
-                    ${settings.activeProfileId === 'narrator' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-700'}
-                  `}
-                >
-                  <Megaphone size={16} className="text-amber-500" />
-                  <span className="font-medium">旁白模式</span>
-                  {settings.activeProfileId === 'narrator' && (
-                    <span className="text-[9px] ml-auto px-1.5 py-0.5 bg-amber-500 text-white rounded">当前</span>
-                  )}
-                </button>
-                {/* User Profiles */}
-                {(settings.userProfiles || []).map(profile => (
-                  <button
-                    key={profile.id}
-                    onClick={() => {
-                      setSettings({
-                        ...settings,
-                        activeProfileId: profile.id,
-                        userName: profile.name,
-                        userAvatar: profile.avatar,
-                        userPersona: profile.persona
-                      });
-                      setShowProfileSwitcher(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors
-                      ${settings.activeProfileId === profile.id ? 'bg-zinc-100 dark:bg-zinc-700 text-zinc-900 dark:text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-700'}
-                    `}
-                  >
-                    <img src={profile.avatar} className="w-5 h-5 rounded-full border border-gray-200 dark:border-zinc-600 object-cover" />
-                    <span className="truncate">{profile.name}</span>
-                    {settings.activeProfileId === profile.id && (
-                      <span className="text-[9px] ml-auto px-1.5 py-0.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded">当前</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
             <form onSubmit={handleUserSend} className="relative flex items-end">
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt,.md,.js,.ts,.py,.json" onChange={handleFileSelect} />
 
-              {/* Profile Switcher Button */}
-              <button
-                type="button"
-                onClick={() => setShowProfileSwitcher(!showProfileSwitcher)}
-                className="absolute left-3 bottom-3 flex items-center gap-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors rounded-lg px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-zinc-600"
-                title="切换发言身份"
-              >
-                {settings.activeProfileId === 'narrator' ? (
-                  <Megaphone size={16} className="text-amber-500" />
-                ) : (
-                  <img
-                    src={(settings.userProfiles || []).find(p => p.id === settings.activeProfileId)?.avatar || settings.userAvatar}
-                    className="w-5 h-5 rounded-full border border-gray-200 dark:border-zinc-600 object-cover"
-                  />
-                )}
-                <MoreHorizontal size={12} className="text-gray-400" />
-              </button>
-
               {/* File Upload Button */}
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-14 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" title="上传文件 (图片/文档)">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" title="上传文件 (图片/文档)">
                 <Paperclip size={18} />
               </button>
 
@@ -2227,16 +2174,15 @@ const App: React.FC = () => {
                 value={inputText}
                 onChange={handleInputChange}
                 onKeyDown={handleInputKeyDown}
-                onFocus={() => setShowProfileSwitcher(false)}
                 placeholder={
                   settings.activeProfileId === 'narrator'
                     ? '以旁白身份发言... (系统消息样式)'
                     : processingAgents.size > 0
                       ? "AI正在输入中..."
-                      : `以 "${(settings.userProfiles || []).find(p => p.id === settings.activeProfileId)?.name || settings.userName}" 身份发言...`
+                      : `在 "${activeSession.name}" 发言... (Enter发送, Shift+Enter换行)`
                 }
                 rows={1}
-                className="w-full bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-xl px-4 py-3.5 pl-20 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-hidden"
+                className="w-full bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-xl px-4 py-3.5 pl-10 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-hidden"
                 style={{ minHeight: '52px', maxHeight: '150px' }}
               />
               <button type="submit" disabled={(!inputText.trim() && !attachment) || isParsingFile} className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm">

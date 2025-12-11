@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { Agent, MuteInfo } from '../types';
-import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff } from 'lucide-react';
+import { Agent, MuteInfo, UserProfile } from '../types';
+import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone } from 'lucide-react';
 
 // Mute duration options (in minutes)
 const MUTE_DURATIONS = [
@@ -28,15 +28,25 @@ interface RightSidebarProps {
   onActivateAgent: (agentId: string) => void;  // 激活角色加入群聊
   onToggleAdmin: (agentId: string) => void;    // 切换管理员状态
   userName: string;
+  // User profile switching
+  userProfiles?: UserProfile[];
+  activeProfileId?: string | 'narrator';
+  onSwitchProfile?: (profileId: string | 'narrator') => void;
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
-  isOpen, onClose, agents, inactiveAgents, adminIds, mutedAgents, onRemoveAgent, onMuteAgent, onUnmuteAgent, onActivateAgent, onToggleAdmin, userName
+  isOpen, onClose, agents, inactiveAgents, adminIds, mutedAgents, onRemoveAgent, onMuteAgent, onUnmuteAgent, onActivateAgent, onToggleAdmin, userName,
+  userProfiles, activeProfileId, onSwitchProfile
 }) => {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showMuteMenu, setShowMuteMenu] = useState<string | null>(null); // agentId being muted
   const [customDuration, setCustomDuration] = useState('60'); // minutes
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  // Get current profile info
+  const currentProfile = userProfiles?.find(p => p.id === activeProfileId);
+  const isNarrator = activeProfileId === 'narrator';
 
   const handleActivateAgent = (agentId: string) => {
     onActivateAgent(agentId);
@@ -86,6 +96,93 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
       {/* Agents List */}
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50 dark:bg-zinc-900/50 space-y-3 relative">
+
+        {/* USER PROFILE SWITCHER - First in list */}
+        {userProfiles && onSwitchProfile && (
+          <div className={`bg-white dark:bg-zinc-800 p-3 rounded-xl border shadow-sm relative transition-all hover:shadow-md ${
+            isNarrator ? 'border-amber-300 dark:border-amber-600 ring-1 ring-amber-200 dark:ring-amber-700' : 'border-blue-200 dark:border-blue-700 ring-1 ring-blue-100 dark:ring-blue-800'
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                {isNarrator ? (
+                  <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center border border-amber-300 dark:border-amber-600">
+                    <Megaphone size={20} className="text-amber-600 dark:text-amber-400" />
+                  </div>
+                ) : (
+                  <img
+                    src={currentProfile?.avatar || ''}
+                    className="w-10 h-10 rounded-full bg-white object-cover border border-blue-200 dark:border-blue-600 p-0.5"
+                  />
+                )}
+                <div className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center shadow-sm">
+                  <User size={10} />
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-semibold text-sm text-gray-900 dark:text-white truncate flex items-center gap-2">
+                  {isNarrator ? '旁白' : (currentProfile?.name || userName)}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    isNarrator
+                      ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
+                      : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                  }`}>
+                    {isNarrator ? '系统消息' : '玩家'}
+                  </span>
+                </h4>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                  {isNarrator ? '发送的消息会显示为系统提示' : (currentProfile?.persona?.slice(0, 30) || '点击切换身份') + '...'}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                className="px-2 py-1 text-[10px] bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center gap-1"
+              >
+                切换 <ChevronDown size={10} />
+              </button>
+            </div>
+
+            {/* Profile Dropdown Menu */}
+            {showProfileMenu && (
+              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-zinc-700 space-y-1">
+                {/* Narrator Option */}
+                <button
+                  onClick={() => { onSwitchProfile('narrator'); setShowProfileMenu(false); }}
+                  className={`w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-xs transition-colors ${
+                    isNarrator ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' : 'hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  <Megaphone size={14} className="text-amber-500" />
+                  <span>旁白模式</span>
+                  {isNarrator && <span className="ml-auto text-[9px] bg-amber-500 text-white px-1 rounded">当前</span>}
+                </button>
+                {/* User Profiles */}
+                {userProfiles.map(profile => (
+                  <button
+                    key={profile.id}
+                    onClick={() => { onSwitchProfile(profile.id); setShowProfileMenu(false); }}
+                    className={`w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-xs transition-colors ${
+                      activeProfileId === profile.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    <img src={profile.avatar} className="w-4 h-4 rounded-full object-cover border border-gray-200 dark:border-zinc-600" />
+                    <span className="truncate">{profile.name}</span>
+                    {activeProfileId === profile.id && <span className="ml-auto text-[9px] bg-blue-500 text-white px-1 rounded">当前</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Divider if user profiles exist */}
+        {userProfiles && onSwitchProfile && agents.length > 0 && (
+          <div className="flex items-center gap-2 py-1">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-zinc-700"></div>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">AI 成员</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-zinc-700"></div>
+          </div>
+        )}
+
         {agents.map(agent => {
           const muteInfo = getMuteInfo(agent.id);
           const isMuted = !!muteInfo;
