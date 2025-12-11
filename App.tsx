@@ -868,34 +868,61 @@ const App: React.FC = () => {
 
   // --- CORE LOGIC ---
   const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false, retryCount: number = 0) => {
-    if ((activeSession.mutedAgentIds || []).includes(agentId)) return;
-
     const agent = agents.find(a => a.id === agentId);
-    if (!agent) return;
+    const agentName = agent?.name || agentId;
+
+    if ((activeSession.mutedAgentIds || []).includes(agentId)) {
+      console.log(`[${agentName}] ⏭️ Skipped: agent is muted`);
+      return;
+    }
+
+    if (!agent) {
+      console.log(`[${agentName}] ⏭️ Skipped: agent not found`);
+      return;
+    }
 
     // Skip inactive or unconfigured agents
-    if (agent.isActive === false) return;
-    if (!agent.providerId || !agent.modelId) return;
+    if (agent.isActive === false) {
+      console.log(`[${agentName}] ⏭️ Skipped: agent is inactive`);
+      return;
+    }
+    if (!agent.providerId || !agent.modelId) {
+      console.log(`[${agentName}] ⏭️ Skipped: agent not configured (no provider/model)`);
+      return;
+    }
 
     // Synchronous check using ref to prevent race conditions
-    if (pendingTriggerRef.current.has(agentId)) return;
+    if (pendingTriggerRef.current.has(agentId)) {
+      console.log(`[${agentName}] ⏭️ Skipped: already pending`);
+      return;
+    }
 
     // Concurrency Check (also check pending triggers)
     const totalPending = processingAgents.size + pendingTriggerRef.current.size;
-    if (!settings.enableConcurrency && totalPending > 0) return;
-    if (processingAgents.has(agentId)) return;
+    if (!settings.enableConcurrency && totalPending > 0) {
+      console.log(`[${agentName}] ⏭️ Skipped: concurrency disabled and ${totalPending} agents processing`);
+      return;
+    }
+    if (processingAgents.has(agentId)) {
+      console.log(`[${agentName}] ⏭️ Skipped: already processing`);
+      return;
+    }
 
     // Mark as pending immediately (sync) before any async operations
     pendingTriggerRef.current.add(agentId);
 
     const provider = providers.find(p => p.id === agent.providerId);
     if (!provider) {
+      console.log(`[${agentName}] ❌ Error: provider not found`);
       pendingTriggerRef.current.delete(agentId); // Clear pending on error
       updateActiveSessionMessages(prev => [...prev, {
         id: Date.now().toString(), senderId: agent.id, text: `[${formatErrorTimestamp()}] [系统错误] 找不到供应商配置。`, timestamp: Date.now(), isError: true
       }]);
       return;
     }
+
+    console.log(`[${agentName}] 🚀 Starting reply (retry: ${retryCount}, provider: ${provider.name}, model: ${agent.modelId})`);
+
 
     // Capture the session ID at the start to prevent closure issues during async operations
     const capturedSessionId = activeSessionId;
@@ -1059,11 +1086,13 @@ const App: React.FC = () => {
           agent.enableGoogleSearch, groupAdminIds, entertainmentConfig
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
+        console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig
         );
       } else {
+        console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig
@@ -1076,6 +1105,7 @@ const App: React.FC = () => {
       let capturedSignature: string | undefined;
       let isPass = false;
       let detectedReplyId: string | undefined = undefined;
+      let chunkCount = 0;
 
       // ADMIN COMMAND STATE
       let detectedAdminAction: { type: 'MUTE' | 'UNMUTE' | 'NOTE' | 'DELNOTE' | 'CLEARNOTES', target: string, duration?: number } | null = null;
@@ -1083,7 +1113,10 @@ const App: React.FC = () => {
       // SEARCH COMMAND STATE
       let detectedSearchQuery: string | null = null;
 
+      console.log(`[${agent.name}] 📥 Starting to receive stream...`);
+
       for await (const chunk of streamGenerator) {
+        chunkCount++;
         if (abortController.signal.aborted) throw new Error("Request aborted");
 
         if (chunk.reasoning) {
@@ -1178,6 +1211,7 @@ const App: React.FC = () => {
         if (chunk.reasoningSignature) capturedSignature = chunk.reasoningSignature;
       }
 
+      console.log(`[${agent.name}] ✅ Stream completed (${chunkCount} chunks, ${accumulatedText.length} chars)`);
       clearTimeout(timeoutId);
 
       // EXECUTE ADMIN ACTIONS
@@ -1382,24 +1416,25 @@ const App: React.FC = () => {
       }
 
     } catch (error: any) {
-      console.error(`[${agent.name}] Error caught:`, error.name, error.message, error);
+      console.error(`[${agent.name}] ❌ Error caught:`, error.name, error.message);
+      console.error(`[${agent.name}] ❌ Error stack:`, error.stack);
 
       if (error.name === 'AbortError' || error.message === 'Request aborted') {
           // Check if this was a timeout (abortController already deleted by timeout handler)
           // vs user cancel (abortController still exists)
           if (abortControllers.current.has(agentId)) {
               // User cancelled - remove placeholder
-              console.log(`[${agent.name}] Request aborted by user - removing placeholder`);
+              console.log(`[${agent.name}] 🛑 Request aborted by user - removing placeholder`);
               updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
           } else {
               // Timeout - already handled by timeout callback, do nothing
-              console.log(`[${agent.name}] Request aborted by timeout - already handled`);
+              console.log(`[${agent.name}] ⏱️ Request aborted by timeout - already handled`);
           }
       }
       else {
           // All other errors - show in chat and keep the message
           const errorMsg = error.message || '未知错误';
-          console.error(`[${agent.name}] Showing error in chat:`, errorMsg);
+          console.error(`[${agent.name}] 💬 Showing error in chat:`, errorMsg);
           updateThisSession(s => ({
               ...s,
               messages: s.messages.map(m => m.id === newMessageId ? {
@@ -1411,6 +1446,7 @@ const App: React.FC = () => {
           }));
       }
     } finally {
+      console.log(`[${agent.name}] 🏁 Cleanup: releasing locks`);
       clearTimeout(timeoutId);
       pendingTriggerRef.current.delete(agentId); // Clear pending flag
       // Record message count when this agent finished speaking (for cooldown)

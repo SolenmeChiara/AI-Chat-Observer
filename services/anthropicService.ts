@@ -478,11 +478,13 @@ export async function* streamAnthropicReply(
             body: JSON.stringify(body)
         });
 
+        console.log(`[Anthropic] 📡 Response received: status=${response.status}`);
+
         if (!response.ok) {
             if (response.status === 429 || response.status >= 500) {
                 if (attempt < MAX_RETRIES) {
                     const delay = 1000 * Math.pow(2, attempt);
-                    console.warn(`Anthropic API Error ${response.status}. Retrying in ${delay}ms...`);
+                    console.warn(`[Anthropic] ⚠️ API Error ${response.status}. Retrying in ${delay}ms...`);
                     await wait(delay);
                     continue;
                 }
@@ -497,19 +499,21 @@ export async function* streamAnthropicReply(
             } catch {
                 errorDetail = await response.text().catch(() => statusText);
             }
+            console.error(`[Anthropic] ❌ API Error: ${statusCode} - ${errorDetail}`);
             throw new Error(`Anthropic ${statusCode}: ${errorDetail}`);
         }
         if (!response.body) throw new Error("No response body");
 
+        console.log(`[Anthropic] ✅ Connection established, starting stream...`);
         break;
     } catch (error: any) {
         if (attempt < MAX_RETRIES) {
             const delay = 1000 * Math.pow(2, attempt);
-            console.warn(`Anthropic Network/Retryable Error. Retrying in ${delay}ms...`);
+            console.warn(`[Anthropic] ⚠️ Network/Retryable Error: ${error.message}. Retrying in ${delay}ms...`);
             await wait(delay);
             continue;
         }
-        console.error("Anthropic Stream Error", error);
+        console.error("[Anthropic] ❌ Stream Error (max retries reached):", error.message);
         throw error;
     }
   }
@@ -589,14 +593,15 @@ export async function* streamAnthropicReply(
 
     // Stream ended without message_stop - this is an abnormal termination
     if (!receivedMessageStop && hasReceivedContent) {
-      console.warn("Anthropic stream ended without message_stop - connection may have been interrupted");
+      console.warn("[Anthropic] ⚠️ Stream ended without message_stop - connection may have been interrupted");
       throw new Error("连接中断：响应未完成");
     }
 
+    console.log(`[Anthropic] ✅ Stream finished normally (usage: ${capturedUsage.input}/${capturedUsage.output} tokens)`);
     yield { isComplete: true, usage: capturedUsage, reasoningSignature: capturedSignature };
 
-  } catch (error) {
-    console.error("Anthropic Stream Reading Error", error);
+  } catch (error: any) {
+    console.error("[Anthropic] ❌ Stream Reading Error:", error.message);
     throw error;
   }
 }

@@ -429,12 +429,14 @@ export async function* streamOpenAIReply(
         body: JSON.stringify(requestBody)
       });
 
+      console.log(`[OpenAI] 📡 Response received: status=${response.status}`);
+
       // Handle Rate Limits and Server Errors
       if (!response.ok) {
         if (response.status === 429 || response.status >= 500) {
             if (attempt < MAX_RETRIES) {
                 const delay = 1000 * Math.pow(2, attempt);
-                console.warn(`OpenAI API Error ${response.status}. Retrying in ${delay}ms...`);
+                console.warn(`[OpenAI] ⚠️ API Error ${response.status}. Retrying in ${delay}ms...`);
                 await wait(delay);
                 continue;
             }
@@ -445,11 +447,13 @@ export async function* streamOpenAIReply(
             const errBody = await response.json();
             errorDetail = errBody.error?.message || errBody.message || JSON.stringify(errBody);
         } catch { /* ignore parse error */ }
+        console.error(`[OpenAI] ❌ API Error: ${response.status} - ${errorDetail}`);
         throw new Error(`API ${response.status}: ${errorDetail}`);
       }
-      
+
       if (!response.body) throw new Error("No response body");
 
+      console.log(`[OpenAI] ✅ Connection established, starting stream...`);
       // Success, break retry loop
       break;
 
@@ -457,11 +461,11 @@ export async function* streamOpenAIReply(
         // Handle Network Errors (Fetch failed)
         if (attempt < MAX_RETRIES) {
             const delay = 1000 * Math.pow(2, attempt);
-            console.warn(`OpenAI Network/Retryable Error. Retrying in ${delay}ms...`);
+            console.warn(`[OpenAI] ⚠️ Network/Retryable Error: ${error.message}. Retrying in ${delay}ms...`);
             await wait(delay);
             continue;
         }
-        console.error("OpenAI Stream Error", error);
+        console.error("[OpenAI] ❌ Stream Error (max retries reached):", error.message);
         throw error;
     }
   }
@@ -565,14 +569,15 @@ export async function* streamOpenAIReply(
 
     // Stream ended without [DONE] - this is an abnormal termination
     if (!receivedDone && hasReceivedContent) {
-      console.warn("OpenAI stream ended without [DONE] - connection may have been interrupted");
+      console.warn("[OpenAI] ⚠️ Stream ended without [DONE] - connection may have been interrupted");
       throw new Error("连接中断：响应未完成");
     }
 
+    console.log(`[OpenAI] ✅ Stream finished normally (usage: ${capturedUsage.input}/${capturedUsage.output} tokens)`);
     yield { isComplete: true, usage: capturedUsage };
 
-  } catch (error) {
-    console.error("OpenAI Stream Reading Error", error);
+  } catch (error: any) {
+    console.error("[OpenAI] ❌ Stream Reading Error:", error.message);
     throw error;
   }
 }
