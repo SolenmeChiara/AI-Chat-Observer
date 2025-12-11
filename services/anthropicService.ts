@@ -524,6 +524,8 @@ export async function* streamAnthropicReply(
     let buffer = "";
     let capturedUsage = { input: 0, output: 0 };
     let capturedSignature: string | undefined;
+    let receivedMessageStop = false;
+    let hasReceivedContent = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -550,9 +552,11 @@ export async function* streamAnthropicReply(
                 // Parsing Content vs Thinking Delta
                 if (json.type === 'content_block_delta') {
                     if (json.delta?.type === 'text_delta' && json.delta.text) {
+                        hasReceivedContent = true;
                         yield { text: json.delta.text, isComplete: false };
                     }
                     if (json.delta?.type === 'thinking_delta' && json.delta.thinking) {
+                        hasReceivedContent = true;
                         yield { reasoning: json.delta.thinking, isComplete: false };
                     }
                     // Capture signature delta (Anthropic streams signature in thinking block)
@@ -572,6 +576,7 @@ export async function* streamAnthropicReply(
                 }
 
                 if (json.type === 'message_stop') {
+                    receivedMessageStop = true;
                     yield { isComplete: true, usage: capturedUsage, reasoningSignature: capturedSignature };
                     return;
                 }
@@ -580,6 +585,12 @@ export async function* streamAnthropicReply(
             }
         }
       }
+    }
+
+    // Stream ended without message_stop - this is an abnormal termination
+    if (!receivedMessageStop && hasReceivedContent) {
+      console.warn("Anthropic stream ended without message_stop - connection may have been interrupted");
+      throw new Error("连接中断：响应未完成");
     }
 
     yield { isComplete: true, usage: capturedUsage, reasoningSignature: capturedSignature };

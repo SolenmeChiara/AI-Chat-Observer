@@ -478,6 +478,8 @@ export async function* streamOpenAIReply(
 
     // State for parsing raw <think> tags in content
     let insideThinkTag = false;
+    let receivedDone = false;
+    let hasReceivedContent = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -492,7 +494,10 @@ export async function* streamOpenAIReply(
         if (!trimmed.startsWith("data: ")) continue;
         
         const dataStr = trimmed.slice(6);
-        if (dataStr === "[DONE]") continue;
+        if (dataStr === "[DONE]") {
+          receivedDone = true;
+          continue;
+        }
 
         try {
           const json = JSON.parse(dataStr);
@@ -533,6 +538,7 @@ export async function* streamOpenAIReply(
                 if (insideThinkTag) {
                     yield { reasoning: text, isComplete: false };
                 } else {
+                    hasReceivedContent = true;
                     yield { text: text, isComplete: false };
                 }
              }
@@ -555,6 +561,12 @@ export async function* streamOpenAIReply(
           }
         }
       }
+    }
+
+    // Stream ended without [DONE] - this is an abnormal termination
+    if (!receivedDone && hasReceivedContent) {
+      console.warn("OpenAI stream ended without [DONE] - connection may have been interrupted");
+      throw new Error("连接中断：响应未完成");
     }
 
     yield { isComplete: true, usage: capturedUsage };
