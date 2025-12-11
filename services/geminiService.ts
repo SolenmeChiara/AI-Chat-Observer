@@ -536,8 +536,9 @@ export async function* streamGeminiReply(
         }
 
         // Also check for thought signature at candidate level (Gemini 3)
-        if (chunk.candidates?.[0]?.thoughtSignature) {
-          capturedThoughtSignature = chunk.candidates[0].thoughtSignature;
+        const candidate = chunk.candidates?.[0] as any;
+        if (candidate?.thoughtSignature) {
+          capturedThoughtSignature = candidate.thoughtSignature;
         }
 
         if (chunk.usageMetadata) {

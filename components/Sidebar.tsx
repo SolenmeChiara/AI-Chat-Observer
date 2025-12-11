@@ -1,9 +1,185 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine } from '../types';
-import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon } from 'lucide-react';
+import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngine, TTSVoice } from '../types';
+import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2 } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
+import { getBrowserVoices, OPENAI_VOICES } from '../services/ttsService';
+
+// TTS Settings Panel Component
+const TTSSettingsPanel: React.FC<{
+  settings: GlobalSettings;
+  setSettings: React.Dispatch<React.SetStateAction<GlobalSettings>>;
+  agents: Agent[];
+  setAgents: React.Dispatch<React.SetStateAction<Agent[]>>;
+}> = ({ settings, setSettings, agents, setAgents }) => {
+  const [browserVoices, setBrowserVoices] = useState<TTSVoice[]>([]);
+  const [isLoadingVoices, setIsLoadingVoices] = useState(false);
+
+  // Load browser voices on mount
+  useEffect(() => {
+    if (settings.ttsSettings?.enabled && settings.ttsSettings?.engine === 'browser') {
+      setIsLoadingVoices(true);
+      getBrowserVoices().then(voices => {
+        setBrowserVoices(voices);
+        setIsLoadingVoices(false);
+      });
+    }
+  }, [settings.ttsSettings?.enabled, settings.ttsSettings?.engine]);
+
+  const ttsSettings = settings.ttsSettings || {
+    enabled: false,
+    engine: 'browser' as TTSEngine,
+    rate: 1.0,
+    volume: 1.0,
+    autoPlayNewMessages: false
+  };
+
+  const updateTTSSettings = (updates: Partial<typeof ttsSettings>) => {
+    setSettings({
+      ...settings,
+      ttsSettings: { ...ttsSettings, ...updates }
+    });
+  };
+
+  const availableVoices = ttsSettings.engine === 'openai' ? OPENAI_VOICES : browserVoices;
+
+  // Auto-assign voices to agents
+  const handleAutoAssignVoices = () => {
+    const voices = availableVoices;
+    if (voices.length === 0) return;
+
+    const updatedAgents = agents.map((agent, idx) => ({
+      ...agent,
+      voiceId: voices[idx % voices.length].id,
+      voiceEngine: ttsSettings.engine
+    }));
+    setAgents(updatedAgents);
+  };
+
+  return (
+    <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+      <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <Volume2 size={16}/> 语音朗读 (TTS)
+      </h3>
+      <div className="space-y-4">
+        {/* Enable TTS */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-gray-600 dark:text-gray-300">启用语音朗读</span>
+          <input
+            type="checkbox"
+            className="accent-zinc-900"
+            checked={ttsSettings.enabled}
+            onChange={(e) => updateTTSSettings({ enabled: e.target.checked })}
+          />
+        </div>
+
+        {ttsSettings.enabled && (
+          <>
+            {/* Engine Selection */}
+            <div>
+              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">TTS 引擎</label>
+              <select
+                className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                value={ttsSettings.engine}
+                onChange={(e) => updateTTSSettings({ engine: e.target.value as TTSEngine })}
+              >
+                <option value="browser">浏览器原生 (免费)</option>
+                <option value="openai">OpenAI TTS (高质量)</option>
+              </select>
+            </div>
+
+            {/* OpenAI API Key (if OpenAI engine) */}
+            {ttsSettings.engine === 'openai' && (
+              <div>
+                <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">OpenAI API Key</label>
+                <input
+                  type="password"
+                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  placeholder="sk-..."
+                  value={ttsSettings.openaiApiKey || ''}
+                  onChange={(e) => updateTTSSettings({ openaiApiKey: e.target.value })}
+                />
+                <p className="text-[10px] text-gray-400 mt-1">用于 OpenAI TTS，费用约 $15/百万字符</p>
+              </div>
+            )}
+
+            {/* Speech Rate */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-600 dark:text-gray-300">语速</span>
+                <span className="font-mono text-gray-500 dark:text-gray-400">{ttsSettings.rate.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range" min="0.5" max="2.0" step="0.1"
+                className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                value={ttsSettings.rate}
+                onChange={(e) => updateTTSSettings({ rate: parseFloat(e.target.value) })}
+              />
+            </div>
+
+            {/* Volume */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-600 dark:text-gray-300">音量</span>
+                <span className="font-mono text-gray-500 dark:text-gray-400">{Math.round(ttsSettings.volume * 100)}%</span>
+              </div>
+              <input
+                type="range" min="0" max="1" step="0.1"
+                className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                value={ttsSettings.volume}
+                onChange={(e) => updateTTSSettings({ volume: parseFloat(e.target.value) })}
+              />
+            </div>
+
+            {/* Auto-assign voices button */}
+            <div>
+              <button
+                onClick={handleAutoAssignVoices}
+                disabled={availableVoices.length === 0}
+                className="w-full text-xs py-2 px-3 bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-lg transition-colors disabled:opacity-50"
+              >
+                🎲 自动为 {agents.length} 个角色分配不同音色
+              </button>
+              <p className="text-[10px] text-gray-400 mt-1">
+                {ttsSettings.engine === 'openai' ? '6 种音色可选' : `${browserVoices.length} 种浏览器音色可用`}
+              </p>
+            </div>
+
+            {/* Agent Voice Assignment */}
+            <div className="border-t border-gray-200 dark:border-zinc-600 pt-3">
+              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-2">角色音色设置</label>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {agents.map(agent => (
+                  <div key={agent.id} className="flex items-center gap-2">
+                    <img src={agent.avatar} alt="" className="w-6 h-6 rounded-full object-contain bg-white" />
+                    <span className="text-xs text-gray-700 dark:text-gray-300 flex-shrink-0 w-20 truncate">{agent.name}</span>
+                    <select
+                      className="flex-1 text-xs p-1 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                      value={agent.voiceId || ''}
+                      onChange={(e) => {
+                        setAgents(prev => prev.map(a =>
+                          a.id === agent.id
+                            ? { ...a, voiceId: e.target.value, voiceEngine: ttsSettings.engine }
+                            : a
+                        ));
+                      }}
+                    >
+                      <option value="">自动分配</option>
+                      {availableVoices.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface SidebarProps {
   agents: Agent[];
@@ -1253,7 +1429,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <span className="font-mono text-gray-500 dark:text-gray-400">{(settings.timeoutDuration || 30000) / 1000}s</span>
                         </div>
                         <input
-                            type="range" min="5000" max="60000" step="5000"
+                            type="range" min="5000" max="300000" step="5000"
                             className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
                             value={settings.timeoutDuration || 30000}
                             onChange={(e) => setSettings({...settings, timeoutDuration: parseInt(e.target.value)})}
@@ -1321,6 +1497,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                     切换深色/浅色主题，深色模式更适合夜间使用。
                 </p>
              </div>
+
+             {/* TTS (TEXT-TO-SPEECH) */}
+             <TTSSettingsPanel settings={settings} setSettings={setSettings} agents={agents} setAgents={setAgents} />
 
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Clock size={16}/> 思考呼吸时间</h3>

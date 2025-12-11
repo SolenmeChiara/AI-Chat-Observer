@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3 } from 'lucide-react';
-import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig } from './types';
+import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
+import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSEngine } from './types';
 import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
 import Sidebar from './components/Sidebar';
 import RightSidebar from './components/RightSidebar';
@@ -16,6 +16,7 @@ import { parseFile } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings } from './services/db';
 import { describeImage } from './services/visionProxyService';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
+import { speak, stopTTS, getBrowserVoices, getAutoAssignVoices, OPENAI_VOICES, setPlaybackStateCallback } from './services/ttsService';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -95,6 +96,13 @@ const App: React.FC = () => {
   // Scroll state - track if user is near bottom
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+
+  // TTS State
+  const [isTTSPlaying, setIsTTSPlaying] = useState(false);
+  const [currentPlayingMessageId, setCurrentPlayingMessageId] = useState<string | null>(null);
+  const [ttsAutoPlayMode, setTTSAutoPlayMode] = useState(false); // Continuous auto-play mode
+  const ttsQueueRef = useRef<Message[]>([]); // Queue for continuous playback
+  const lastReadMessageIdRef = useRef<string | null>(null); // Track last read message for auto-play
 
   // --- PERSISTENCE (IndexedDB) ---
   
@@ -352,7 +360,134 @@ const App: React.FC = () => {
     updateActiveSession(s => ({ ...s, messages: [], yieldedAgentIds: [], adminNotes: [] }));
     setTotalCost(0);
     handleStopAll();
+    handleStopTTS(); // Also stop TTS
   };
+
+  // --- TTS FUNCTIONS ---
+
+  // Initialize TTS callback
+  useEffect(() => {
+    setPlaybackStateCallback((playing) => {
+      setIsTTSPlaying(playing);
+      if (!playing) {
+        // Playback ended, process queue if in auto-play mode
+        processNextInTTSQueue();
+      }
+    });
+  }, []);
+
+  // Get voice for an agent (or user)
+  const getVoiceForSender = (senderId: string): { voiceId: string; engine: TTSEngine } => {
+    const ttsSettings = settings.ttsSettings;
+
+    if (senderId === USER_ID) {
+      // Default user voice - first voice of current engine
+      if (ttsSettings.engine === 'openai') {
+        return { voiceId: 'alloy', engine: 'openai' };
+      }
+      return { voiceId: 'browser-0-default', engine: 'browser' };
+    }
+
+    const agent = agents.find(a => a.id === senderId);
+    if (agent?.voiceId && agent?.voiceEngine) {
+      return { voiceId: agent.voiceId, engine: agent.voiceEngine };
+    }
+
+    // Auto-assign based on agent index
+    const agentIndex = agents.findIndex(a => a.id === senderId);
+    if (ttsSettings.engine === 'openai') {
+      const voices = OPENAI_VOICES;
+      return { voiceId: voices[agentIndex % voices.length].id, engine: 'openai' };
+    }
+
+    // Browser voice - will be assigned dynamically
+    return { voiceId: `browser-${agentIndex % 10}-auto`, engine: 'browser' };
+  };
+
+  // Play TTS for a single message
+  const handlePlayTTS = async (message: Message) => {
+    const ttsSettings = settings.ttsSettings;
+    if (!ttsSettings.enabled) return;
+
+    // Stop any current playback
+    stopTTS();
+    setCurrentPlayingMessageId(message.id);
+
+    const { voiceId, engine } = getVoiceForSender(message.senderId);
+
+    try {
+      await speak(message.text, voiceId, engine, ttsSettings);
+    } catch (error) {
+      console.error('TTS playback error:', error);
+    }
+
+    setCurrentPlayingMessageId(null);
+  };
+
+  // Stop TTS playback
+  const handleStopTTS = () => {
+    stopTTS();
+    setCurrentPlayingMessageId(null);
+    setTTSAutoPlayMode(false);
+    ttsQueueRef.current = [];
+  };
+
+  // Process next message in TTS queue
+  const processNextInTTSQueue = async () => {
+    if (!ttsAutoPlayMode || ttsQueueRef.current.length === 0) return;
+
+    const nextMessage = ttsQueueRef.current.shift();
+    if (nextMessage) {
+      await handlePlayTTS(nextMessage);
+      lastReadMessageIdRef.current = nextMessage.id;
+    }
+  };
+
+  // Start continuous playback from a specific message
+  const handleStartTTSFromMessage = (startMessageId: string) => {
+    const ttsSettings = settings.ttsSettings;
+    if (!ttsSettings.enabled) return;
+
+    const startIndex = messages.findIndex(m => m.id === startMessageId);
+    if (startIndex === -1) return;
+
+    // Queue all messages from this point
+    ttsQueueRef.current = messages.slice(startIndex).filter(m => !m.isSystem && !m.isSearchResult);
+    setTTSAutoPlayMode(true);
+    lastReadMessageIdRef.current = null;
+
+    // Start playing
+    processNextInTTSQueue();
+  };
+
+  // Toggle auto-play for new messages
+  const handleToggleTTSAutoPlay = () => {
+    if (ttsAutoPlayMode) {
+      handleStopTTS();
+    } else {
+      setTTSAutoPlayMode(true);
+      lastReadMessageIdRef.current = messages.length > 0 ? messages[messages.length - 1].id : null;
+    }
+  };
+
+  // Auto-play new messages when they arrive (if auto-play mode is on)
+  useEffect(() => {
+    if (!ttsAutoPlayMode || !settings.ttsSettings.enabled) return;
+
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.isSystem || lastMessage.isSearchResult || lastMessage.isStreaming) return;
+    if (lastMessage.id === lastReadMessageIdRef.current) return;
+
+    // Queue the new message
+    if (!ttsQueueRef.current.find(m => m.id === lastMessage.id)) {
+      ttsQueueRef.current.push(lastMessage);
+    }
+
+    // If not currently playing, start
+    if (!isTTSPlaying) {
+      processNextInTTSQueue();
+    }
+  }, [messages, ttsAutoPlayMode, settings.ttsSettings.enabled, isTTSPlaying]);
 
   const calculateCost = (tokens: { input: number, output: number }, provider: ApiProvider, modelId: string): number => {
     const modelConfig = provider.models.find(m => m.id === modelId);
@@ -1727,6 +1862,25 @@ const App: React.FC = () => {
             <div className="hidden sm:block h-4 w-px bg-gray-200 dark:bg-zinc-700 mx-1"></div>
 
             <button
+               onClick={() => setSettings(s => ({ ...s, expandAllReasoning: !s.expandAllReasoning }))}
+               className={`p-2.5 rounded-lg transition-colors ${settings.expandAllReasoning ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
+               title={settings.expandAllReasoning ? "折叠所有思考链" : "展开所有思考链"}
+            >
+              <BrainCircuit size={20} />
+            </button>
+
+            {/* TTS Auto-Play Toggle */}
+            {settings.ttsSettings?.enabled && (
+              <button
+                onClick={handleToggleTTSAutoPlay}
+                className={`p-2.5 rounded-lg transition-colors ${ttsAutoPlayMode ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
+                title={ttsAutoPlayMode ? "停止自动朗读" : "自动朗读新消息"}
+              >
+                {ttsAutoPlayMode ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              </button>
+            )}
+
+            <button
                onClick={() => setIsStatsOpen(true)}
                className="p-2.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                title="会话统计"
@@ -1801,6 +1955,9 @@ const App: React.FC = () => {
                   onReply={(targetMsg) => setReplyToId(targetMsg.id)}
                   onMention={(name) => setInputText(prev => `${prev}@${name} `)}
                   isStreaming={processingAgents.has(msg.senderId)}
+                  onPlayTTS={settings.ttsSettings?.enabled ? handlePlayTTS : undefined}
+                  onStopTTS={handleStopTTS}
+                  currentPlayingMessageId={currentPlayingMessageId || undefined}
                />
              ))}
              

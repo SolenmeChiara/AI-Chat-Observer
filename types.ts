@@ -72,6 +72,8 @@ export interface Agent {
   isActive?: boolean; // If false, agent won't participate in chat until manually activated
   searchConfig?: SearchConfig; // 搜索工具配置
   enableGoogleSearch?: boolean; // Gemini 原生 Google 搜索 (仅 Gemini 模型可用)
+  voiceId?: string;   // TTS voice ID for this agent
+  voiceEngine?: TTSEngine; // TTS engine preference for this agent
 }
 
 export interface Attachment {
@@ -167,6 +169,10 @@ export interface GlobalSettings {
 
   // Appearance
   darkMode: boolean;
+  expandAllReasoning: boolean; // If true, all reasoning chains are expanded by default
+
+  // TTS (Text-to-Speech)
+  ttsSettings: TTSSettings;
 }
 
 export interface StreamChunk {
@@ -175,4 +181,30 @@ export interface StreamChunk {
   reasoningSignature?: string; // Anthropic thinking signature
   usage?: { input: number; output: number };
   isComplete: boolean;
+}
+
+// TTS Configuration
+export type TTSEngine = 'browser' | 'openai';
+
+export interface TTSVoice {
+  id: string;        // Voice identifier (e.g., 'en-US-Standard-A' or 'alloy')
+  name: string;      // Display name
+  lang?: string;     // Language code for browser voices
+  engine: TTSEngine; // Which engine this voice belongs to
+}
+
+export interface TTSSettings {
+  enabled: boolean;
+  engine: TTSEngine;
+  openaiApiKey?: string;       // Optional OpenAI API key for high-quality TTS
+  openaiBaseUrl?: string;      // Optional custom base URL
+  rate: number;                // Speech rate (0.5 - 2.0)
+  volume: number;              // Volume (0 - 1)
+  autoPlayNewMessages: boolean; // Auto-read new AI messages as they arrive
+}
+
+export interface AgentVoiceConfig {
+  agentId: string;
+  voiceId: string;   // Selected voice ID
+  engine: TTSEngine; // Which engine to use for this agent
 }

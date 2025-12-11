@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
-import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square } from 'lucide-react';
 import { marked } from 'marked';
 
 interface ChatBubbleProps {
@@ -14,11 +14,17 @@ interface ChatBubbleProps {
   onReply?: (message: Message) => void;
   onMention?: (name: string) => void;
   isStreaming?: boolean; // If true, skip markdown rendering for performance
+  onPlayTTS?: (message: Message) => void; // Callback to play TTS for this message
+  onStopTTS?: () => void; // Callback to stop TTS
+  isTTSPlaying?: boolean; // Is TTS currently playing this message
+  currentPlayingMessageId?: string; // ID of the message currently being played
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, isStreaming }) => {
+const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+
+  const isThisMessagePlaying = currentPlayingMessageId === message.id;
 
   // 1. System Message Style
   if (message.isSystem) {
@@ -182,10 +188,10 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
 
         {/* REASONING CHAIN (Collapsible) */}
         {message.reasoningText && !isUser && (
-          <details className="mb-2 max-w-full">
+          <details className="mb-2 max-w-full" open={userProfile?.expandAllReasoning}>
             <summary className="list-none cursor-pointer flex items-center gap-1.5 text-[10px] text-gray-400 font-medium bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors w-fit">
                <BrainCircuit size={12} />
-               思考过程 (已折叠)
+               思考过程
             </summary>
             <div className="mt-2 p-3 bg-gray-50 dark:bg-zinc-700 rounded-lg border-l-2 border-gray-300 dark:border-zinc-500 text-xs text-gray-500 dark:text-gray-400 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-w-full" style={{ wordBreak: 'break-word' }}>
               {message.reasoningText}
@@ -246,7 +252,17 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
            </span>
 
            {/* Actions */}
-           <div className={`flex gap-1 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+           <div className={`flex gap-1 transition-opacity duration-200 ${isHovered || isThisMessagePlaying ? 'opacity-100' : 'opacity-0'}`}>
+              {/* TTS Play/Stop Button */}
+              {onPlayTTS && (
+                <button
+                  onClick={() => isThisMessagePlaying ? onStopTTS?.() : onPlayTTS(message)}
+                  className={`p-0.5 rounded transition-colors ${isThisMessagePlaying ? 'text-green-500 hover:text-red-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                  title={isThisMessagePlaying ? "停止朗读" : "朗读此消息"}
+                >
+                  {isThisMessagePlaying ? <Square size={12} /> : <Volume2 size={12} />}
+                </button>
+              )}
               <button onClick={() => onReply && onReply(message)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded" title="引用回复">
                  <Reply size={12} />
               </button>
