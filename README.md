@@ -13,6 +13,14 @@
 
 <br/>
 
+> **免责声明 / Disclaimer**
+> - 本项目仅供学习交流，AI 生成内容不代表开发者观点
+> - 用户需自行承担使用风险，请勿用于违法用途
+> - This project is for learning purposes only. AI-generated content does not represent the developer's views
+> - Users bear their own risks. Do not use for illegal purposes
+
+<br/>
+
 [English](#english) | [中文说明](#chinese)
 
 <a name="english"></a>
