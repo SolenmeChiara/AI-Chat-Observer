@@ -121,6 +121,12 @@ export interface MuteInfo {
   mutedBy: string;   // Name of who muted this agent
 }
 
+// 娱乐功能配置（骰子、塔罗等）
+export interface EntertainmentConfig {
+  enableDice: boolean;    // 启用骰子 {{ROLL: XdY+Z}}
+  enableTarot: boolean;   // 启用塔罗牌 {{TAROT: N}}
+}
+
 // 群组：包含多个对话，共享成员和场景
 export interface ChatGroup {
   id: string;
@@ -129,6 +135,7 @@ export interface ChatGroup {
   adminIds?: string[];        // 该群的管理员列表
   scenario?: string;          // 共享的场景设定
   memoryConfig: MemoryConfig; // 共享的记忆配置
+  entertainmentConfig?: EntertainmentConfig; // 娱乐功能配置
   createdAt: number;
 }
 

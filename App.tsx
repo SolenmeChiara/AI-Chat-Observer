@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
-import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile } from './types';
+import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile, EntertainmentConfig } from './types';
 import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
 import Sidebar from './components/Sidebar';
 import RightSidebar from './components/RightSidebar';
@@ -17,6 +17,7 @@ import { initDB, loadAllData, saveCollection, saveSettings } from './services/db
 import { describeImage } from './services/visionProxyService';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
+import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand } from './services/entertainmentService';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -312,6 +313,13 @@ const App: React.FC = () => {
 
   const handleUpdateGroupMemoryConfig = (id: string, updates: Partial<MemoryConfig>) => {
     setGroups(prev => prev.map(g => g.id === id ? { ...g, memoryConfig: { ...g.memoryConfig, ...updates } } : g));
+  };
+
+  const handleUpdateGroupEntertainmentConfig = (id: string, updates: Partial<EntertainmentConfig>) => {
+    setGroups(prev => prev.map(g => g.id === id ? {
+      ...g,
+      entertainmentConfig: { ...(g.entertainmentConfig || { enableDice: false, enableTarot: false }), ...updates }
+    } : g));
   };
 
   // --- SESSION MANAGEMENT ---
@@ -1325,6 +1333,33 @@ const App: React.FC = () => {
             // Don't re-trigger AI on search failure
           }
         }
+
+        // EXECUTE ENTERTAINMENT COMMANDS (Dice, Tarot)
+        const entertainmentConfig = activeGroup?.entertainmentConfig;
+        if (entertainmentConfig) {
+          const entertainmentCmds = parseEntertainmentCommands(
+            finalText,
+            entertainmentConfig.enableDice || false,
+            entertainmentConfig.enableTarot || false
+          );
+
+          if (entertainmentCmds.length > 0) {
+            const resultText = formatEntertainmentMessage(entertainmentCmds);
+            const entertainmentMsg: Message = {
+              id: `entertainment-${Date.now()}`,
+              senderId: 'SYSTEM',
+              text: resultText,
+              timestamp: Date.now(),
+              isSystem: true
+            };
+
+            updateThisSession(s => ({
+              ...s,
+              messages: [...s.messages, entertainmentMsg],
+              lastUpdated: Date.now()
+            }));
+          }
+        }
       }
 
     } catch (error: any) {
@@ -1845,6 +1880,7 @@ const App: React.FC = () => {
         onDeleteGroup={handleDeleteGroup} onRenameGroup={handleRenameGroup}
         onUpdateGroupScenario={handleUpdateGroupScenario}
         onUpdateGroupMemoryConfig={handleUpdateGroupMemoryConfig}
+        onUpdateGroupEntertainmentConfig={handleUpdateGroupEntertainmentConfig}
         sessions={sessions} activeSessionId={activeSessionId}
         onCreateSession={handleCreateSession} onSwitchSession={setActiveSessionId}
         onDeleteSession={handleDeleteSession} onRenameSession={handleRenameSession}

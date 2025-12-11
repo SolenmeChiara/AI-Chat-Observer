@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider, UserProfile } from '../types';
-import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic } from 'lucide-react';
+import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS } from '../services/ttsService';
@@ -325,6 +325,7 @@ interface SidebarProps {
   onRenameGroup: (id: string, name: string) => void;
   onUpdateGroupScenario: (id: string, scenario: string) => void;
   onUpdateGroupMemoryConfig: (groupId: string, updates: any) => void;
+  onUpdateGroupEntertainmentConfig: (groupId: string, updates: any) => void;
   // 会话相关
   sessions: ChatSession[];
   activeSessionId: string;
@@ -344,7 +345,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   settings, setSettings,
   ttsProviders, setTTSProviders,
   groups, activeGroupId,
-  onCreateGroup, onSwitchGroup, onDeleteGroup, onRenameGroup, onUpdateGroupScenario, onUpdateGroupMemoryConfig,
+  onCreateGroup, onSwitchGroup, onDeleteGroup, onRenameGroup, onUpdateGroupScenario, onUpdateGroupMemoryConfig, onUpdateGroupEntertainmentConfig,
   sessions, activeSessionId,
   onCreateSession, onSwitchSession, onDeleteSession, onRenameSession,
   onUpdateSummary,
@@ -931,6 +932,45 @@ const Sidebar: React.FC<SidebarProps> = ({
                          )}
                       </div>
                     )}
+                 </div>
+
+                 {/* 娱乐功能配置 */}
+                 <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
+                    <div className="flex justify-between items-center mb-3">
+                        <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
+                          <Sparkles size={12}/> 娱乐功能
+                        </label>
+                    </div>
+                    <div className="space-y-2">
+                       {/* 骰子开关 */}
+                       <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                             <Dices size={14} className="text-gray-400" />
+                             <span className="text-xs text-gray-600 dark:text-gray-300">骰子</span>
+                             <span className="text-[10px] text-gray-400 font-mono">{'{{ROLL: 2d6+3}}'}</span>
+                          </div>
+                          <input
+                             type="checkbox"
+                             className="accent-zinc-900"
+                             checked={activeGroup.entertainmentConfig?.enableDice || false}
+                             onChange={(e) => onUpdateGroupEntertainmentConfig(activeGroup.id, { enableDice: e.target.checked })}
+                          />
+                       </div>
+                       {/* 塔罗开关 */}
+                       <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                             <Sparkles size={14} className="text-gray-400" />
+                             <span className="text-xs text-gray-600 dark:text-gray-300">塔罗牌</span>
+                             <span className="text-[10px] text-gray-400 font-mono">{'{{TAROT: 3}}'}</span>
+                          </div>
+                          <input
+                             type="checkbox"
+                             className="accent-zinc-900"
+                             checked={activeGroup.entertainmentConfig?.enableTarot || false}
+                             onChange={(e) => onUpdateGroupEntertainmentConfig(activeGroup.id, { enableTarot: e.target.checked })}
+                          />
+                       </div>
+                    </div>
                  </div>
 
                  {/* 当前对话的摘要 (独立于群组) */}

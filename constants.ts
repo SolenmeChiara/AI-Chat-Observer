@@ -1,5 +1,5 @@
 
-import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, MemoryConfig, UserProfile } from './types';
+import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, MemoryConfig, UserProfile, EntertainmentConfig } from './types';
 
 export const USER_ID = 'user';
 
@@ -200,6 +200,12 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   summaryProviderId: ''
 };
 
+// 默认娱乐功能配置
+export const DEFAULT_ENTERTAINMENT_CONFIG: EntertainmentConfig = {
+  enableDice: false,
+  enableTarot: false
+};
+
 // 初始群组
 export const INITIAL_GROUPS: ChatGroup[] = [
   {
@@ -208,6 +214,7 @@ export const INITIAL_GROUPS: ChatGroup[] = [
     memberIds: ['agent-1', 'agent-2'],
     scenario: '这是一个轻松的聊天室。大家可以自由讨论科技、生活或任何感兴趣的话题。',
     memoryConfig: DEFAULT_MEMORY_CONFIG,
+    entertainmentConfig: DEFAULT_ENTERTAINMENT_CONFIG,
     createdAt: Date.now()
   }
 ];
