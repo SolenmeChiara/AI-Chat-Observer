@@ -362,6 +362,9 @@ const playElevenLabsTTS = async (
 
   if (!provider.apiKey) throw new Error('ElevenLabs API key not configured');
 
+  // ElevenLabs speed must be between 0.7 and 1.2
+  const speed = Math.max(0.7, Math.min(1.2, settings.rate));
+
   const response = await fetch(`${provider.baseUrl}/text-to-speech/${voiceId}`, {
     method: 'POST',
     headers: {
@@ -374,7 +377,7 @@ const playElevenLabsTTS = async (
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
-        speed: settings.rate,
+        speed: speed,
       },
     }),
   });

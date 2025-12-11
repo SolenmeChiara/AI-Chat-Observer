@@ -411,16 +411,20 @@ const App: React.FC = () => {
 
     const agent = agents.find(a => a.id === senderId);
 
-    // If agent has specific voice and provider configured, verify voice exists
-    if (agent?.voiceId && agent?.voiceProviderId) {
-      const agentProvider = ttsProviders.find(p => p.id === agent.voiceProviderId) || activeProvider;
+    // If agent has specific voice configured, verify it exists in the current provider
+    if (agent?.voiceId) {
+      // Use agent's provider if specified, otherwise use active provider
+      const agentProvider = agent.voiceProviderId
+        ? (ttsProviders.find(p => p.id === agent.voiceProviderId) || activeProvider)
+        : activeProvider;
+
       // Validate that the voiceId exists in the provider's voices
       const voiceExists = agentProvider.voices.some(v => v.id === agent.voiceId);
-      if (voiceExists) {
+      if (voiceExists && agentProvider.apiKey) {
         return { voiceId: agent.voiceId, provider: agentProvider };
       }
-      // Voice not found - fall through to auto-assign
-      console.log(`[TTS] Voice "${agent.voiceId}" not found in provider, auto-assigning`);
+      // Voice not found or no API key - fall through to auto-assign
+      console.log(`[TTS] Voice "${agent.voiceId}" not valid (exists: ${voiceExists}, hasKey: ${!!agentProvider.apiKey}), auto-assigning`);
     }
 
     // Auto-assign based on agent index
