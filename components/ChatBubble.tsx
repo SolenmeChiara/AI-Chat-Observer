@@ -91,12 +91,16 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
     );
   }
 
-  const isUser = message.senderId === USER_ID;
-  const avatarSrc = isUser 
-     ? (userProfile?.userAvatar || 'https://api.dicebear.com/9.x/micah/svg?seed=user') 
+  // Check if sender is any of the user profiles (multi-identity support)
+  const userProfiles = userProfile?.userProfiles || [];
+  const matchedProfile = userProfiles.find(p => p.id === message.senderId);
+  const isUser = message.senderId === USER_ID || !!matchedProfile;
+
+  const avatarSrc = isUser
+     ? (matchedProfile?.avatar || userProfile?.userAvatar || 'https://api.dicebear.com/9.x/micah/svg?seed=user')
      : (sender?.avatar || 'https://picsum.photos/200');
-  const displayName = isUser 
-     ? (userProfile?.userName || 'User') 
+  const displayName = isUser
+     ? (matchedProfile?.name || userProfile?.userName || 'User')
      : (sender?.name || 'Unknown');
   
   // Configure marked for security and style

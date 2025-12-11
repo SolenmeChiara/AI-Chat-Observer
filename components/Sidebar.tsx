@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider } from '../types';
+import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider, UserProfile } from '../types';
 import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
@@ -359,6 +359,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Agent card collapse state
   const [collapsedAgents, setCollapsedAgents] = useState<Set<string>>(new Set());
 
+  // User profile editing state
+  const [expandedProfileId, setExpandedProfileId] = useState<string | null>(null);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+
   // Draft state for editing agents (changes don't apply until saved)
   const [draftAgents, setDraftAgents] = useState<Record<string, Agent>>({});
 
@@ -594,18 +598,73 @@ const Sidebar: React.FC<SidebarProps> = ({
     } catch (e: any) { alert(`获取失败: ${e.message}`); } finally { setIsFetching(null); }
   };
 
-  // User Avatar Upload
+  // User Avatar Upload (for profile)
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (ev) => {
         if (ev.target?.result) {
-          setSettings({ ...settings, userAvatar: ev.target.result as string });
+          const avatarData = ev.target.result as string;
+          // If editing a specific profile, update that profile
+          if (editingProfileId) {
+            updateUserProfile(editingProfileId, { avatar: avatarData });
+            setEditingProfileId(null);
+          } else {
+            // Legacy: update global settings
+            setSettings({ ...settings, userAvatar: avatarData });
+          }
         }
       };
       reader.readAsDataURL(file);
     }
+    if (avatarInputRef.current) avatarInputRef.current.value = '';
+  };
+
+  // User Profile Management
+  const updateUserProfile = (profileId: string, updates: Partial<UserProfile>) => {
+    const profiles = settings.userProfiles || [];
+    const updatedProfiles = profiles.map(p =>
+      p.id === profileId ? { ...p, ...updates } : p
+    );
+    // Also update legacy fields if this is the active profile
+    const updatedProfile = updatedProfiles.find(p => p.id === profileId);
+    const newSettings: GlobalSettings = { ...settings, userProfiles: updatedProfiles };
+    if (settings.activeProfileId === profileId && updatedProfile) {
+      newSettings.userName = updatedProfile.name;
+      newSettings.userAvatar = updatedProfile.avatar;
+      newSettings.userPersona = updatedProfile.persona;
+    }
+    setSettings(newSettings);
+  };
+
+  const addNewUserProfile = () => {
+    const newId = `user-${Date.now()}`;
+    const newProfile: UserProfile = {
+      id: newId,
+      name: '新身份',
+      avatar: settings.userAvatar || '',
+      persona: ''
+    };
+    const profiles = settings.userProfiles || [];
+    setSettings({ ...settings, userProfiles: [...profiles, newProfile] });
+    setExpandedProfileId(newId);
+  };
+
+  const deleteUserProfile = (profileId: string) => {
+    const profiles = settings.userProfiles || [];
+    if (profiles.length <= 1) return; // Keep at least one profile
+    const newProfiles = profiles.filter(p => p.id !== profileId);
+    const newSettings: GlobalSettings = { ...settings, userProfiles: newProfiles };
+    // If deleting active profile, switch to first remaining
+    if (settings.activeProfileId === profileId && newProfiles.length > 0) {
+      newSettings.activeProfileId = newProfiles[0].id;
+      newSettings.userName = newProfiles[0].name;
+      newSettings.userAvatar = newProfiles[0].avatar;
+      newSettings.userPersona = newProfiles[0].persona;
+    }
+    setSettings(newSettings);
+    if (expandedProfileId === profileId) setExpandedProfileId(null);
   };
 
   // Agent Avatar Upload - updates draft
@@ -1472,64 +1531,123 @@ const Sidebar: React.FC<SidebarProps> = ({
         {activeTab === 'settings' && (
            <div className="space-y-6 p-1">
              
-             {/* USER PROFILE SETTINGS */}
+             {/* USER PROFILES SETTINGS */}
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><User size={16}/> 用户设置 (Human)</h3>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><User size={16}/> 用户档案 (多身份)</h3>
+
+                {/* Hidden file inputs */}
+                <input
+                   type="file"
+                   ref={avatarInputRef}
+                   className="hidden"
+                   accept="image/png, image/jpeg, image/svg+xml, image/webp"
+                   onChange={handleAvatarUpload}
+                />
+                <input
+                   type="file"
+                   ref={agentAvatarInputRef}
+                   className="hidden"
+                   accept="image/png, image/jpeg, image/svg+xml, image/webp"
+                   onChange={handleAgentAvatarUpload}
+                />
+
                 <div className="space-y-3">
-                  <div className="flex gap-3 items-center group">
-                    <div className="relative">
+                  {/* Profile List */}
+                  {(settings.userProfiles || []).map((profile, idx) => (
+                    <div key={profile.id} className="border border-gray-200 dark:border-zinc-600 rounded-lg overflow-hidden">
+                      {/* Profile Header (Collapsible) */}
+                      <div
+                        className={`flex items-center gap-2 p-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-700 ${
+                          settings.activeProfileId === profile.id ? 'bg-zinc-100 dark:bg-zinc-700' : ''
+                        }`}
+                        onClick={() => setExpandedProfileId(expandedProfileId === profile.id ? null : profile.id)}
+                      >
                         <img
-                          src={settings.userAvatar}
-                          className="w-12 h-12 rounded-full bg-gray-100 dark:bg-zinc-700 p-0.5 border border-gray-200 dark:border-zinc-600 cursor-pointer object-cover hover:opacity-80 transition-opacity"
-                          onClick={() => avatarInputRef.current?.click()}
-                          title="点击上传图片"
+                          src={profile.avatar}
+                          className="w-8 h-8 rounded-full object-cover border border-gray-200 dark:border-zinc-600"
                         />
-                        <div className="absolute -bottom-1 -right-1 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-full p-1 cursor-pointer pointer-events-none">
-                            <Upload size={10} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-gray-900 dark:text-white truncate">{profile.name}</div>
+                          <div className="text-[10px] text-gray-400 truncate">{profile.persona?.slice(0, 30) || '无人设'}...</div>
                         </div>
-                    </div>
-                    <input
-                       type="file"
-                       ref={avatarInputRef}
-                       className="hidden"
-                       accept="image/png, image/jpeg, image/svg+xml, image/webp"
-                       onChange={handleAvatarUpload}
-                    />
-                    {/* Agent Avatar Upload Input */}
-                    <input
-                       type="file"
-                       ref={agentAvatarInputRef}
-                       className="hidden"
-                       accept="image/png, image/jpeg, image/svg+xml, image/webp"
-                       onChange={handleAgentAvatarUpload}
-                    />
+                        {settings.activeProfileId === profile.id && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded">当前</span>
+                        )}
+                        {expandedProfileId === profile.id ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+                      </div>
 
-                    <div className="flex-1 space-y-2">
-                       <input
-                         className="w-full text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
-                         placeholder="用户名称"
-                         value={settings.userName}
-                         onChange={(e) => setSettings({...settings, userName: e.target.value})}
-                       />
-                       <input
-                         className="w-full text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-400"
-                         placeholder="头像地址 (支持粘贴 URL 或点击头像上传)"
-                         value={settings.userAvatar.length > 50 ? '已上传自定义图片 (Base64)' : settings.userAvatar}
-                         onChange={(e) => setSettings({...settings, userAvatar: e.target.value})}
-                       />
+                      {/* Profile Editor (Expanded) */}
+                      {expandedProfileId === profile.id && (
+                        <div className="p-3 bg-gray-50 dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-600 space-y-3">
+                          <div className="flex gap-3 items-start">
+                            <div className="relative">
+                              <img
+                                src={profile.avatar}
+                                className="w-12 h-12 rounded-full bg-gray-100 dark:bg-zinc-700 p-0.5 border border-gray-200 dark:border-zinc-600 cursor-pointer object-cover hover:opacity-80 transition-opacity"
+                                onClick={() => {
+                                  setEditingProfileId(profile.id);
+                                  avatarInputRef.current?.click();
+                                }}
+                                title="点击上传图片"
+                              />
+                              <div className="absolute -bottom-1 -right-1 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-full p-1 pointer-events-none">
+                                <Upload size={10} />
+                              </div>
+                            </div>
+                            <div className="flex-1 space-y-2">
+                              <input
+                                className="w-full text-xs p-2 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                placeholder="档案名称"
+                                value={profile.name}
+                                onChange={(e) => updateUserProfile(profile.id, { name: e.target.value })}
+                              />
+                              <input
+                                className="w-full text-xs p-2 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded text-gray-400"
+                                placeholder="头像 URL (或点击头像上传)"
+                                value={profile.avatar.length > 50 ? '已上传图片' : profile.avatar}
+                                onChange={(e) => updateUserProfile(profile.id, { avatar: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-gray-400 font-bold block mb-1">人设 / 自我介绍 (AI可见)</label>
+                            <textarea
+                              className="w-full text-xs bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none"
+                              placeholder="例如：我是一个图灵测试主考官..."
+                              value={profile.persona || ''}
+                              onChange={(e) => updateUserProfile(profile.id, { persona: e.target.value })}
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            {settings.activeProfileId !== profile.id && (
+                              <button
+                                className="flex-1 text-xs py-1.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded hover:opacity-90"
+                                onClick={() => setSettings({ ...settings, activeProfileId: profile.id })}
+                              >
+                                设为当前
+                              </button>
+                            )}
+                            {(settings.userProfiles || []).length > 1 && (
+                              <button
+                                className="px-3 text-xs py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded border border-red-200 dark:border-red-800"
+                                onClick={() => deleteUserProfile(profile.id)}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  ))}
 
-                  {/* USER PERSONA EDIT */}
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-bold block mb-1">我的自我介绍 / 人设 (AI可见)</label>
-                    <textarea
-                        className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-20 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500"
-                        placeholder="例如：我是一个图灵测试主考官，请尽量展现你们的人性。"
-                        value={settings.userPersona || ''}
-                        onChange={(e) => setSettings({...settings, userPersona: e.target.value})}
-                    />
-                  </div>
+                  {/* Add New Profile Button */}
+                  <button
+                    className="w-full py-2 text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-zinc-600 rounded-lg hover:bg-gray-50 dark:hover:bg-zinc-700 flex items-center justify-center gap-1"
+                    onClick={addNewUserProfile}
+                  >
+                    <Plus size={14} /> 添加新档案
+                  </button>
                 </div>
              </div>
 

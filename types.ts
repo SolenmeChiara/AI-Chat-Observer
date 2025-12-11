@@ -149,15 +149,28 @@ export interface ChatSession {
   adminNotes?: string[]; // Temporary notes from Admins
 }
 
+// User Profile for multi-identity support
+export interface UserProfile {
+  id: string;
+  name: string;
+  avatar: string;
+  persona: string;      // User's backstory/bio
+  isDefault?: boolean;  // Mark default profile
+}
+
 export interface GlobalSettings {
   breathingTime: number; // ms to wait after a message before next agent starts
   visibilityMode: 'OPEN' | 'BLIND'; // OPEN: Agents see all; BLIND: Agents see only User + Self
   contextLimit: number; // Max messages to send to history
 
-  // User Persona
+  // User Profiles (multi-identity)
+  userProfiles: UserProfile[];
+  activeProfileId: string | 'narrator'; // 'narrator' = narrator mode (system messages)
+
+  // Legacy fields (kept for migration, will use first profile)
   userName: string;
   userAvatar: string;
-  userPersona: string; // <--- New Field: User's System Prompt / Bio
+  userPersona: string;
 
   // Stability & Concurrency
   enableConcurrency: boolean; // If true, multiple agents can speak at once. If false, they queue/block.

@@ -1,18 +1,31 @@
 
-import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, MemoryConfig } from './types';
+import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, MemoryConfig, UserProfile } from './types';
 
 export const USER_ID = 'user';
 
 // Minimalist Grey "No User" Avatar (SVG Base64)
 const DEFAULT_USER_AVATAR = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23F3F4F6'%3E%3Crect width='24' height='24' rx='12' fill='%23E5E7EB'/%3E%3Cpath fill='%239CA3AF' d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E";
 
+// Default user profile
+export const DEFAULT_USER_PROFILE: UserProfile = {
+  id: 'user-default',
+  name: 'User',
+  avatar: DEFAULT_USER_AVATAR,
+  persona: '一位充满好奇心的人类观察者。',
+  isDefault: true
+};
+
 export const DEFAULT_SETTINGS: GlobalSettings = {
   breathingTime: 2000,
   visibilityMode: 'OPEN',
   contextLimit: 20,
+  // Multi-profile support
+  userProfiles: [DEFAULT_USER_PROFILE],
+  activeProfileId: 'user-default',
+  // Legacy fields (for backward compatibility)
   userName: 'User',
   userAvatar: DEFAULT_USER_AVATAR,
-  userPersona: '一位充满好奇心的人类观察者。', // Default Persona
+  userPersona: '一位充满好奇心的人类观察者。',
   enableConcurrency: false, // Default to sequential (polite)
   timeoutDuration: 30000,   // Default 30s timeout
   compressImages: true,     // Default ON (Anthropic has 5MB limit)
