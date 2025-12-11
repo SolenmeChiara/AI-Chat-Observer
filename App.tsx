@@ -1043,6 +1043,9 @@ const App: React.FC = () => {
       // Pass userName and userPersona from settings (using processedMessages for vision proxy)
       const groupAdminIds = currentGroup?.adminIds || [];
 
+      // Get entertainment config from current group
+      const entertainmentConfig = currentGroup?.entertainmentConfig;
+
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(
           agent, agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
@@ -1053,17 +1056,17 @@ const App: React.FC = () => {
             vertexLocation: provider.vertexLocation
           },
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
-          agent.enableGoogleSearch, groupAdminIds
+          agent.enableGoogleSearch, groupAdminIds, entertainmentConfig
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig
         );
       } else {
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig
         );
       }
 

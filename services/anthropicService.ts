@@ -1,5 +1,5 @@
 
-import { Agent, Message, StreamChunk, AgentRole } from '../types';
+import { Agent, Message, StreamChunk, AgentRole, EntertainmentConfig } from '../types';
 import { USER_ID } from '../constants';
 
 // Detect actual image format from base64 data (magic bytes)
@@ -40,7 +40,8 @@ export async function* streamAnthropicReply(
   userName?: string,
   userPersona?: string,
   hasSearchTool?: boolean,
-  groupAdminIds?: string[]
+  groupAdminIds?: string[],
+  entertainmentConfig?: EntertainmentConfig
 ): AsyncGenerator<StreamChunk> {
   
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -168,6 +169,46 @@ export async function* streamAnthropicReply(
       - Only one search per message
     `;
   }
+
+  // --- 8. ENTERTAINMENT TOOLS (Dice, Tarot) ---
+  let entertainmentProtocol = "";
+  if (entertainmentConfig?.enableDice || entertainmentConfig?.enableTarot) {
+    const tools: string[] = [];
+
+    if (entertainmentConfig.enableDice) {
+      tools.push(`
+      **Dice Roll**
+      Use {{ROLL: expression}} to roll dice. The system will display results automatically.
+      Format: XdY+Z (X dice with Y sides, plus/minus Z modifier)
+      Examples:
+      - {{ROLL: d20}} - Roll a 20-sided die
+      - {{ROLL: 2d6+3}} - Roll two 6-sided dice, add 3 to result
+      - {{ROLL: d100}} - Roll a percentile die
+
+      Use cases: TRPG sessions, skill checks, random decisions`);
+    }
+
+    if (entertainmentConfig.enableTarot) {
+      tools.push(`
+      **Tarot Cards**
+      Use {{TAROT: N}} to draw N tarot cards. System shows upright/reversed positions.
+      Examples:
+      - {{TAROT: 1}} - Draw one card
+      - {{TAROT: 3}} - Draw three cards (Past/Present/Future spread)
+
+      Use cases: Divination, plot progression, character fate decisions`);
+    }
+
+    entertainmentProtocol = `
+    [ENTERTAINMENT TOOLS]
+    This chat has the following entertainment features enabled. Use inside {{RESPONSE:}}:
+    ${tools.join('\n')}
+
+    Usage examples:
+    {{RESPONSE: Let me roll the dice {{ROLL: d20}}}}
+    {{RESPONSE: Drawing a tarot card for you {{TAROT: 1}}}}
+    `;
+  }
   // -------------------------------
 
   // 6. System Prompt Injection
@@ -270,6 +311,8 @@ export async function* streamAnthropicReply(
     ${adminProtocol}
 
     ${searchToolProtocol}
+
+    ${entertainmentProtocol}
 
     Directives:
     - Think freely. Change topics if you wish.
