@@ -17,7 +17,7 @@ import { initDB, loadAllData, saveCollection, saveSettings } from './services/db
 import { describeImage } from './services/visionProxyService';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
-import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand } from './services/entertainmentService';
+import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -1553,6 +1553,128 @@ const App: React.FC = () => {
         yieldedAtCount: undefined
       }));
 
+      setInputText('');
+      setShowMentionPopup(false);
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+      }
+      return;
+    }
+
+    // 检测 /roll 命令 (用户投骰子)
+    const rollMatch = trimmedText.match(/^\/roll\s+(.+)$/i);
+    if (rollMatch) {
+      const expression = rollMatch[1].trim();
+      const entertainmentConfig = activeGroup?.entertainmentConfig;
+
+      if (!entertainmentConfig?.enableDice) {
+        const errorMsg: Message = {
+          id: Date.now().toString(),
+          senderId: 'SYSTEM',
+          text: `[${formatErrorTimestamp()}] 骰子功能未启用。请在当前群组配置中开启骰子功能。`,
+          timestamp: Date.now(),
+          isSystem: true
+        };
+        updateActiveSession(s => ({
+          ...s,
+          messages: [...s.messages, errorMsg],
+          lastUpdated: Date.now()
+        }));
+        setInputText('');
+        return;
+      }
+
+      const result = rollDice(expression);
+      if (!result) {
+        const errorMsg: Message = {
+          id: Date.now().toString(),
+          senderId: 'SYSTEM',
+          text: `[${formatErrorTimestamp()}] 无效的骰子表达式: "${expression}"。格式示例: d20, 2d6, 3d8+5`,
+          timestamp: Date.now(),
+          isSystem: true
+        };
+        updateActiveSession(s => ({
+          ...s,
+          messages: [...s.messages, errorMsg],
+          lastUpdated: Date.now()
+        }));
+        setInputText('');
+        return;
+      }
+
+      const rollMsg: Message = {
+        id: Date.now().toString(),
+        senderId: 'SYSTEM',
+        text: `🎲 ${result.breakdown}`,
+        timestamp: Date.now(),
+        isSystem: true
+      };
+      updateActiveSession(s => ({
+        ...s,
+        messages: [...s.messages, rollMsg],
+        lastUpdated: Date.now()
+      }));
+      setInputText('');
+      setShowMentionPopup(false);
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+      }
+      return;
+    }
+
+    // 检测 /tarot 命令 (用户抽塔罗牌)
+    const tarotMatch = trimmedText.match(/^\/tarot(?:\s+(\d+))?$/i);
+    if (tarotMatch) {
+      const count = tarotMatch[1] ? parseInt(tarotMatch[1]) : 1;
+      const entertainmentConfig = activeGroup?.entertainmentConfig;
+
+      if (!entertainmentConfig?.enableTarot) {
+        const errorMsg: Message = {
+          id: Date.now().toString(),
+          senderId: 'SYSTEM',
+          text: `[${formatErrorTimestamp()}] 塔罗牌功能未启用。请在当前群组配置中开启塔罗牌功能。`,
+          timestamp: Date.now(),
+          isSystem: true
+        };
+        updateActiveSession(s => ({
+          ...s,
+          messages: [...s.messages, errorMsg],
+          lastUpdated: Date.now()
+        }));
+        setInputText('');
+        return;
+      }
+
+      const result = drawTarot(count);
+      if (!result) {
+        const errorMsg: Message = {
+          id: Date.now().toString(),
+          senderId: 'SYSTEM',
+          text: `[${formatErrorTimestamp()}] 无效的抽牌数量: ${count}。请输入 1-10 之间的数字。`,
+          timestamp: Date.now(),
+          isSystem: true
+        };
+        updateActiveSession(s => ({
+          ...s,
+          messages: [...s.messages, errorMsg],
+          lastUpdated: Date.now()
+        }));
+        setInputText('');
+        return;
+      }
+
+      const tarotMsg: Message = {
+        id: Date.now().toString(),
+        senderId: 'SYSTEM',
+        text: `🃏 ${result.summary}`,
+        timestamp: Date.now(),
+        isSystem: true
+      };
+      updateActiveSession(s => ({
+        ...s,
+        messages: [...s.messages, tarotMsg],
+        lastUpdated: Date.now()
+      }));
       setInputText('');
       setShowMentionPopup(false);
       if (inputRef.current) {
