@@ -1561,128 +1561,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // 检测 /roll 命令 (用户投骰子)
-    const rollMatch = trimmedText.match(/^\/roll\s+(.+)$/i);
-    if (rollMatch) {
-      const expression = rollMatch[1].trim();
-      const entertainmentConfig = activeGroup?.entertainmentConfig;
-
-      if (!entertainmentConfig?.enableDice) {
-        const errorMsg: Message = {
-          id: Date.now().toString(),
-          senderId: 'SYSTEM',
-          text: `[${formatErrorTimestamp()}] 骰子功能未启用。请在当前群组配置中开启骰子功能。`,
-          timestamp: Date.now(),
-          isSystem: true
-        };
-        updateActiveSession(s => ({
-          ...s,
-          messages: [...s.messages, errorMsg],
-          lastUpdated: Date.now()
-        }));
-        setInputText('');
-        return;
-      }
-
-      const result = rollDice(expression);
-      if (!result) {
-        const errorMsg: Message = {
-          id: Date.now().toString(),
-          senderId: 'SYSTEM',
-          text: `[${formatErrorTimestamp()}] 无效的骰子表达式: "${expression}"。格式示例: d20, 2d6, 3d8+5`,
-          timestamp: Date.now(),
-          isSystem: true
-        };
-        updateActiveSession(s => ({
-          ...s,
-          messages: [...s.messages, errorMsg],
-          lastUpdated: Date.now()
-        }));
-        setInputText('');
-        return;
-      }
-
-      const rollMsg: Message = {
-        id: Date.now().toString(),
-        senderId: 'SYSTEM',
-        text: `🎲 ${result.breakdown}`,
-        timestamp: Date.now(),
-        isSystem: true
-      };
-      updateActiveSession(s => ({
-        ...s,
-        messages: [...s.messages, rollMsg],
-        lastUpdated: Date.now()
-      }));
-      setInputText('');
-      setShowMentionPopup(false);
-      if (inputRef.current) {
-        inputRef.current.style.height = 'auto';
-      }
-      return;
-    }
-
-    // 检测 /tarot 命令 (用户抽塔罗牌)
-    const tarotMatch = trimmedText.match(/^\/tarot(?:\s+(\d+))?$/i);
-    if (tarotMatch) {
-      const count = tarotMatch[1] ? parseInt(tarotMatch[1]) : 1;
-      const entertainmentConfig = activeGroup?.entertainmentConfig;
-
-      if (!entertainmentConfig?.enableTarot) {
-        const errorMsg: Message = {
-          id: Date.now().toString(),
-          senderId: 'SYSTEM',
-          text: `[${formatErrorTimestamp()}] 塔罗牌功能未启用。请在当前群组配置中开启塔罗牌功能。`,
-          timestamp: Date.now(),
-          isSystem: true
-        };
-        updateActiveSession(s => ({
-          ...s,
-          messages: [...s.messages, errorMsg],
-          lastUpdated: Date.now()
-        }));
-        setInputText('');
-        return;
-      }
-
-      const result = drawTarot(count);
-      if (!result) {
-        const errorMsg: Message = {
-          id: Date.now().toString(),
-          senderId: 'SYSTEM',
-          text: `[${formatErrorTimestamp()}] 无效的抽牌数量: ${count}。请输入 1-10 之间的数字。`,
-          timestamp: Date.now(),
-          isSystem: true
-        };
-        updateActiveSession(s => ({
-          ...s,
-          messages: [...s.messages, errorMsg],
-          lastUpdated: Date.now()
-        }));
-        setInputText('');
-        return;
-      }
-
-      const tarotMsg: Message = {
-        id: Date.now().toString(),
-        senderId: 'SYSTEM',
-        text: `🃏 ${result.summary}`,
-        timestamp: Date.now(),
-        isSystem: true
-      };
-      updateActiveSession(s => ({
-        ...s,
-        messages: [...s.messages, tarotMsg],
-        lastUpdated: Date.now()
-      }));
-      setInputText('');
-      setShowMentionPopup(false);
-      if (inputRef.current) {
-        inputRef.current.style.height = 'auto';
-      }
-      return;
-    }
-
     // Check if narrator mode
     const isNarratorMode = settings.activeProfileId === 'narrator';
 
@@ -1701,9 +1579,48 @@ const App: React.FC = () => {
     };
 
     // User/Narrator message clears the yielded list - all PASSed agents can speak again
+    // Also check for inline entertainment commands (/roll, /tarot)
+    const entertainmentConfig = activeGroup?.entertainmentConfig;
+    const entertainmentMessages: Message[] = [];
+
+    // Parse inline /roll commands
+    if (entertainmentConfig?.enableDice) {
+      const rollMatches = inputText.matchAll(/\/roll\s+(\d*d\d+(?:[+-]\d+)?)/gi);
+      for (const match of rollMatches) {
+        const result = rollDice(match[1]);
+        if (result) {
+          entertainmentMessages.push({
+            id: `roll-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            senderId: 'SYSTEM',
+            text: `🎲 ${result.breakdown}`,
+            timestamp: Date.now(),
+            isSystem: true
+          });
+        }
+      }
+    }
+
+    // Parse inline /tarot commands
+    if (entertainmentConfig?.enableTarot) {
+      const tarotMatches = inputText.matchAll(/\/tarot(?:\s+(\d+))?/gi);
+      for (const match of tarotMatches) {
+        const count = match[1] ? parseInt(match[1]) : 1;
+        const result = drawTarot(count);
+        if (result) {
+          entertainmentMessages.push({
+            id: `tarot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            senderId: 'SYSTEM',
+            text: `🃏 ${result.summary}`,
+            timestamp: Date.now(),
+            isSystem: true
+          });
+        }
+      }
+    }
+
     updateActiveSession(s => ({
       ...s,
-      messages: [...s.messages, newMessage],
+      messages: [...s.messages, newMessage, ...entertainmentMessages],
       lastUpdated: Date.now(),
       yieldedAgentIds: [], // Only USER messages wake up PASSed agents
       yieldedAtCount: undefined // Reset cooldown counter
