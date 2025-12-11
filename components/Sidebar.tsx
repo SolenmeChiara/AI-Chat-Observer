@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngine, TTSVoice } from '../types';
-import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2 } from 'lucide-react';
+import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider } from '../types';
+import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
-import { getBrowserVoices, OPENAI_VOICES } from '../services/ttsService';
+import { getBrowserVoices, DEFAULT_TTS_PROVIDERS } from '../services/ttsService';
 
 // TTS Settings Panel Component
 const TTSSettingsPanel: React.FC<{
@@ -12,24 +12,28 @@ const TTSSettingsPanel: React.FC<{
   setSettings: React.Dispatch<React.SetStateAction<GlobalSettings>>;
   agents: Agent[];
   setAgents: React.Dispatch<React.SetStateAction<Agent[]>>;
-}> = ({ settings, setSettings, agents, setAgents }) => {
+  ttsProviders: TTSProvider[];
+  setTTSProviders: React.Dispatch<React.SetStateAction<TTSProvider[]>>;
+}> = ({ settings, setSettings, agents, setAgents, ttsProviders, setTTSProviders }) => {
   const [browserVoices, setBrowserVoices] = useState<TTSVoice[]>([]);
-  const [isLoadingVoices, setIsLoadingVoices] = useState(false);
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [newVoiceName, setNewVoiceName] = useState('');
+  const [newVoiceId, setNewVoiceId] = useState('');
 
   // Load browser voices on mount
   useEffect(() => {
-    if (settings.ttsSettings?.enabled && settings.ttsSettings?.engine === 'browser') {
-      setIsLoadingVoices(true);
-      getBrowserVoices().then(voices => {
-        setBrowserVoices(voices);
-        setIsLoadingVoices(false);
-      });
-    }
-  }, [settings.ttsSettings?.enabled, settings.ttsSettings?.engine]);
+    getBrowserVoices().then(voices => {
+      setBrowserVoices(voices);
+      // Update browser provider with actual voices
+      setTTSProviders(prev => prev.map(p =>
+        p.type === 'browser' ? { ...p, voices } : p
+      ));
+    });
+  }, []);
 
   const ttsSettings = settings.ttsSettings || {
     enabled: false,
-    engine: 'browser' as TTSEngine,
+    activeProviderId: 'browser',
     rate: 1.0,
     volume: 1.0,
     autoPlayNewMessages: false
@@ -42,17 +46,44 @@ const TTSSettingsPanel: React.FC<{
     });
   };
 
-  const availableVoices = ttsSettings.engine === 'openai' ? OPENAI_VOICES : browserVoices;
+  const activeProvider = ttsProviders.find(p => p.id === ttsSettings.activeProviderId) || ttsProviders[0];
+  const availableVoices = activeProvider?.type === 'browser' ? browserVoices : (activeProvider?.voices || []);
+
+  // Update provider
+  const updateProvider = (providerId: string, updates: Partial<TTSProvider>) => {
+    setTTSProviders(prev => prev.map(p =>
+      p.id === providerId ? { ...p, ...updates } : p
+    ));
+  };
+
+  // Add custom voice to provider
+  const handleAddVoice = (providerId: string) => {
+    if (!newVoiceName.trim() || !newVoiceId.trim()) return;
+    setTTSProviders(prev => prev.map(p =>
+      p.id === providerId
+        ? { ...p, voices: [...p.voices, { id: newVoiceId.trim(), name: newVoiceName.trim(), isCustom: true }] }
+        : p
+    ));
+    setNewVoiceName('');
+    setNewVoiceId('');
+  };
+
+  // Remove custom voice
+  const handleRemoveVoice = (providerId: string, voiceId: string) => {
+    setTTSProviders(prev => prev.map(p =>
+      p.id === providerId
+        ? { ...p, voices: p.voices.filter(v => v.id !== voiceId) }
+        : p
+    ));
+  };
 
   // Auto-assign voices to agents
   const handleAutoAssignVoices = () => {
-    const voices = availableVoices;
-    if (voices.length === 0) return;
-
+    if (availableVoices.length === 0) return;
     const updatedAgents = agents.map((agent, idx) => ({
       ...agent,
-      voiceId: voices[idx % voices.length].id,
-      voiceEngine: ttsSettings.engine
+      voiceId: availableVoices[idx % availableVoices.length].id,
+      voiceProviderId: activeProvider.id
     }));
     setAgents(updatedAgents);
   };
@@ -76,31 +107,125 @@ const TTSSettingsPanel: React.FC<{
 
         {ttsSettings.enabled && (
           <>
-            {/* Engine Selection */}
+            {/* Provider Selection */}
             <div>
-              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">TTS 引擎</label>
+              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">TTS 服务商</label>
               <select
                 className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
-                value={ttsSettings.engine}
-                onChange={(e) => updateTTSSettings({ engine: e.target.value as TTSEngine })}
+                value={ttsSettings.activeProviderId || 'browser'}
+                onChange={(e) => updateTTSSettings({ activeProviderId: e.target.value })}
               >
-                <option value="browser">浏览器原生 (免费)</option>
-                <option value="openai">OpenAI TTS (高质量)</option>
+                {ttsProviders.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.pricePer1MChars ? `($${p.pricePer1MChars}/1M字符)` : '(免费)'}
+                  </option>
+                ))}
               </select>
             </div>
 
-            {/* OpenAI API Key (if OpenAI engine) */}
-            {ttsSettings.engine === 'openai' && (
-              <div>
-                <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">OpenAI API Key</label>
-                <input
-                  type="password"
-                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
-                  placeholder="sk-..."
-                  value={ttsSettings.openaiApiKey || ''}
-                  onChange={(e) => updateTTSSettings({ openaiApiKey: e.target.value })}
-                />
-                <p className="text-[10px] text-gray-400 mt-1">用于 OpenAI TTS，费用约 $15/百万字符</p>
+            {/* Provider Config */}
+            {activeProvider && activeProvider.type !== 'browser' && (
+              <div className="bg-gray-50 dark:bg-zinc-700/50 p-3 rounded-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{activeProvider.name} 配置</span>
+                  {activeProvider.freeQuota && (
+                    <span className="text-[10px] text-green-600 dark:text-green-400">免费额度: {activeProvider.freeQuota}</span>
+                  )}
+                </div>
+
+                {/* API Key */}
+                <div>
+                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">API Key</label>
+                  <input
+                    type="password"
+                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                    placeholder={activeProvider.type === 'minimax' ? 'group_id:api_key' : 'API Key...'}
+                    value={activeProvider.apiKey || ''}
+                    onChange={(e) => updateProvider(activeProvider.id, { apiKey: e.target.value })}
+                  />
+                </div>
+
+                {/* Base URL (optional) */}
+                <div>
+                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">API 地址 (可选)</label>
+                  <input
+                    type="text"
+                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                    placeholder={activeProvider.baseUrl}
+                    value={activeProvider.baseUrl || ''}
+                    onChange={(e) => updateProvider(activeProvider.id, { baseUrl: e.target.value })}
+                  />
+                </div>
+
+                {/* Price */}
+                <div>
+                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">价格 ($/百万字符)</label>
+                  <input
+                    type="number"
+                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                    value={activeProvider.pricePer1MChars || 0}
+                    onChange={(e) => updateProvider(activeProvider.id, { pricePer1MChars: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+
+                {/* Voice Management */}
+                <div className="border-t border-gray-200 dark:border-zinc-600 pt-2">
+                  <div
+                    className="flex items-center justify-between cursor-pointer"
+                    onClick={() => setExpandedProvider(expandedProvider === activeProvider.id ? null : activeProvider.id)}
+                  >
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                      音色管理 ({activeProvider.voices.length} 个)
+                    </span>
+                    {expandedProvider === activeProvider.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </div>
+
+                  {expandedProvider === activeProvider.id && (
+                    <div className="mt-2 space-y-2">
+                      {/* Existing voices */}
+                      <div className="max-h-32 overflow-y-auto space-y-1">
+                        {activeProvider.voices.map(v => (
+                          <div key={v.id} className="flex items-center justify-between text-[10px] bg-white dark:bg-zinc-700 p-1.5 rounded">
+                            <span className="text-gray-700 dark:text-gray-300 truncate flex-1">{v.name}</span>
+                            <span className="text-gray-400 mx-2 font-mono">{v.id}</span>
+                            {v.isCustom && (
+                              <button
+                                onClick={() => handleRemoveVoice(activeProvider.id, v.id)}
+                                className="text-red-400 hover:text-red-600"
+                              >
+                                <X size={10} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add new voice */}
+                      <div className="flex gap-1">
+                        <input
+                          type="text"
+                          className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                          placeholder="音色名称"
+                          value={newVoiceName}
+                          onChange={(e) => setNewVoiceName(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                          placeholder="Voice ID"
+                          value={newVoiceId}
+                          onChange={(e) => setNewVoiceId(e.target.value)}
+                        />
+                        <button
+                          onClick={() => handleAddVoice(activeProvider.id)}
+                          className="px-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded text-[10px]"
+                        >
+                          <Plus size={10} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -142,7 +267,7 @@ const TTSSettingsPanel: React.FC<{
                 🎲 自动为 {agents.length} 个角色分配不同音色
               </button>
               <p className="text-[10px] text-gray-400 mt-1">
-                {ttsSettings.engine === 'openai' ? '6 种音色可选' : `${browserVoices.length} 种浏览器音色可用`}
+                {availableVoices.length} 种音色可用
               </p>
             </div>
 
@@ -160,7 +285,7 @@ const TTSSettingsPanel: React.FC<{
                       onChange={(e) => {
                         setAgents(prev => prev.map(a =>
                           a.id === agent.id
-                            ? { ...a, voiceId: e.target.value, voiceEngine: ttsSettings.engine }
+                            ? { ...a, voiceId: e.target.value, voiceProviderId: activeProvider.id }
                             : a
                         ));
                       }}
@@ -188,6 +313,9 @@ interface SidebarProps {
   setProviders: React.Dispatch<React.SetStateAction<ApiProvider[]>>;
   settings: GlobalSettings;
   setSettings: React.Dispatch<React.SetStateAction<GlobalSettings>>;
+  // TTS Providers
+  ttsProviders: TTSProvider[];
+  setTTSProviders: React.Dispatch<React.SetStateAction<TTSProvider[]>>;
   // 群组相关
   groups: ChatGroup[];
   activeGroupId: string;
@@ -214,6 +342,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   agents, setAgents,
   providers, setProviders,
   settings, setSettings,
+  ttsProviders, setTTSProviders,
   groups, activeGroupId,
   onCreateGroup, onSwitchGroup, onDeleteGroup, onRenameGroup, onUpdateGroupScenario, onUpdateGroupMemoryConfig,
   sessions, activeSessionId,
@@ -1499,7 +1628,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              </div>
 
              {/* TTS (TEXT-TO-SPEECH) */}
-             <TTSSettingsPanel settings={settings} setSettings={setSettings} agents={agents} setAgents={setAgents} />
+             <TTSSettingsPanel settings={settings} setSettings={setSettings} agents={agents} setAgents={setAgents} ttsProviders={ttsProviders} setTTSProviders={setTTSProviders} />
 
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Clock size={16}/> 思考呼吸时间</h3>

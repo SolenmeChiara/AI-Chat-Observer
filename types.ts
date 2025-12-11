@@ -72,8 +72,8 @@ export interface Agent {
   isActive?: boolean; // If false, agent won't participate in chat until manually activated
   searchConfig?: SearchConfig; // 搜索工具配置
   enableGoogleSearch?: boolean; // Gemini 原生 Google 搜索 (仅 Gemini 模型可用)
-  voiceId?: string;   // TTS voice ID for this agent
-  voiceEngine?: TTSEngine; // TTS engine preference for this agent
+  voiceId?: string;      // TTS voice ID for this agent
+  voiceProviderId?: string; // TTS provider ID for this agent
 }
 
 export interface Attachment {
@@ -184,27 +184,36 @@ export interface StreamChunk {
 }
 
 // TTS Configuration
-export type TTSEngine = 'browser' | 'openai';
+export type TTSEngineType = 'browser' | 'openai' | 'elevenlabs' | 'minimax' | 'fishaudio' | 'azure' | 'google';
 
 export interface TTSVoice {
   id: string;        // Voice identifier (e.g., 'en-US-Standard-A' or 'alloy')
   name: string;      // Display name
-  lang?: string;     // Language code for browser voices
-  engine: TTSEngine; // Which engine this voice belongs to
+  lang?: string;     // Language code
+  gender?: 'male' | 'female' | 'neutral';
+  isCustom?: boolean; // User-added custom voice
+}
+
+// TTS Provider (like ApiProvider for LLMs)
+export interface TTSProvider {
+  id: string;
+  name: string;      // Display name (e.g., "ElevenLabs", "MiniMax")
+  type: TTSEngineType;
+  apiKey?: string;
+  baseUrl?: string;  // Custom endpoint URL
+  voices: TTSVoice[]; // Available voices for this provider
+  // Pricing info
+  pricePer1MChars?: number; // Cost per 1M characters (USD)
+  freeQuota?: string; // e.g., "10k chars/month"
 }
 
 export interface TTSSettings {
   enabled: boolean;
-  engine: TTSEngine;
-  openaiApiKey?: string;       // Optional OpenAI API key for high-quality TTS
-  openaiBaseUrl?: string;      // Optional custom base URL
-  rate: number;                // Speech rate (0.5 - 2.0)
-  volume: number;              // Volume (0 - 1)
-  autoPlayNewMessages: boolean; // Auto-read new AI messages as they arrive
+  activeProviderId?: string;  // Currently selected provider
+  rate: number;               // Speech rate (0.5 - 2.0)
+  volume: number;             // Volume (0 - 1)
+  autoPlayNewMessages: boolean;
 }
 
-export interface AgentVoiceConfig {
-  agentId: string;
-  voiceId: string;   // Selected voice ID
-  engine: TTSEngine; // Which engine to use for this agent
-}
+// Legacy compatibility alias
+export type TTSEngine = TTSEngineType;

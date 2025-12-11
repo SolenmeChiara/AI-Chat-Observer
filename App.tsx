@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
-import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSEngine } from './types';
+import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider } from './types';
 import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
 import Sidebar from './components/Sidebar';
 import RightSidebar from './components/RightSidebar';
@@ -16,7 +16,7 @@ import { parseFile } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings } from './services/db';
 import { describeImage } from './services/visionProxyService';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
-import { speak, stopTTS, getBrowserVoices, getAutoAssignVoices, OPENAI_VOICES, setPlaybackStateCallback } from './services/ttsService';
+import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -29,6 +29,7 @@ const App: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [providers, setProviders] = useState<ApiProvider[]>(INITIAL_PROVIDERS);
   const [settings, setSettings] = useState<GlobalSettings>(DEFAULT_SETTINGS);
+  const [ttsProviders, setTTSProviders] = useState<TTSProvider[]>(DEFAULT_TTS_PROVIDERS);
   
   // Group & Session State
   const [groups, setGroups] = useState<ChatGroup[]>(INITIAL_GROUPS);
@@ -376,32 +377,33 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Get voice for an agent (or user)
-  const getVoiceForSender = (senderId: string): { voiceId: string; engine: TTSEngine } => {
+  // Get voice and provider for an agent (or user)
+  const getVoiceForSender = (senderId: string): { voiceId: string; provider: TTSProvider } => {
     const ttsSettings = settings.ttsSettings;
+    const activeProvider = ttsProviders.find(p => p.id === ttsSettings.activeProviderId) || ttsProviders[0];
 
     if (senderId === USER_ID) {
-      // Default user voice - first voice of current engine
-      if (ttsSettings.engine === 'openai') {
-        return { voiceId: 'alloy', engine: 'openai' };
-      }
-      return { voiceId: 'browser-0-default', engine: 'browser' };
+      // Default user voice - first voice of current provider
+      const firstVoice = activeProvider.voices[0];
+      return { voiceId: firstVoice?.id || 'default', provider: activeProvider };
     }
 
     const agent = agents.find(a => a.id === senderId);
-    if (agent?.voiceId && agent?.voiceEngine) {
-      return { voiceId: agent.voiceId, engine: agent.voiceEngine };
+
+    // If agent has specific voice and provider configured
+    if (agent?.voiceId && agent?.voiceProviderId) {
+      const agentProvider = ttsProviders.find(p => p.id === agent.voiceProviderId) || activeProvider;
+      return { voiceId: agent.voiceId, provider: agentProvider };
     }
 
     // Auto-assign based on agent index
     const agentIndex = agents.findIndex(a => a.id === senderId);
-    if (ttsSettings.engine === 'openai') {
-      const voices = OPENAI_VOICES;
-      return { voiceId: voices[agentIndex % voices.length].id, engine: 'openai' };
+    const voices = activeProvider.voices;
+    if (voices.length > 0) {
+      return { voiceId: voices[agentIndex % voices.length].id, provider: activeProvider };
     }
 
-    // Browser voice - will be assigned dynamically
-    return { voiceId: `browser-${agentIndex % 10}-auto`, engine: 'browser' };
+    return { voiceId: 'default', provider: activeProvider };
   };
 
   // Play TTS for a single message
@@ -413,10 +415,12 @@ const App: React.FC = () => {
     stopTTS();
     setCurrentPlayingMessageId(message.id);
 
-    const { voiceId, engine } = getVoiceForSender(message.senderId);
+    const { voiceId, provider } = getVoiceForSender(message.senderId);
 
     try {
-      await speak(message.text, voiceId, engine, ttsSettings);
+      const result = await speak(message.text, voiceId, provider, ttsSettings);
+      // Could track TTS cost here: result.cost
+      console.log(`TTS: ${result.chars} chars, cost: $${result.cost.toFixed(6)}`);
     } catch (error) {
       console.error('TTS playback error:', error);
     }
@@ -1781,6 +1785,7 @@ const App: React.FC = () => {
         agents={agents} setAgents={setAgents}
         providers={providers} setProviders={setProviders}
         settings={settings} setSettings={setSettings}
+        ttsProviders={ttsProviders} setTTSProviders={setTTSProviders}
         groups={groups} activeGroupId={activeGroupId}
         onCreateGroup={handleCreateGroup} onSwitchGroup={handleSwitchGroup}
         onDeleteGroup={handleDeleteGroup} onRenameGroup={handleRenameGroup}

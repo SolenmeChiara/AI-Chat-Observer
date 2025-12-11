@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   expandAllReasoning: false, // Default to collapsed reasoning chains
   ttsSettings: {
     enabled: false,
-    engine: 'browser',
+    activeProviderId: 'browser',
     rate: 1.0,
     volume: 1.0,
     autoPlayNewMessages: false
