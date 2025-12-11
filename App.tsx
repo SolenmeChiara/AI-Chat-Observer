@@ -1820,6 +1820,27 @@ const App: React.FC = () => {
 
     if (eligibleAgents.length === 0) return;
 
+    // --- REPLY PRIORITY: Check if replying to an AI message ---
+    let replyTargetAgent: typeof eligibleAgents[0] | null = null;
+    if (lastMessage.replyToId) {
+        const repliedMessage = messages.find(m => m.id === lastMessage.replyToId);
+        if (repliedMessage && repliedMessage.senderId !== USER_ID && repliedMessage.senderId !== 'SYSTEM' && repliedMessage.senderId !== 'narrator') {
+            // Find the agent who sent the replied message
+            const agent = sessionMembers.find(a => a.id === repliedMessage.senderId);
+            if (agent) {
+                const isProcessing = processingAgents.has(agent.id);
+                const isPending = pendingTriggerRef.current.has(agent.id);
+                const isMuted = (activeSession.mutedAgentIds || []).includes(agent.id);
+                const isUnconfigured = !agent.providerId || !agent.modelId;
+
+                if (!isProcessing && !isPending && !isMuted && !isUnconfigured) {
+                    replyTargetAgent = agent;
+                    console.log('[Reply] Prioritizing replied-to agent:', agent.name);
+                }
+            }
+        }
+    }
+
     // --- @MENTION PRIORITY: Check for @全体成员 or multiple @mentions ---
     const lastTextLower = lastMessage.text.toLowerCase();
     let selectedAgent = null;
@@ -1890,8 +1911,11 @@ const App: React.FC = () => {
         }
     } else if (agentsToQueue.length === 1) {
         selectedAgent = agentsToQueue[0];
+    } else if (replyTargetAgent) {
+        // No mention, but replying to an AI - prioritize that agent
+        selectedAgent = replyTargetAgent;
     } else {
-        // No mention, pick randomly
+        // No mention, no reply target, pick randomly
         selectedAgent = eligibleAgents[Math.floor(Math.random() * eligibleAgents.length)];
     }
 
