@@ -1,6 +1,12 @@
 # 🏗️ 项目架构文档 (Project Architecture)
 
-本文档详细描述了 **AI 群聊观察会 (V5)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
+本文档详细描述了 **AI 群聊观察会 (V5.2)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
+
+**V5.2 新增功能：**
+- 多服务商 TTS 语音合成 (Browser/OpenAI/ElevenLabs/MiniMax/Fish Audio/Azure)
+- 自定义音色管理与 Agent 音色分配
+- 全局展开/折叠思维链按钮
+- 超时时间滑块扩展至 5 分钟
 
 ---
 
@@ -33,7 +39,8 @@ src/
 │   ├── fileParser.ts    # 前端文件解析 (PDF/Docx -> Text) + 图片压缩
 │   ├── modelFetcher.ts  # 远程模型列表获取
 │   ├── visionProxyService.ts # 视觉代理 (让纯文本模型"看"图片)
-│   └── summaryService.ts# 自动起名与记忆总结服务
+│   ├── summaryService.ts# 自动起名与记忆总结服务
+│   └── ttsService.ts    # TTS 语音合成服务 (多服务商适配)
 │
 ├── types.ts             # TypeScript 类型定义 (数据契约)
 ├── constants.ts         # 常量、默认值、Logo 映射
@@ -93,6 +100,39 @@ interface Agent {
   role: AgentRole;         // 'MEMBER' | 'ADMIN'
   isActive?: boolean;      // 是否启用
   searchConfig?: SearchConfig; // 搜索工具配置
+  voiceId?: string;        // TTS 音色 ID
+  voiceProviderId?: string;// TTS 服务商 ID
+}
+```
+
+### 3.4 `TTSProvider` (TTS 服务商) - V5.2 新增
+类似于 `ApiProvider`，用于管理多个 TTS 服务商。
+```typescript
+interface TTSProvider {
+  id: string;
+  name: string;            // 显示名称
+  type: TTSEngineType;     // 'browser' | 'openai' | 'elevenlabs' | 'minimax' | 'fishaudio' | 'azure'
+  apiKey?: string;
+  baseUrl?: string;        // 自定义端点
+  voices: TTSVoice[];      // 可用音色列表
+  pricePer1MChars?: number;// 每百万字符价格 (USD)
+  freeQuota?: string;      // 免费额度说明
+}
+
+interface TTSVoice {
+  id: string;              // 音色标识符
+  name: string;            // 显示名称
+  lang?: string;           // 语言代码
+  gender?: 'male' | 'female' | 'neutral';
+  isCustom?: boolean;      // 用户自定义音色
+}
+
+interface TTSSettings {
+  enabled: boolean;
+  activeProviderId?: string;  // 当前选择的服务商
+  rate: number;               // 语速 (0.5 - 2.0)
+  volume: number;             // 音量 (0 - 1)
+  autoPlayNewMessages: boolean;
 }
 ```
 
@@ -168,6 +208,41 @@ Anthropic API 限制图片 5MB，因此在上传时自动压缩：
 1.  **检测**: `fileParser.ts` 计算 Base64 大小。
 2.  **压缩**: 使用 Canvas 降低质量 (0.9→0.3) 和尺寸 (1.0→0.25)，输出 JPEG。
 3.  **配置**: 用户可在设置中关闭或调整阈值 (默认 4MB)。
+
+### 4.8 TTS 语音合成系统 (Text-to-Speech) - V5.2 新增
+支持多种 TTS 服务商，实现消息朗读功能。
+
+**支持的服务商：**
+| 服务商 | 类型 | 价格 (每百万字符) | 特点 |
+|--------|------|------------------|------|
+| Browser | 浏览器原生 | 免费 | 无需 API，依赖系统语音 |
+| OpenAI | 云端 | $15 | 高质量，支持 6 种音色 |
+| ElevenLabs | 云端 | $30 | 最自然，支持自定义音色克隆 |
+| MiniMax | 云端 | $5 | 性价比高，中文优化 |
+| Fish Audio | 云端 | $10 | 开源友好，支持自训练 |
+| Azure | 云端 | $15 | 企业级，多语言支持 |
+
+**播放模式：**
+*   **单条播放**: 点击消息旁的播放按钮。
+*   **连续播放**: 从某条消息开始，自动播放后续所有消息。
+*   **自动播放**: 新消息生成后自动朗读。
+
+**音色分配逻辑：**
+1.  优先使用 Agent 配置的 `voiceId` + `voiceProviderId`。
+2.  若未配置，则从当前服务商的音色列表中随机分配。
+3.  用户消息使用默认音色。
+
+**执行流程：**
+```
+用户点击播放 → ttsService.speak(text, voiceId, provider)
+  → 根据 provider.type 路由到对应实现
+  → playOpenAITTS / playElevenLabsTTS / playMiniMaxTTS / ...
+  → 返回 { chars, cost } 用于费用统计
+```
+
+**自定义音色管理：**
+*   用户可手动添加服务商未自动获取的音色（输入名称 + ID）。
+*   支持为每个 Agent 单独指定音色。
 
 ---
 
