@@ -1161,6 +1161,8 @@ const App: React.FC = () => {
              .replace(/\{\{DELNOTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{CLEARNOTES\}\}/, '')
              .replace(/\{\{SEARCH:\s*(.+?)\}\}/, '')
+             .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
+             .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .trimStart();
 
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
@@ -1283,6 +1285,8 @@ const App: React.FC = () => {
              .replace(/\{\{DELNOTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{CLEARNOTES\}\}/, '')
              .replace(/\{\{SEARCH:\s*(.+?)\}\}/, '')
+             .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
+             .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .trimStart();
 
         // Update the placeholder message with final data (clear isStreaming)
