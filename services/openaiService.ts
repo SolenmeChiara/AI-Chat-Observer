@@ -350,7 +350,7 @@ export async function* streamOpenAIReply(
   const formattedMessages = [
     { role: 'system', content: systemInstruction },
     ...visibleMessages.map(m => {
-       const senderName = m.senderId === USER_ID ? (userName || "User") : (m.isSystem ? "SYSTEM" : allAgents.find(a => a.id === m.senderId)?.name || "Bot");
+       const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
        
        // INJECT ID AND TIMESTAMP INTO CONTENT
        const timeStr = formatMessageTime(m.timestamp);

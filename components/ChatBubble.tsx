@@ -184,7 +184,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
              ${isUser ? 'bg-zinc-800 text-gray-300 border-gray-500' : 'bg-gray-100 dark:bg-zinc-700 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-zinc-500'}
            `}>
               <div className="font-bold mb-0.5 flex items-center gap-1">
-                <Reply size={10} /> 引用 {replyToMessage.senderId === USER_ID ? 'User' : 'Bot'}
+                <Reply size={10} /> 引用 {replyToMessage.senderId === USER_ID ? (userProfile?.userName || 'User') : (replyToMessage.senderId === 'SYSTEM' || replyToMessage.isSystem ? 'System' : allAgents?.find(a => a.id === replyToMessage.senderId)?.name || 'Unknown')}
               </div>
               <div className="line-clamp-1 truncate max-w-[200px]">{replyToMessage.text}</div>
            </div>

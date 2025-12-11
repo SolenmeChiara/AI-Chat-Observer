@@ -399,7 +399,7 @@ export async function* streamGeminiReply(
   for (const m of visibleMessages) {
     const isSelf = m.senderId === agent.id;
     const role = isSelf ? 'model' : 'user';
-    const senderName = m.senderId === USER_ID ? (userName || "User") : (m.isSystem ? "SYSTEM" : allAgents.find(a => a.id === m.senderId)?.name || "Bot");
+    const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
 
     const parts: any[] = [];
 

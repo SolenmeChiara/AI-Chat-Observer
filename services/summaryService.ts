@@ -96,7 +96,7 @@ export const generateSessionName = async (
   // Prepare simple context with agent names
   const transcript = messages.slice(-5).map(m => {
     const sender = allAgents.find((a: any) => a.id === m.senderId);
-    const name = sender ? sender.name : (m.senderId === USER_ID ? 'User' : 'Bot');
+    const name = sender ? sender.name : (m.senderId === USER_ID ? 'User' : (m.senderId === 'SYSTEM' || m.isSystem ? 'System' : 'Unknown'));
     return `${name}: ${m.text}`;
   }).join('\n');
 
