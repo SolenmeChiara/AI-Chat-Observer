@@ -90,6 +90,7 @@ export interface Message {
   text: string;
   reasoningText?: string; // The "Thought Chain" content
   reasoningSignature?: string; // Anthropic thinking signature (required for multi-turn)
+  reasoningDuration?: number; // Time spent on reasoning in milliseconds
   timestamp: number;
   cost?: number; // Cost of this specific message
   tokens?: { input: number; output: number };
@@ -204,7 +205,7 @@ export interface StreamChunk {
 }
 
 // TTS Configuration
-export type TTSEngineType = 'browser' | 'openai' | 'elevenlabs' | 'minimax' | 'fishaudio' | 'azure' | 'google';
+export type TTSEngineType = 'browser' | 'openai' | 'elevenlabs' | 'minimax' | 'fishaudio' | 'azure' | 'google' | 'cartesia' | 'playht' | 'custom';
 
 export interface TTSVoice {
   id: string;        // Voice identifier (e.g., 'en-US-Standard-A' or 'alloy')
@@ -225,6 +226,8 @@ export interface TTSProvider {
   // Pricing info
   pricePer1MChars?: number; // Cost per 1M characters (USD)
   freeQuota?: string; // e.g., "10k chars/month"
+  isCustom?: boolean; // User-defined custom provider
+  description?: string; // Provider description/notes
 }
 
 export interface TTSSettings {

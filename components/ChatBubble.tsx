@@ -196,6 +196,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             <summary className="list-none cursor-pointer flex items-center gap-1.5 text-[10px] text-gray-400 font-medium bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors w-fit">
                <BrainCircuit size={12} />
                思考过程
+               {message.reasoningDuration && (
+                 <span className="text-gray-400 dark:text-gray-500">
+                   ({(message.reasoningDuration / 1000).toFixed(1)}s)
+                 </span>
+               )}
             </summary>
             <div className="mt-2 p-3 bg-gray-50 dark:bg-zinc-700 rounded-lg border-l-2 border-gray-300 dark:border-zinc-500 text-xs text-gray-500 dark:text-gray-400 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-w-full" style={{ wordBreak: 'break-word' }}>
               {message.reasoningText}

@@ -19,6 +19,9 @@ const TTSSettingsPanel: React.FC<{
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [newVoiceName, setNewVoiceName] = useState('');
   const [newVoiceId, setNewVoiceId] = useState('');
+  const [showAddProvider, setShowAddProvider] = useState(false);
+  const [newProviderName, setNewProviderName] = useState('');
+  const [newProviderType, setNewProviderType] = useState<TTSEngineType>('custom');
 
   // Load browser voices on mount
   useEffect(() => {
@@ -77,6 +80,32 @@ const TTSSettingsPanel: React.FC<{
     ));
   };
 
+  // Add custom TTS provider
+  const handleAddProvider = () => {
+    if (!newProviderName.trim()) return;
+    const id = `custom-${Date.now()}`;
+    const newProvider: TTSProvider = {
+      id,
+      name: newProviderName.trim(),
+      type: newProviderType,
+      baseUrl: '',
+      voices: [],
+      isCustom: true,
+    };
+    setTTSProviders(prev => [...prev, newProvider]);
+    updateTTSSettings({ activeProviderId: id });
+    setNewProviderName('');
+    setShowAddProvider(false);
+  };
+
+  // Remove custom TTS provider
+  const handleRemoveProvider = (providerId: string) => {
+    setTTSProviders(prev => prev.filter(p => p.id !== providerId));
+    if (ttsSettings.activeProviderId === providerId) {
+      updateTTSSettings({ activeProviderId: 'browser' });
+    }
+  };
+
   // Auto-assign voices to agents
   const handleAutoAssignVoices = () => {
     if (availableVoices.length === 0) return;
@@ -110,18 +139,82 @@ const TTSSettingsPanel: React.FC<{
             {/* Provider Selection */}
             <div>
               <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">TTS 服务商</label>
-              <select
-                className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
-                value={ttsSettings.activeProviderId || 'browser'}
-                onChange={(e) => updateTTSSettings({ activeProviderId: e.target.value })}
-              >
-                {ttsProviders.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.pricePer1MChars ? `($${p.pricePer1MChars}/1M字符)` : '(免费)'}
-                  </option>
-                ))}
-              </select>
+              <div className="flex gap-1">
+                <select
+                  className="flex-1 text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  value={ttsSettings.activeProviderId || 'browser'}
+                  onChange={(e) => updateTTSSettings({ activeProviderId: e.target.value })}
+                >
+                  {ttsProviders.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.pricePer1MChars ? `($${p.pricePer1MChars}/1M)` : '(免费)'}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setShowAddProvider(!showAddProvider)}
+                  className="px-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-xs"
+                  title="添加自定义服务商"
+                >
+                  <Plus size={14} />
+                </button>
+                {activeProvider?.isCustom && (
+                  <button
+                    onClick={() => handleRemoveProvider(activeProvider.id)}
+                    className="px-2 bg-red-500 text-white rounded-lg text-xs"
+                    title="删除此服务商"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+              {activeProvider?.description && (
+                <p className="text-[10px] text-gray-400 mt-1">{activeProvider.description}</p>
+              )}
             </div>
+
+            {/* Add Custom Provider */}
+            {showAddProvider && (
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg space-y-2 border border-blue-200 dark:border-blue-800">
+                <div className="text-xs font-medium text-blue-700 dark:text-blue-300">添加自定义 TTS 服务商</div>
+                <input
+                  type="text"
+                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  placeholder="服务商名称"
+                  value={newProviderName}
+                  onChange={(e) => setNewProviderName(e.target.value)}
+                />
+                <select
+                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  value={newProviderType}
+                  onChange={(e) => setNewProviderType(e.target.value as TTSEngineType)}
+                >
+                  <option value="custom">OpenAI 兼容 (通用)</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="elevenlabs">ElevenLabs</option>
+                  <option value="cartesia">Cartesia</option>
+                  <option value="fishaudio">Fish Audio</option>
+                  <option value="minimax">MiniMax</option>
+                  <option value="azure">Azure</option>
+                  <option value="google">Google Cloud</option>
+                  <option value="playht">PlayHT</option>
+                </select>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAddProvider}
+                    className="flex-1 text-xs py-1.5 bg-blue-500 text-white rounded"
+                  >
+                    添加
+                  </button>
+                  <button
+                    onClick={() => setShowAddProvider(false)}
+                    className="flex-1 text-xs py-1.5 bg-gray-200 dark:bg-zinc-600 text-gray-700 dark:text-gray-300 rounded"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Provider Config */}
             {activeProvider && activeProvider.type !== 'browser' && (

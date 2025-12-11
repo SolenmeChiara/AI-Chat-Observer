@@ -105,6 +105,7 @@ const App: React.FC = () => {
   const [ttsAutoPlayMode, setTTSAutoPlayMode] = useState(false); // Continuous auto-play mode
   const ttsQueueRef = useRef<Message[]>([]); // Queue for continuous playback
   const lastReadMessageIdRef = useRef<string | null>(null); // Track last read message for auto-play
+  const ttsPlayingLockRef = useRef(false); // Prevent concurrent playback requests
 
   // --- PERSISTENCE (IndexedDB) ---
   
@@ -426,44 +427,98 @@ const App: React.FC = () => {
     return { voiceId: 'default', provider: activeProvider };
   };
 
-  // Play TTS for a single message
+  // Play TTS for a single message (from bubble click)
   const handlePlayTTS = async (message: Message) => {
     const ttsSettings = settings.ttsSettings;
     if (!ttsSettings.enabled) return;
 
-    // Stop any current playback
-    stopTTS();
+    // If clicking same message that's playing, ignore (user should use stop button)
+    if (currentPlayingMessageId === message.id && ttsPlayingLockRef.current) {
+      return;
+    }
+
+    // If playing something else, stop it first and wait a moment
+    if (ttsPlayingLockRef.current) {
+      console.log('[TTS] Stopping current playback to play new message');
+      stopTTS();
+      ttsPlayingLockRef.current = false;
+      // Brief delay to let stop complete
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    // Disable auto-play mode when manually playing
+    setTTSAutoPlayMode(false);
+    ttsQueueRef.current = [];
+
+    // Acquire lock
+    ttsPlayingLockRef.current = true;
     setCurrentPlayingMessageId(message.id);
+    setIsTTSPlaying(true);
 
     const { voiceId, provider } = getVoiceForSender(message.senderId);
 
     try {
       const result = await speak(message.text, voiceId, provider, ttsSettings);
-      // Could track TTS cost here: result.cost
-      console.log(`TTS: ${result.chars} chars, cost: $${result.cost.toFixed(6)}`);
+      console.log(`[TTS] ${result.chars} chars, cost: $${result.cost.toFixed(6)}`);
     } catch (error) {
-      console.error('TTS playback error:', error);
+      console.error('[TTS] Playback error:', error);
+    } finally {
+      // Release lock and clear state
+      ttsPlayingLockRef.current = false;
+      setCurrentPlayingMessageId(null);
+      setIsTTSPlaying(false);
     }
-
-    setCurrentPlayingMessageId(null);
   };
 
   // Stop TTS playback
   const handleStopTTS = () => {
     stopTTS();
+    ttsPlayingLockRef.current = false;
     setCurrentPlayingMessageId(null);
+    setIsTTSPlaying(false);
     setTTSAutoPlayMode(false);
     ttsQueueRef.current = [];
   };
 
-  // Process next message in TTS queue
+  // Process TTS queue - plays messages in sequence
   const processNextInTTSQueue = async () => {
-    if (!ttsAutoPlayMode || ttsQueueRef.current.length === 0) return;
+    // Check if we should continue
+    if (!ttsAutoPlayMode || ttsQueueRef.current.length === 0) {
+      return;
+    }
+
+    // If already playing, wait for current to finish
+    if (ttsPlayingLockRef.current) {
+      return;
+    }
 
     const nextMessage = ttsQueueRef.current.shift();
     if (nextMessage) {
-      await handlePlayTTS(nextMessage);
-      lastReadMessageIdRef.current = nextMessage.id;
+      // Acquire lock
+      ttsPlayingLockRef.current = true;
+      setCurrentPlayingMessageId(nextMessage.id);
+      setIsTTSPlaying(true);
+
+      const { voiceId, provider } = getVoiceForSender(nextMessage.senderId);
+      const ttsSettings = settings.ttsSettings;
+
+      try {
+        const result = await speak(nextMessage.text, voiceId, provider, ttsSettings);
+        console.log(`[TTS/Queue] ${result.chars} chars, cost: $${result.cost.toFixed(6)}`);
+        lastReadMessageIdRef.current = nextMessage.id;
+      } catch (error) {
+        console.error('[TTS/Queue] Playback error:', error);
+      } finally {
+        // Release lock
+        ttsPlayingLockRef.current = false;
+        setCurrentPlayingMessageId(null);
+        setIsTTSPlaying(false);
+      }
+
+      // Continue to next message if auto-play still active
+      if (ttsAutoPlayMode) {
+        processNextInTTSQueue();
+      }
     }
   };
 
@@ -471,6 +526,9 @@ const App: React.FC = () => {
   const handleStartTTSFromMessage = (startMessageId: string) => {
     const ttsSettings = settings.ttsSettings;
     if (!ttsSettings.enabled) return;
+
+    // Stop current playback first
+    handleStopTTS();
 
     const startIndex = messages.findIndex(m => m.id === startMessageId);
     if (startIndex === -1) return;
@@ -484,13 +542,16 @@ const App: React.FC = () => {
     processNextInTTSQueue();
   };
 
-  // Toggle auto-play for new messages
+  // Toggle auto-play for new messages (top bar button)
   const handleToggleTTSAutoPlay = () => {
     if (ttsAutoPlayMode) {
       handleStopTTS();
     } else {
+      // Just enable auto-play mode - will play NEW messages as they arrive
       setTTSAutoPlayMode(true);
+      // Mark current last message as already read so we don't replay it
       lastReadMessageIdRef.current = messages.length > 0 ? messages[messages.length - 1].id : null;
+      console.log('[TTS] Auto-play enabled - waiting for new messages');
     }
   };
 
@@ -502,9 +563,10 @@ const App: React.FC = () => {
     if (!lastMessage || lastMessage.isSystem || lastMessage.isSearchResult || lastMessage.isStreaming) return;
     if (lastMessage.id === lastReadMessageIdRef.current) return;
 
-    // Queue the new message
+    // Queue the new message if not already queued
     if (!ttsQueueRef.current.find(m => m.id === lastMessage.id)) {
       ttsQueueRef.current.push(lastMessage);
+      console.log('[TTS] Queued new message for playback');
     }
 
     // If not currently playing, start
@@ -1040,7 +1102,7 @@ const App: React.FC = () => {
             await Promise.all(messagesWithImages.map(async (msg) => {
               if (msg.attachment?.content) {
                 const base64Data = msg.attachment.content.split(',')[1] || msg.attachment.content;
-                const description = await describeImage(base64Data, msg.attachment.mimeType, visionProvider);
+                const description = await describeImage(base64Data, msg.attachment.mimeType, visionProvider, agent.config.visionProxyModelId);
                 imageDescriptions.set(msg.id, description);
               }
             }));
@@ -1107,6 +1169,10 @@ const App: React.FC = () => {
       let detectedReplyId: string | undefined = undefined;
       let chunkCount = 0;
 
+      // Reasoning timing
+      const streamStartTime = Date.now();
+      let reasoningEndTime: number | undefined;
+
       // ADMIN COMMAND STATE
       let detectedAdminAction: { type: 'MUTE' | 'UNMUTE' | 'NOTE' | 'DELNOTE' | 'CLEARNOTES', target: string, duration?: number } | null = null;
 
@@ -1128,6 +1194,10 @@ const App: React.FC = () => {
         }
 
         if (chunk.text) {
+          // Record when reasoning ends (first text chunk received)
+          if (!reasoningEndTime && accumulatedReasoning) {
+            reasoningEndTime = Date.now();
+          }
           accumulatedText += chunk.text;
 
           if (accumulatedText.includes("{{PASS}}")) {
@@ -1333,6 +1403,9 @@ const App: React.FC = () => {
         if (detectedSearchQuery) console.log(`[${agent.name}] 🔍 Search query:`, detectedSearchQuery);
         if (detectedReplyId) console.log(`[${agent.name}] ↩️ Reply to:`, detectedReplyId);
 
+        // Calculate reasoning duration
+        const reasoningDuration = reasoningEndTime ? reasoningEndTime - streamStartTime : undefined;
+
         // Update the placeholder message with final data (clear isStreaming)
         updateThisSession(s => ({
             ...s,
@@ -1341,6 +1414,7 @@ const App: React.FC = () => {
                 text: finalText,
                 reasoningText: accumulatedReasoning || undefined,
                 reasoningSignature: capturedSignature,
+                reasoningDuration: reasoningDuration,
                 tokens: accumulatedUsage,
                 cost: cost,
                 replyToId: detectedReplyId,
@@ -2104,37 +2178,37 @@ const App: React.FC = () => {
 
             <button
                onClick={() => setSettings(s => ({ ...s, expandAllReasoning: !s.expandAllReasoning }))}
-               className={`p-2.5 rounded-lg transition-colors ${settings.expandAllReasoning ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
+               className={`p-1.5 rounded-lg transition-colors ${settings.expandAllReasoning ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
                title={settings.expandAllReasoning ? "折叠所有思考链" : "展开所有思考链"}
             >
-              <BrainCircuit size={20} />
+              <BrainCircuit size={18} />
             </button>
 
             {/* TTS Auto-Play Toggle */}
             {settings.ttsSettings?.enabled && (
               <button
                 onClick={handleToggleTTSAutoPlay}
-                className={`p-2.5 rounded-lg transition-colors ${ttsAutoPlayMode ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
+                className={`p-1.5 rounded-lg transition-colors ${ttsAutoPlayMode ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
                 title={ttsAutoPlayMode ? "停止自动朗读" : "自动朗读新消息"}
               >
-                {ttsAutoPlayMode ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                {ttsAutoPlayMode ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
             )}
 
             <button
                onClick={() => setIsStatsOpen(true)}
-               className="p-2.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+               className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                title="会话统计"
             >
-              <BarChart3 size={20} />
+              <BarChart3 size={18} />
             </button>
 
             <button
                onClick={handleClearMessages}
-               className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                title="清空记录"
             >
-              <Trash size={20} />
+              <Trash size={18} />
             </button>
 
             {/* Play/Pause - simplified on mobile */}

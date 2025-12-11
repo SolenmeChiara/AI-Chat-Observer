@@ -4,13 +4,61 @@ import { TTSEngineType, TTSVoice, TTSProvider, TTSSettings } from '../types';
 // ============ DEFAULT PROVIDERS ============
 
 export const DEFAULT_TTS_PROVIDERS: TTSProvider[] = [
+  // ===== 免费 / 离线 =====
   {
     id: 'browser',
     name: '浏览器原生',
     type: 'browser',
     voices: [], // Will be populated dynamically
-    freeQuota: '无限制 (离线可用)'
+    freeQuota: '无限制 (离线可用)',
+    description: '使用浏览器内置语音合成，免费且离线可用'
   },
+
+  // ===== 顶级质量 =====
+  {
+    id: 'elevenlabs',
+    name: 'ElevenLabs ⭐',
+    type: 'elevenlabs',
+    baseUrl: 'https://api.elevenlabs.io/v1',
+    voices: [
+      { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (美式女)', gender: 'female', lang: 'en' },
+      { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi (年轻女)', gender: 'female', lang: 'en' },
+      { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (年轻女)', gender: 'female', lang: 'en' },
+      { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni (温暖男)', gender: 'male', lang: 'en' },
+      { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli (年轻女)', gender: 'female', lang: 'en' },
+      { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh (年轻男)', gender: 'male', lang: 'en' },
+      { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold (浑厚男)', gender: 'male', lang: 'en' },
+      { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (深沉男)', gender: 'male', lang: 'en' },
+      { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam (沙哑男)', gender: 'male', lang: 'en' },
+    ],
+    pricePer1MChars: 300, // $0.30/1k chars (Turbo v2.5)
+    freeQuota: '10k 字符/月',
+    description: '公认最自然、情感最丰富，32种语言，延迟~75ms'
+  },
+  {
+    id: 'cartesia',
+    name: 'Cartesia Sonic ⚡',
+    type: 'cartesia',
+    baseUrl: 'https://api.cartesia.ai',
+    voices: [
+      { id: 'a0e99841-438c-4a64-b679-ae501e7d6091', name: 'Barbershop Man', gender: 'male', lang: 'en' },
+      { id: '79a125e8-cd45-4c13-8a67-188112f4dd22', name: 'British Lady', gender: 'female', lang: 'en-GB' },
+      { id: '638efaaa-4d0c-442e-b701-3fae16aad012', name: 'California Girl', gender: 'female', lang: 'en' },
+      { id: '41534e16-2966-4c6b-9670-111411def906', name: 'Confident Man', gender: 'male', lang: 'en' },
+      { id: 'bf991597-6c13-47e4-8411-91ec2de5c466', name: 'Friendly Sidekick', gender: 'male', lang: 'en' },
+      { id: '71a7ad14-091c-4e8e-a314-022ece01c121', name: 'Gentle Lady', gender: 'female', lang: 'en' },
+      { id: '95856005-0332-41b0-935f-352e296aa0df', name: 'Laidback Woman', gender: 'female', lang: 'en' },
+      { id: '996a8b96-4804-46c0-8e82-f5f35f5e9eac', name: 'Midwestern Man', gender: 'male', lang: 'en' },
+      { id: 'c45bc5ec-dc68-4feb-8829-6e6b2748095d', name: 'Narrator Lady', gender: 'female', lang: 'en' },
+      { id: 'd46abd1d-2f02-43a8-b7f5-e8f8e01e9f4a', name: 'Chinese Lady', gender: 'female', lang: 'zh' },
+      { id: 'eda5bbff-1ff1-4886-8ef1-4e69a77640a0', name: 'Chinese Man', gender: 'male', lang: 'zh' },
+    ],
+    pricePer1MChars: 100, // ~$0.10/1k chars
+    freeQuota: '无',
+    description: '超低延迟40-90ms，支持emotion tags和[laughter]等非语言表达'
+  },
+
+  // ===== 性价比 =====
   {
     id: 'openai',
     name: 'OpenAI TTS',
@@ -18,75 +66,78 @@ export const DEFAULT_TTS_PROVIDERS: TTSProvider[] = [
     baseUrl: 'https://api.openai.com/v1',
     voices: [
       { id: 'alloy', name: 'Alloy (中性)', gender: 'neutral' },
-      { id: 'echo', name: 'Echo (男声)', gender: 'male' },
-      { id: 'fable', name: 'Fable (英式)', gender: 'male' },
-      { id: 'onyx', name: 'Onyx (低沉男声)', gender: 'male' },
-      { id: 'nova', name: 'Nova (女声)', gender: 'female' },
-      { id: 'shimmer', name: 'Shimmer (柔和女声)', gender: 'female' },
+      { id: 'ash', name: 'Ash (男)', gender: 'male' },
+      { id: 'coral', name: 'Coral (女)', gender: 'female' },
+      { id: 'echo', name: 'Echo (男)', gender: 'male' },
+      { id: 'fable', name: 'Fable (英式男)', gender: 'male' },
+      { id: 'onyx', name: 'Onyx (低沉男)', gender: 'male' },
+      { id: 'nova', name: 'Nova (女)', gender: 'female' },
+      { id: 'sage', name: 'Sage (女)', gender: 'female' },
+      { id: 'shimmer', name: 'Shimmer (柔和女)', gender: 'female' },
     ],
-    pricePer1MChars: 15,
-    freeQuota: '无'
-  },
-  {
-    id: 'elevenlabs',
-    name: 'ElevenLabs',
-    type: 'elevenlabs',
-    baseUrl: 'https://api.elevenlabs.io/v1',
-    voices: [
-      { id: 'Rachel', name: 'Rachel (美式女声)', gender: 'female', lang: 'en' },
-      { id: 'Drew', name: 'Drew (美式男声)', gender: 'male', lang: 'en' },
-      { id: 'Clyde', name: 'Clyde (美式男声)', gender: 'male', lang: 'en' },
-      { id: 'Paul', name: 'Paul (新闻播报)', gender: 'male', lang: 'en' },
-      { id: 'Domi', name: 'Domi (年轻女声)', gender: 'female', lang: 'en' },
-      { id: 'Dave', name: 'Dave (英式男声)', gender: 'male', lang: 'en-GB' },
-      { id: 'Fin', name: 'Fin (爱尔兰男声)', gender: 'male', lang: 'en-IE' },
-      { id: 'Sarah', name: 'Sarah (柔和女声)', gender: 'female', lang: 'en' },
-      { id: 'Antoni', name: 'Antoni (温暖男声)', gender: 'male', lang: 'en' },
-      { id: 'Elli', name: 'Elli (年轻女声)', gender: 'female', lang: 'en' },
-      { id: 'Josh', name: 'Josh (年轻男声)', gender: 'male', lang: 'en' },
-      { id: 'Arnold', name: 'Arnold (浑厚男声)', gender: 'male', lang: 'en' },
-      { id: 'Adam', name: 'Adam (深沉男声)', gender: 'male', lang: 'en' },
-      { id: 'Sam', name: 'Sam (沙哑男声)', gender: 'male', lang: 'en' },
-    ],
-    pricePer1MChars: 200, // ~$0.20/1k chars = $200/1M
-    freeQuota: '10k 字符/月'
-  },
-  {
-    id: 'minimax',
-    name: 'MiniMax (中文最佳)',
-    type: 'minimax',
-    baseUrl: 'https://api.minimax.chat/v1',
-    voices: [
-      { id: 'male-qn-qingse', name: '青涩青年 (男)', gender: 'male', lang: 'zh' },
-      { id: 'male-qn-jingying', name: '精英青年 (男)', gender: 'male', lang: 'zh' },
-      { id: 'male-qn-badao', name: '霸道青年 (男)', gender: 'male', lang: 'zh' },
-      { id: 'male-qn-daxuesheng', name: '大学生 (男)', gender: 'male', lang: 'zh' },
-      { id: 'female-shaonv', name: '少女 (女)', gender: 'female', lang: 'zh' },
-      { id: 'female-yujie', name: '御姐 (女)', gender: 'female', lang: 'zh' },
-      { id: 'female-chengshu', name: '成熟女性 (女)', gender: 'female', lang: 'zh' },
-      { id: 'female-tianmei', name: '甜美女声 (女)', gender: 'female', lang: 'zh' },
-      { id: 'presenter_male', name: '男主播', gender: 'male', lang: 'zh' },
-      { id: 'presenter_female', name: '女主播', gender: 'female', lang: 'zh' },
-      { id: 'audiobook_male_1', name: '有声书男1', gender: 'male', lang: 'zh' },
-      { id: 'audiobook_male_2', name: '有声书男2', gender: 'male', lang: 'zh' },
-      { id: 'audiobook_female_1', name: '有声书女1', gender: 'female', lang: 'zh' },
-      { id: 'audiobook_female_2', name: '有声书女2', gender: 'female', lang: 'zh' },
-    ],
-    pricePer1MChars: 30, // Speech-02-Turbo
-    freeQuota: '无'
+    pricePer1MChars: 15, // tts-1: $0.015/1k chars
+    freeQuota: '无',
+    description: 'OpenAI生态，简单易用，tts-1-hd更高质量$30/1M'
   },
   {
     id: 'fishaudio',
-    name: 'Fish Audio',
+    name: 'Fish Audio 🐟',
     type: 'fishaudio',
     baseUrl: 'https://api.fish.audio/v1',
     voices: [
-      { id: 'default', name: '默认声音', gender: 'neutral', lang: 'zh' },
-      // Fish Audio uses voice cloning, users should add their own voices
+      { id: '7f92f8afb8ec43bf81429cc1c9199cb1', name: '丁真', gender: 'male', lang: 'zh' },
+      { id: '54a5170264694bfc8e9ad98df7bd89c3', name: 'AD学姐', gender: 'female', lang: 'zh' },
+      { id: '0eb38bc974e1459facca38b359e13511', name: '雷军', gender: 'male', lang: 'zh' },
+      { id: 'e58b0d7efca34eb38d5c4985e378abcb', name: '可莉', gender: 'female', lang: 'zh' },
+      { id: '3a558a19a7e4497186e5ece1c88da6da', name: '派蒙', gender: 'female', lang: 'zh' },
     ],
-    pricePer1MChars: 15, // ~$15/1M bytes ≈ chars
-    freeQuota: '1小时/月'
+    pricePer1MChars: 15, // ~$15/1M bytes
+    freeQuota: '100次/天 (免费)',
+    description: '开源TTS，中文最佳，20万+社区音色，支持voice clone'
   },
+
+  // ===== 中文专属 =====
+  {
+    id: 'minimax',
+    name: 'MiniMax 语音',
+    type: 'minimax',
+    baseUrl: 'https://api.minimax.chat/v1',
+    voices: [
+      { id: 'male-qn-qingse', name: '青涩青年', gender: 'male', lang: 'zh' },
+      { id: 'male-qn-jingying', name: '精英青年', gender: 'male', lang: 'zh' },
+      { id: 'male-qn-badao', name: '霸道青年', gender: 'male', lang: 'zh' },
+      { id: 'male-qn-daxuesheng', name: '大学生', gender: 'male', lang: 'zh' },
+      { id: 'female-shaonv', name: '少女', gender: 'female', lang: 'zh' },
+      { id: 'female-yujie', name: '御姐', gender: 'female', lang: 'zh' },
+      { id: 'female-chengshu', name: '成熟女性', gender: 'female', lang: 'zh' },
+      { id: 'female-tianmei', name: '甜美女声', gender: 'female', lang: 'zh' },
+      { id: 'presenter_male', name: '男主播', gender: 'male', lang: 'zh' },
+      { id: 'presenter_female', name: '女主播', gender: 'female', lang: 'zh' },
+      { id: 'audiobook_male_1', name: '有声书男1', gender: 'male', lang: 'zh' },
+      { id: 'audiobook_female_1', name: '有声书女1', gender: 'female', lang: 'zh' },
+    ],
+    pricePer1MChars: 30, // Speech-02-Turbo
+    freeQuota: '无',
+    description: '中文表现力佳，适合有声书和播客'
+  },
+
+  // ===== 内容创作 =====
+  {
+    id: 'playht',
+    name: 'PlayHT',
+    type: 'playht',
+    baseUrl: 'https://api.play.ht/api/v2',
+    voices: [
+      { id: 's3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json', name: 'Jennifer (美式女)', gender: 'female', lang: 'en' },
+      { id: 's3://voice-cloning-zero-shot/820da3d2-3a3b-42e7-844d-e68db835a206/sarah/manifest.json', name: 'Sarah (年轻女)', gender: 'female', lang: 'en' },
+      { id: 's3://voice-cloning-zero-shot/65f4e31f-c0c4-4b0b-a7c8-f98b99b3f3e6/male/manifest.json', name: 'Michael (美式男)', gender: 'male', lang: 'en' },
+    ],
+    pricePer1MChars: 50,
+    freeQuota: '2500字符/月',
+    description: '适合Podcast和视频配音，支持WebSocket流式'
+  },
+
+  // ===== 企业级 =====
   {
     id: 'azure',
     name: 'Azure TTS',
@@ -102,30 +153,43 @@ export const DEFAULT_TTS_PROVIDERS: TTSProvider[] = [
       { id: 'zh-CN-XiaohanNeural', name: '晓涵 (女)', gender: 'female', lang: 'zh-CN' },
       { id: 'zh-CN-XiaomengNeural', name: '晓梦 (女)', gender: 'female', lang: 'zh-CN' },
       { id: 'zh-CN-XiaomoNeural', name: '晓墨 (女)', gender: 'female', lang: 'zh-CN' },
-      { id: 'zh-CN-XiaoqiuNeural', name: '晓秋 (女)', gender: 'female', lang: 'zh-CN' },
-      { id: 'zh-CN-XiaoruiNeural', name: '晓睿 (女)', gender: 'female', lang: 'zh-CN' },
-      { id: 'zh-CN-XiaoshuangNeural', name: '晓双 (女/童声)', gender: 'female', lang: 'zh-CN' },
-      { id: 'zh-CN-XiaoxuanNeural', name: '晓萱 (女)', gender: 'female', lang: 'zh-CN' },
-      { id: 'zh-CN-XiaoyanNeural', name: '晓颜 (女)', gender: 'female', lang: 'zh-CN' },
-      { id: 'zh-CN-XiaoyouNeural', name: '晓悠 (女/童声)', gender: 'female', lang: 'zh-CN' },
       { id: 'zh-CN-YunfengNeural', name: '云枫 (男)', gender: 'male', lang: 'zh-CN' },
       { id: 'zh-CN-YunhaoNeural', name: '云皓 (男)', gender: 'male', lang: 'zh-CN' },
-      { id: 'zh-CN-YunxiaNeural', name: '云夏 (男/童声)', gender: 'male', lang: 'zh-CN' },
-      { id: 'zh-CN-YunyeNeural', name: '云野 (男)', gender: 'male', lang: 'zh-CN' },
-      { id: 'zh-CN-YunzeNeural', name: '云泽 (男)', gender: 'male', lang: 'zh-CN' },
       { id: 'en-US-JennyNeural', name: 'Jenny (美式女)', gender: 'female', lang: 'en-US' },
       { id: 'en-US-GuyNeural', name: 'Guy (美式男)', gender: 'male', lang: 'en-US' },
       { id: 'en-US-AriaNeural', name: 'Aria (美式女)', gender: 'female', lang: 'en-US' },
-      { id: 'en-US-DavisNeural', name: 'Davis (美式男)', gender: 'male', lang: 'en-US' },
       { id: 'en-GB-SoniaNeural', name: 'Sonia (英式女)', gender: 'female', lang: 'en-GB' },
       { id: 'en-GB-RyanNeural', name: 'Ryan (英式男)', gender: 'male', lang: 'en-GB' },
       { id: 'ja-JP-NanamiNeural', name: '七海 (日语女)', gender: 'female', lang: 'ja-JP' },
       { id: 'ja-JP-KeitaNeural', name: '圭太 (日语男)', gender: 'male', lang: 'ja-JP' },
       { id: 'ko-KR-SunHiNeural', name: '선희 (韩语女)', gender: 'female', lang: 'ko-KR' },
-      { id: 'ko-KR-InJoonNeural', name: '인준 (韩语男)', gender: 'male', lang: 'ko-KR' },
     ],
     pricePer1MChars: 16,
-    freeQuota: '50万字符/月 (免费层)'
+    freeQuota: '50万字符/月 (免费层)',
+    description: '140+语言400+音色，支持Custom Neural Voice'
+  },
+  {
+    id: 'google',
+    name: 'Google Cloud TTS',
+    type: 'google',
+    baseUrl: 'https://texttospeech.googleapis.com/v1',
+    voices: [
+      { id: 'cmn-CN-Standard-A', name: '中文女声A', gender: 'female', lang: 'zh-CN' },
+      { id: 'cmn-CN-Standard-B', name: '中文男声B', gender: 'male', lang: 'zh-CN' },
+      { id: 'cmn-CN-Standard-C', name: '中文男声C', gender: 'male', lang: 'zh-CN' },
+      { id: 'cmn-CN-Standard-D', name: '中文女声D', gender: 'female', lang: 'zh-CN' },
+      { id: 'cmn-CN-Wavenet-A', name: '中文女声WaveNet', gender: 'female', lang: 'zh-CN' },
+      { id: 'cmn-CN-Wavenet-B', name: '中文男声WaveNet', gender: 'male', lang: 'zh-CN' },
+      { id: 'en-US-Standard-A', name: 'English Male A', gender: 'male', lang: 'en-US' },
+      { id: 'en-US-Standard-C', name: 'English Female C', gender: 'female', lang: 'en-US' },
+      { id: 'en-US-Wavenet-D', name: 'English Male WaveNet', gender: 'male', lang: 'en-US' },
+      { id: 'en-US-Wavenet-F', name: 'English Female WaveNet', gender: 'female', lang: 'en-US' },
+      { id: 'ja-JP-Standard-A', name: '日语女声', gender: 'female', lang: 'ja-JP' },
+      { id: 'ja-JP-Standard-C', name: '日语男声', gender: 'male', lang: 'ja-JP' },
+    ],
+    pricePer1MChars: 16, // Standard: $4, WaveNet: $16, Neural2/Studio: $16
+    freeQuota: '400万字符/月 (免费层)',
+    description: '380+音色50+语言，Studio/Journey更高质量'
   },
 ];
 
@@ -456,6 +520,161 @@ const playAzureTTS = async (
   return playAudioBlob(audioBlob, settings.volume, cleanText.length);
 };
 
+// Google Cloud TTS
+const playGoogleTTS = async (
+  text: string,
+  voiceId: string,
+  provider: TTSProvider,
+  settings: TTSSettings
+): Promise<{ chars: number }> => {
+  const cleanText = cleanTextForTTS(text);
+  if (!cleanText) return { chars: 0 };
+
+  if (!provider.apiKey) throw new Error('Google Cloud API key not configured');
+
+  // Extract language from voiceId (e.g., "cmn-CN-Standard-A" -> "cmn-CN")
+  const langMatch = voiceId.match(/^([a-z]{2,3}-[A-Z]{2})/);
+  const languageCode = langMatch ? langMatch[1] : 'en-US';
+
+  const response = await fetch(`${provider.baseUrl}/text:synthesize?key=${provider.apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input: { text: cleanText },
+      voice: { languageCode, name: voiceId },
+      audioConfig: {
+        audioEncoding: 'MP3',
+        speakingRate: settings.rate,
+        volumeGainDb: (settings.volume - 1) * 6, // Convert 0-1 to dB
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(`Google TTS error: ${error.error?.message || response.status}`);
+  }
+
+  const data = await response.json();
+  const audioBlob = base64ToBlob(data.audioContent, 'audio/mp3');
+  return playAudioBlob(audioBlob, settings.volume, cleanText.length);
+};
+
+// Cartesia Sonic TTS
+const playCartesiaTTS = async (
+  text: string,
+  voiceId: string,
+  provider: TTSProvider,
+  settings: TTSSettings
+): Promise<{ chars: number }> => {
+  const cleanText = cleanTextForTTS(text);
+  if (!cleanText) return { chars: 0 };
+
+  if (!provider.apiKey) throw new Error('Cartesia API key not configured');
+
+  const response = await fetch(`${provider.baseUrl}/tts/bytes`, {
+    method: 'POST',
+    headers: {
+      'X-API-Key': provider.apiKey,
+      'Cartesia-Version': '2024-06-10',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model_id: 'sonic-english',
+      transcript: cleanText,
+      voice: { mode: 'id', id: voiceId },
+      output_format: { container: 'mp3', encoding: 'mp3', sample_rate: 44100 },
+      language: 'en',
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Cartesia TTS error: ${error}`);
+  }
+
+  const audioBlob = await response.blob();
+  return playAudioBlob(audioBlob, settings.volume, cleanText.length);
+};
+
+// PlayHT TTS
+const playPlayHTTTS = async (
+  text: string,
+  voiceId: string,
+  provider: TTSProvider,
+  settings: TTSSettings
+): Promise<{ chars: number }> => {
+  const cleanText = cleanTextForTTS(text);
+  if (!cleanText) return { chars: 0 };
+
+  if (!provider.apiKey) throw new Error('PlayHT API key not configured');
+
+  // PlayHT uses userId:apiKey format
+  const [userId, apiKey] = provider.apiKey.includes(':')
+    ? provider.apiKey.split(':')
+    : ['', provider.apiKey];
+
+  const response = await fetch(`${provider.baseUrl}/tts`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'X-User-Id': userId,
+      'Content-Type': 'application/json',
+      'Accept': 'audio/mpeg',
+    },
+    body: JSON.stringify({
+      text: cleanText,
+      voice: voiceId,
+      output_format: 'mp3',
+      speed: settings.rate,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`PlayHT TTS error: ${error}`);
+  }
+
+  const audioBlob = await response.blob();
+  return playAudioBlob(audioBlob, settings.volume, cleanText.length);
+};
+
+// Custom OpenAI-compatible TTS (for custom providers)
+const playCustomTTS = async (
+  text: string,
+  voiceId: string,
+  provider: TTSProvider,
+  settings: TTSSettings
+): Promise<{ chars: number }> => {
+  const cleanText = cleanTextForTTS(text);
+  if (!cleanText) return { chars: 0 };
+
+  if (!provider.baseUrl) throw new Error('Custom TTS base URL not configured');
+
+  // Use OpenAI-compatible format by default
+  const response = await fetch(`${provider.baseUrl}/audio/speech`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${provider.apiKey || ''}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'tts-1',
+      input: cleanText,
+      voice: voiceId || 'alloy',
+      speed: settings.rate,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Custom TTS error: ${error}`);
+  }
+
+  const audioBlob = await response.blob();
+  return playAudioBlob(audioBlob, settings.volume, cleanText.length);
+};
+
 // ============ HELPER FUNCTIONS ============
 
 const base64ToBlob = (base64: string, mimeType: string): Blob => {
@@ -524,6 +743,18 @@ export const speak = async (
       break;
     case 'azure':
       result = await playAzureTTS(text, voiceId, provider, settings);
+      break;
+    case 'google':
+      result = await playGoogleTTS(text, voiceId, provider, settings);
+      break;
+    case 'cartesia':
+      result = await playCartesiaTTS(text, voiceId, provider, settings);
+      break;
+    case 'playht':
+      result = await playPlayHTTTS(text, voiceId, provider, settings);
+      break;
+    case 'custom':
+      result = await playCustomTTS(text, voiceId, provider, settings);
       break;
     default:
       result = await playBrowserTTS(text, voiceId, settings);
