@@ -104,7 +104,7 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 | Claude | ✅ Supported | Native API with special header |
 | OpenRouter | ✅ Supported | OpenAI-compatible endpoint |
 | SiliconFlow | ✅ Supported | OpenAI-compatible endpoint |
-| OpenAI Official | ⚠️ Sometimes works | Use OpenRouter instead |
+| OpenAI Official | ✅ Supported | OpenAI-compatible endpoint |
 | DeepSeek Official | ❌ CORS blocked | Use OpenRouter or SiliconFlow |
 
 **Recommendation**: For the best experience, use **[OpenRouter](https://openrouter.ai)** or **[SiliconFlow](https://siliconflow.cn)** as your API provider. They support CORS and give you access to all major models through a single endpoint.
@@ -186,7 +186,7 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 | Claude | ✅ 支持 | 原生 API（特殊 Header） |
 | OpenRouter | ✅ 支持 | OpenAI 兼容接口 |
 | 硅基流动 (SiliconFlow) | ✅ 支持 | OpenAI 兼容接口 |
-| OpenAI 官方 | ⚠️ 有时可用 | 建议用 OpenRouter |
+| OpenAI 官方 | ✅ 支持 | OpenAI 兼容接口 |
 | DeepSeek 官方 | ❌ 被 CORS 阻止 | 用 OpenRouter 或硅基流动 |
 
 **推荐方案**：使用 **[OpenRouter](https://openrouter.ai)** 或 **[硅基流动](https://siliconflow.cn)** 作为 API 中转服务，它们支持 CORS 且可以通过统一接口访问所有主流模型。
