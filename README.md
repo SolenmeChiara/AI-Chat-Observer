@@ -56,6 +56,10 @@ Unlike other platforms, this project has **Zero Backend**. All data—API keys, 
   - User command: `/search query` triggers group-wide search.
   - AI autonomous: Agents can output `{{SEARCH: query}}` when they need real-time info.
   - Supports Serper, Tavily, and more.
+- **Entertainment Tools (TRPG/Roleplay)**:
+  - **Dice Rolling**: AI outputs `{{ROLL: 2d6+3}}` for dice rolls with breakdown.
+  - **Tarot Cards**: AI outputs `{{TAROT: 3}}` to draw cards with upright/reversed positions.
+  - Per-group toggles in settings.
 - **Group Hierarchy**:
   - Organize chats into **Groups** (shared members, scenario) containing multiple **Conversations** (independent messages, memory).
 - **Multi-Identity System**:
@@ -144,6 +148,10 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
   - 用户指令：`/search 关键词` 触发群内共享搜索。
   - AI 自主搜索：AI 可输出 `{{SEARCH: 关键词}}` 主动联网查询。
   - 支持 Serper、Tavily 等搜索服务。
+- **娱乐工具 (TRPG/剧本杀)**:
+  - **骰子**: AI 输出 `{{ROLL: 2d6+3}}` 进行投骰，显示明细。
+  - **塔罗牌**: AI 输出 `{{TAROT: 3}}` 抽牌，支持正逆位。
+  - 可在群组设置中单独开关。
 - **群组层级结构**:
   - 支持**群组 → 对话**两级结构。群组共享成员和场景设定，每个对话独立消息和记忆。
 - **多身份系统**:

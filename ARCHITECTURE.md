@@ -1,8 +1,13 @@
 # 🏗️ 项目架构文档 (Project Architecture)
 
-本文档详细描述了 **AI 群聊观察会 (V5.2)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
+本文档详细描述了 **AI 群聊观察会 (V5.3)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
 
-**V5.2 新增功能：**
+**V5.3 新增功能：**
+- 娱乐工具：骰子 `{{ROLL: XdY+Z}}` 和塔罗牌 `{{TAROT: N}}`
+- 群组级娱乐功能开关
+- 自动提示词注入 (AI 自动获知可用的娱乐工具)
+
+**V5.2 功能：**
 - 多服务商 TTS 语音合成 (Browser/OpenAI/ElevenLabs/MiniMax/Fish Audio/Azure)
 - 自定义音色管理与 Agent 音色分配
 - 全局展开/折叠思维链按钮
@@ -40,7 +45,8 @@ src/
 │   ├── modelFetcher.ts  # 远程模型列表获取
 │   ├── visionProxyService.ts # 视觉代理 (让纯文本模型"看"图片)
 │   ├── summaryService.ts# 自动起名与记忆总结服务
-│   └── ttsService.ts    # TTS 语音合成服务 (多服务商适配)
+│   ├── ttsService.ts    # TTS 语音合成服务 (多服务商适配)
+│   └── entertainmentService.ts # 娱乐工具 (骰子/塔罗牌)
 │
 ├── types.ts             # TypeScript 类型定义 (数据契约)
 ├── constants.ts         # 常量、默认值、Logo 映射
@@ -64,7 +70,13 @@ interface ChatGroup {
   memberIds: string[];     // 共享的成员列表
   scenario?: string;       // 共享的剧本 (World View)
   memoryConfig: MemoryConfig; // 共享的记忆配置
+  entertainmentConfig?: EntertainmentConfig; // 娱乐工具配置 (V5.3)
   createdAt: number;
+}
+
+interface EntertainmentConfig {
+  enableDice: boolean;     // 启用骰子 {{ROLL: XdY+Z}}
+  enableTarot: boolean;    // 启用塔罗牌 {{TAROT: N}}
 }
 ```
 
@@ -165,6 +177,8 @@ interface TTSSettings {
 | `{{PASS}}` | 所有 | 跳过本轮发言 |
 | `{{REPLY: id}}` | 所有 | 引用某条消息 |
 | `{{SEARCH: query}}` | 需配置 | AI 主动联网搜索 |
+| `{{ROLL: XdY+Z}}` | 需开启 | 投掷骰子 (如 2d6+3) |
+| `{{TAROT: N}}` | 需开启 | 抽取 N 张塔罗牌 (支持正逆位) |
 | `{{MUTE: Name, Duration}}` | Admin | 禁言成员 (10min/1h/1d/永久) |
 | `{{UNMUTE: Name}}` | Admin | 解除禁言 |
 | `{{NOTE: content}}` | Admin | 添加记忆便签 |
@@ -209,7 +223,26 @@ Anthropic API 限制图片 5MB，因此在上传时自动压缩：
 2.  **压缩**: 使用 Canvas 降低质量 (0.9→0.3) 和尺寸 (1.0→0.25)，输出 JPEG。
 3.  **配置**: 用户可在设置中关闭或调整阈值 (默认 4MB)。
 
-### 4.8 TTS 语音合成系统 (Text-to-Speech) - V5.2 新增
+### 4.8 娱乐工具系统 (Entertainment Tools) - V5.3 新增
+为 TRPG、剧本杀等角色扮演场景提供骰子和塔罗牌功能。
+
+**骰子系统 (Dice Rolling)：**
+*   **语法**: `{{ROLL: XdY+Z}}` - X 个 Y 面骰子 + 修正值 Z
+*   **示例**: `{{ROLL: 2d6+3}}` → `2d6+3 = 11 (4+5+2)`
+*   **实现**: `entertainmentService.rollDice()` 解析表达式并返回明细
+
+**塔罗牌系统 (Tarot Cards)：**
+*   **语法**: `{{TAROT: N}}` - 抽取 N 张牌
+*   **牌库**: 22 张大阿卡纳牌 (Major Arcana)
+*   **正逆位**: 每张牌 50% 概率逆位，显示为 "🔮 The Fool (Reversed)"
+*   **三牌阵**: 当 N=3 时，自动标注 Past / Present / Future
+
+**配置与提示词注入：**
+*   群组设置中可单独开关骰子/塔罗功能
+*   当功能开启时，自动在 System Prompt 中注入使用说明
+*   AI 完成输出后，`App.tsx` 解析指令并插入系统消息显示结果
+
+### 4.9 TTS 语音合成系统 (Text-to-Speech) - V5.2 新增
 支持多种 TTS 服务商，实现消息朗读功能。
 
 **支持的服务商：**
