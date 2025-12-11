@@ -784,10 +784,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                      </div>
                      <div className="flex-1 min-w-0">
                        <input
-                         className={`w-full bg-transparent text-sm font-semibold focus:outline-none ${isActiveGroup ? 'text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}`}
+                         className={`w-full bg-transparent text-sm font-semibold focus:outline-none pointer-events-none ${isActiveGroup ? 'text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}`}
                          value={group.name}
                          onChange={(e) => onRenameGroup(group.id, e.target.value)}
-                         onClick={(e) => e.stopPropagation()}
+                         onDoubleClick={(e) => { e.stopPropagation(); (e.target as HTMLInputElement).classList.remove('pointer-events-none'); (e.target as HTMLInputElement).select(); }}
+                         onBlur={(e) => (e.target as HTMLInputElement).classList.add('pointer-events-none')}
                        />
                        <div className="text-[10px] text-gray-400">{groupSessions.length} 个对话 • {group.memberIds.length} 位成员</div>
                      </div>
@@ -813,12 +814,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                            <div className={`w-5 h-5 rounded flex items-center justify-center ${activeSessionId === session.id ? 'bg-zinc-900 dark:bg-zinc-500 text-white' : 'bg-gray-200 dark:bg-zinc-600 text-gray-400'}`}>
                              <MessageSquare size={10} />
                            </div>
-                           <div className="flex-1 min-w-0">
+                           <div className="flex-1 min-w-0" onClick={() => onSwitchSession(session.id)}>
                              <input
-                               className={`w-full bg-transparent text-xs font-medium focus:outline-none ${activeSessionId === session.id ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}
+                               className={`w-full bg-transparent text-xs font-medium focus:outline-none pointer-events-none ${activeSessionId === session.id ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}
                                value={session.name}
                                onChange={(e) => onRenameSession(session.id, e.target.value)}
-                               onClick={(e) => e.stopPropagation()}
+                               onDoubleClick={(e) => { e.stopPropagation(); (e.target as HTMLInputElement).classList.remove('pointer-events-none'); (e.target as HTMLInputElement).select(); }}
+                               onBlur={(e) => (e.target as HTMLInputElement).classList.add('pointer-events-none')}
                              />
                            </div>
                            <span className="text-[10px] text-gray-400">{session.messages.length}条</span>
