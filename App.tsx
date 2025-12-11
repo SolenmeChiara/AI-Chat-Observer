@@ -846,7 +846,7 @@ const App: React.FC = () => {
 
 
   // --- CORE LOGIC ---
-  const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false) => {
+  const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false, retryCount: number = 0) => {
     if ((activeSession.mutedAgentIds || []).includes(agentId)) return;
 
     const agent = agents.find(a => a.id === agentId);
@@ -897,22 +897,67 @@ const App: React.FC = () => {
 
     updateThisSession(s => ({ ...s, messages: [...s.messages, placeholderMessage], lastUpdated: Date.now() }));
 
-    const timeoutId = setTimeout(() => {
+    // Track partial output for timeout recovery
+    let partialOutputText = '';
+
+    const timeoutId = setTimeout(async () => {
         if (abortControllers.current.has(agentId)) {
             const ctrl = abortControllers.current.get(agentId);
             ctrl?.abort();
-            updateThisSession(s => ({
-                ...s,
-                messages: s.messages.map(m => m.id === newMessageId ? {
-                    ...m, isError: true, text: m.text + `\n[${formatErrorTimestamp()}] [系统: 响应超时 (${settings.timeoutDuration/1000}s), 已强制终止]`
-                } : m)
-            }));
+
+            // Get the current partial output from the message
+            const currentSession = sessions.find(s => s.id === capturedSessionId);
+            const partialMsg = currentSession?.messages.find(m => m.id === newMessageId);
+            partialOutputText = partialMsg?.text || '';
+
+            // Clean up current attempt
             setProcessingAgents(prev => {
                 const next = new Set(prev);
                 next.delete(agentId);
                 return next;
             });
             abortControllers.current.delete(agentId);
+            pendingTriggerRef.current.delete(agentId);
+
+            // If this is first attempt (retryCount === 0), retry once
+            if (retryCount === 0) {
+                console.log(`[${agent.name}] Timeout on first attempt, retrying...`);
+                // Remove the failed placeholder
+                updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
+                // Retry with retryCount = 1
+                triggerAgentReply(agentId, disableSearch, 1);
+            } else {
+                // Already retried, give up and insert system message
+                console.log(`[${agent.name}] Timeout after retry, inserting recovery message`);
+
+                // Update the failed message with error marker
+                updateThisSession(s => ({
+                    ...s,
+                    messages: s.messages.map(m => m.id === newMessageId ? {
+                        ...m, isError: true, isStreaming: false,
+                        text: partialOutputText
+                            ? `${partialOutputText}\n\n[${formatErrorTimestamp()}] [系统: 响应超时，输出被截断]`
+                            : `[${formatErrorTimestamp()}] [系统: 响应超时 (${settings.timeoutDuration/1000}s)]`
+                    } : m)
+                }));
+
+                // Insert system message to prompt other AIs to continue
+                const recoveryMessage: Message = {
+                    id: `recovery-${Date.now()}`,
+                    senderId: 'system',
+                    text: partialOutputText
+                        ? `[系统提示] ${agent.name} 由于网络问题输出被截断。它的未完成输出已显示在上方。请其他成员继续当前话题。`
+                        : `[系统提示] 一个未知错误打断了对话。请继续当下的讨论。`,
+                    timestamp: Date.now(),
+                    isSystem: true
+                };
+
+                updateThisSession(s => ({
+                    ...s,
+                    messages: [...s.messages, recoveryMessage],
+                    lastUpdated: Date.now()
+                }));
+            }
         }
     }, settings.timeoutDuration || 30000);
 
@@ -1322,7 +1367,7 @@ const App: React.FC = () => {
       });
       abortControllers.current.delete(agentId);
     }
-  }, [agents, providers, groups, messages, settings, processingAgents, activeSession.mutedAgentIds, activeSession.groupId, activeSession.summary, activeSession.adminNotes, activeSessionId]);
+  }, [agents, providers, groups, messages, settings, processingAgents, activeSession.mutedAgentIds, activeSession.groupId, activeSession.summary, activeSession.adminNotes, activeSessionId, sessions]);
 
 
   // --- USER ACTION ---
