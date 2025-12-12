@@ -65,36 +65,75 @@ export const rollDice = (expression: string): DiceResult | null => {
 
 // ============ TAROT SYSTEM ============
 
-// Major Arcana (大阿卡纳)
+// Major Arcana (大阿卡纳) - 22 张
 const MAJOR_ARCANA = [
-  { id: 0, name: '愚者', nameEn: 'The Fool' },
-  { id: 1, name: '魔术师', nameEn: 'The Magician' },
-  { id: 2, name: '女祭司', nameEn: 'The High Priestess' },
-  { id: 3, name: '女皇', nameEn: 'The Empress' },
-  { id: 4, name: '皇帝', nameEn: 'The Emperor' },
-  { id: 5, name: '教皇', nameEn: 'The Hierophant' },
-  { id: 6, name: '恋人', nameEn: 'The Lovers' },
-  { id: 7, name: '战车', nameEn: 'The Chariot' },
-  { id: 8, name: '力量', nameEn: 'Strength' },
-  { id: 9, name: '隐士', nameEn: 'The Hermit' },
-  { id: 10, name: '命运之轮', nameEn: 'Wheel of Fortune' },
-  { id: 11, name: '正义', nameEn: 'Justice' },
-  { id: 12, name: '倒吊人', nameEn: 'The Hanged Man' },
-  { id: 13, name: '死神', nameEn: 'Death' },
-  { id: 14, name: '节制', nameEn: 'Temperance' },
-  { id: 15, name: '恶魔', nameEn: 'The Devil' },
-  { id: 16, name: '塔', nameEn: 'The Tower' },
-  { id: 17, name: '星星', nameEn: 'The Star' },
-  { id: 18, name: '月亮', nameEn: 'The Moon' },
-  { id: 19, name: '太阳', nameEn: 'The Sun' },
-  { id: 20, name: '审判', nameEn: 'Judgement' },
-  { id: 21, name: '世界', nameEn: 'The World' }
+  { id: 0, name: '愚者', nameEn: 'The Fool', suit: 'major' },
+  { id: 1, name: '魔术师', nameEn: 'The Magician', suit: 'major' },
+  { id: 2, name: '女祭司', nameEn: 'The High Priestess', suit: 'major' },
+  { id: 3, name: '女皇', nameEn: 'The Empress', suit: 'major' },
+  { id: 4, name: '皇帝', nameEn: 'The Emperor', suit: 'major' },
+  { id: 5, name: '教皇', nameEn: 'The Hierophant', suit: 'major' },
+  { id: 6, name: '恋人', nameEn: 'The Lovers', suit: 'major' },
+  { id: 7, name: '战车', nameEn: 'The Chariot', suit: 'major' },
+  { id: 8, name: '力量', nameEn: 'Strength', suit: 'major' },
+  { id: 9, name: '隐士', nameEn: 'The Hermit', suit: 'major' },
+  { id: 10, name: '命运之轮', nameEn: 'Wheel of Fortune', suit: 'major' },
+  { id: 11, name: '正义', nameEn: 'Justice', suit: 'major' },
+  { id: 12, name: '倒吊人', nameEn: 'The Hanged Man', suit: 'major' },
+  { id: 13, name: '死神', nameEn: 'Death', suit: 'major' },
+  { id: 14, name: '节制', nameEn: 'Temperance', suit: 'major' },
+  { id: 15, name: '恶魔', nameEn: 'The Devil', suit: 'major' },
+  { id: 16, name: '塔', nameEn: 'The Tower', suit: 'major' },
+  { id: 17, name: '星星', nameEn: 'The Star', suit: 'major' },
+  { id: 18, name: '月亮', nameEn: 'The Moon', suit: 'major' },
+  { id: 19, name: '太阳', nameEn: 'The Sun', suit: 'major' },
+  { id: 20, name: '审判', nameEn: 'Judgement', suit: 'major' },
+  { id: 21, name: '世界', nameEn: 'The World', suit: 'major' }
 ];
+
+// Minor Arcana (小阿卡纳) - 56 张
+const SUITS = [
+  { id: 'wands', name: '权杖', nameEn: 'Wands', symbol: '🪄' },
+  { id: 'cups', name: '圣杯', nameEn: 'Cups', symbol: '🏆' },
+  { id: 'swords', name: '宝剑', nameEn: 'Swords', symbol: '⚔️' },
+  { id: 'pentacles', name: '星币', nameEn: 'Pentacles', symbol: '⭐' }
+];
+
+const RANKS = [
+  { rank: 1, name: '王牌', nameEn: 'Ace' },
+  { rank: 2, name: '二', nameEn: 'Two' },
+  { rank: 3, name: '三', nameEn: 'Three' },
+  { rank: 4, name: '四', nameEn: 'Four' },
+  { rank: 5, name: '五', nameEn: 'Five' },
+  { rank: 6, name: '六', nameEn: 'Six' },
+  { rank: 7, name: '七', nameEn: 'Seven' },
+  { rank: 8, name: '八', nameEn: 'Eight' },
+  { rank: 9, name: '九', nameEn: 'Nine' },
+  { rank: 10, name: '十', nameEn: 'Ten' },
+  { rank: 11, name: '侍从', nameEn: 'Page' },
+  { rank: 12, name: '骑士', nameEn: 'Knight' },
+  { rank: 13, name: '王后', nameEn: 'Queen' },
+  { rank: 14, name: '国王', nameEn: 'King' }
+];
+
+// Generate Minor Arcana cards
+const MINOR_ARCANA = SUITS.flatMap((suit, suitIdx) =>
+  RANKS.map((rank, rankIdx) => ({
+    id: 22 + suitIdx * 14 + rankIdx,
+    name: `${suit.name}${rank.name}`,
+    nameEn: `${rank.nameEn} of ${suit.nameEn}`,
+    suit: suit.id
+  }))
+);
+
+// Full 78-card deck
+const FULL_DECK = [...MAJOR_ARCANA, ...MINOR_ARCANA];
 
 export interface TarotCard {
   id: number;
   name: string;
   nameEn: string;
+  suit: string;       // 'major' | 'wands' | 'cups' | 'swords' | 'pentacles'
   isReversed: boolean;  // 逆位
 }
 
@@ -104,16 +143,16 @@ export interface TarotResult {
 }
 
 /**
- * Draw tarot cards
- * @param count Number of cards to draw (1-10)
+ * Draw tarot cards from full 78-card deck
+ * @param count Number of cards to draw (1-22)
  */
 export const drawTarot = (count: number): TarotResult | null => {
   // Sanity check
-  if (count < 1 || count > 10) return null;
-  if (count > MAJOR_ARCANA.length) count = MAJOR_ARCANA.length;
+  if (count < 1 || count > 22) return null;
+  if (count > FULL_DECK.length) count = FULL_DECK.length;
 
   // Shuffle and pick cards (without replacement)
-  const deck = [...MAJOR_ARCANA];
+  const deck = [...FULL_DECK];
   const cards: TarotCard[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -127,22 +166,18 @@ export const drawTarot = (count: number): TarotResult | null => {
     });
   }
 
-  // Build summary
+  // Build summary with suit indicator for minor arcana
   const cardStrings = cards.map(c => {
     const position = c.isReversed ? '逆位' : '正位';
-    return `【${c.name}】${position}`;
+    const isMajor = c.suit === 'major';
+    return isMajor ? `【${c.name}】${position}` : `【${c.name}】${position}`;
   });
 
   let summary: string;
   if (count === 1) {
-    summary = `抽取塔罗牌: ${cardStrings[0]}`;
-  } else if (count === 3) {
-    summary = `塔罗三牌阵:\n` +
-      `  过去: ${cardStrings[0]}\n` +
-      `  现在: ${cardStrings[1]}\n` +
-      `  未来: ${cardStrings[2]}`;
+    summary = `🃏 抽取塔罗牌: ${cardStrings[0]}`;
   } else {
-    summary = `抽取 ${count} 张塔罗牌:\n` + cardStrings.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
+    summary = `🃏 抽取 ${count} 张塔罗牌:\n` + cardStrings.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
   }
 
   return { cards, summary };

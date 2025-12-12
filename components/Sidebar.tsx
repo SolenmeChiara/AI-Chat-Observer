@@ -4,7 +4,7 @@ import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, 
 import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
-import { getBrowserVoices, DEFAULT_TTS_PROVIDERS } from '../services/ttsService';
+import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
 
 // TTS Settings Panel Component
 const TTSSettingsPanel: React.FC<{
@@ -22,6 +22,7 @@ const TTSSettingsPanel: React.FC<{
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [newProviderName, setNewProviderName] = useState('');
   const [newProviderType, setNewProviderType] = useState<TTSEngineType>('custom');
+  const [fetchingVoices, setFetchingVoices] = useState(false);
 
   // Load browser voices on mount
   useEffect(() => {
@@ -116,6 +117,28 @@ const TTSSettingsPanel: React.FC<{
     }));
     setAgents(updatedAgents);
   };
+
+  // Fetch voices from provider API (ElevenLabs, Fish Audio, etc.)
+  const handleFetchVoices = async () => {
+    if (!activeProvider || fetchingVoices) return;
+    setFetchingVoices(true);
+    try {
+      const voices = await fetchProviderVoices(activeProvider);
+      if (voices && voices.length > 0) {
+        updateProvider(activeProvider.id, { voices });
+        alert(`成功获取 ${voices.length} 个音色`);
+      } else {
+        alert('此服务商不支持自动获取音色，请手动添加');
+      }
+    } catch (err: any) {
+      alert(`获取音色失败: ${err.message}`);
+    } finally {
+      setFetchingVoices(false);
+    }
+  };
+
+  // Check if provider supports voice fetching
+  const supportsFetchVoices = activeProvider?.type === 'elevenlabs' || activeProvider?.type === 'fishaudio';
 
   return (
     <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
@@ -263,14 +286,27 @@ const TTSSettingsPanel: React.FC<{
 
                 {/* Voice Management */}
                 <div className="border-t border-gray-200 dark:border-zinc-600 pt-2">
-                  <div
-                    className="flex items-center justify-between cursor-pointer"
-                    onClick={() => setExpandedProvider(expandedProvider === activeProvider.id ? null : activeProvider.id)}
-                  >
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                      音色管理 ({activeProvider.voices.length} 个)
-                    </span>
-                    {expandedProvider === activeProvider.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  <div className="flex items-center justify-between">
+                    <div
+                      className="flex items-center gap-1 cursor-pointer flex-1"
+                      onClick={() => setExpandedProvider(expandedProvider === activeProvider.id ? null : activeProvider.id)}
+                    >
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                        音色管理 ({activeProvider.voices.length} 个)
+                      </span>
+                      {expandedProvider === activeProvider.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    </div>
+                    {supportsFetchVoices && activeProvider.apiKey && (
+                      <button
+                        onClick={handleFetchVoices}
+                        disabled={fetchingVoices}
+                        className="text-[10px] px-2 py-0.5 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white rounded flex items-center gap-1"
+                        title="从API获取可用音色"
+                      >
+                        <RefreshCw size={10} className={fetchingVoices ? 'animate-spin' : ''} />
+                        {fetchingVoices ? '获取中...' : '获取音色'}
+                      </button>
+                    )}
                   </div>
 
                   {expandedProvider === activeProvider.id && (

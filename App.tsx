@@ -383,6 +383,8 @@ const App: React.FC = () => {
     setTotalCost(0);
     handleStopAll();
     handleStopTTS(); // Also stop TTS
+    agentLastSpokeAt.current.clear(); // Reset cooldowns
+    mentionQueueRef.current = []; // Clear mention queue
   };
 
   // --- TTS FUNCTIONS ---
@@ -1978,9 +1980,18 @@ const App: React.FC = () => {
 
     // Check for @全体成员
     if (lastTextLower.includes('@全体成员') || lastTextLower.includes('@all')) {
-        // Shuffle all eligible agents randomly
-        agentsToQueue = [...eligibleAgents].sort(() => Math.random() - 0.5);
-        console.log('[Mention] @全体成员 detected, queuing', agentsToQueue.length, 'agents:', agentsToQueue.map(a => a.name));
+        // @全体成员 bypasses cooldown - use sessionMembers, not eligibleAgents
+        // Only filter out: processing, pending, muted, unconfigured
+        const allMentionAgents = sessionMembers.filter(a => {
+            const isProcessing = processingAgents.has(a.id);
+            const isPending = pendingTriggerRef.current.has(a.id);
+            const isMuted = (activeSession.mutedAgentIds || []).includes(a.id);
+            const isUnconfigured = !a.providerId || !a.modelId;
+            return !isProcessing && !isPending && !isMuted && !isUnconfigured;
+        });
+        // Shuffle randomly
+        agentsToQueue = allMentionAgents.sort(() => Math.random() - 0.5);
+        console.log('[Mention] @全体成员 detected (bypassing cooldown), queuing', agentsToQueue.length, 'agents:', agentsToQueue.map(a => a.name));
     } else {
         // Extract all @mentions in order
         const mentionMatches = lastMessage.text.matchAll(/@(\S+)/g);

@@ -781,5 +781,85 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   autoPlayNewMessages: false,
 };
 
+// ============ DYNAMIC VOICE FETCHING ============
+
+/**
+ * Fetch available voices from ElevenLabs API
+ * Returns array of TTSVoice objects
+ */
+export const fetchElevenLabsVoices = async (apiKey: string): Promise<TTSVoice[]> => {
+  if (!apiKey) throw new Error('ElevenLabs API key required');
+
+  const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+    method: 'GET',
+    headers: {
+      'xi-api-key': apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(`ElevenLabs API error: ${error.detail?.message || response.status}`);
+  }
+
+  const data = await response.json();
+
+  // Map API response to TTSVoice format
+  return (data.voices || []).map((voice: any) => ({
+    id: voice.voice_id,
+    name: voice.name,
+    gender: voice.labels?.gender || 'neutral',
+    lang: voice.labels?.language || 'en',
+  }));
+};
+
+/**
+ * Fetch available voices from Fish Audio API
+ */
+export const fetchFishAudioVoices = async (apiKey: string): Promise<TTSVoice[]> => {
+  if (!apiKey) throw new Error('Fish Audio API key required');
+
+  // Fish Audio uses /model endpoint to list available voice models
+  const response = await fetch('https://api.fish.audio/model?page_size=20&sort=score', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Fish Audio API error: ${error}`);
+  }
+
+  const data = await response.json();
+
+  return (data.items || []).map((model: any) => ({
+    id: model._id,
+    name: model.title || model.name || model._id,
+    gender: 'neutral' as const,
+    lang: model.language || 'zh',
+  }));
+};
+
+/**
+ * Fetch voices for a provider (if supported)
+ * Returns null if provider doesn't support dynamic voice fetching
+ */
+export const fetchProviderVoices = async (
+  provider: TTSProvider
+): Promise<TTSVoice[] | null> => {
+  if (!provider.apiKey) return null;
+
+  switch (provider.type) {
+    case 'elevenlabs':
+      return fetchElevenLabsVoices(provider.apiKey);
+    case 'fishaudio':
+      return fetchFishAudioVoices(provider.apiKey);
+    default:
+      return null; // Provider doesn't support dynamic voice fetching
+  }
+};
+
 // Legacy exports for compatibility
 export const OPENAI_VOICES = DEFAULT_TTS_PROVIDERS.find(p => p.id === 'openai')?.voices || [];
