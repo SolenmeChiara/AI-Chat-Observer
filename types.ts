@@ -98,7 +98,7 @@ export interface Message {
 
   // New Features
   isSystem?: boolean; // System notification (e.g. "User muted Agent A")
-  attachment?: Attachment; // Image upload or Document
+  attachments?: Attachment[]; // Multiple images/documents
   replyToId?: string; // ID of the message being replied to
 
   // 搜索结果

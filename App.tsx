@@ -54,7 +54,7 @@ const App: React.FC = () => {
   // Input State
   const [inputText, setInputText] = useState('');
   const [replyToId, setReplyToId] = useState<string | null>(null);
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isParsingFile, setIsParsingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -86,6 +86,10 @@ const App: React.FC = () => {
 
   // Ref to prevent duplicate triggers (sync check before async state update)
   const pendingTriggerRef = useRef<Set<string>>(new Set());
+
+  // Persistent pending mentions: agents that were @mentioned but haven't responded yet
+  // These will keep being retried until the agent actually responds
+  const pendingMentionsRef = useRef<Set<string>>(new Set());
 
   // Track last message count when summary was triggered (per session)
   const lastSummaryCountRef = useRef<Map<string, number>>(new Map());
@@ -178,6 +182,7 @@ const App: React.FC = () => {
     agentLastSpokeAt.current.clear();
     mentionQueueRef.current = [];
     pendingTriggerRef.current.clear();
+    pendingMentionsRef.current.clear();
     console.log('[Session] Switched to session:', activeSessionId, '- cleared cooldowns and queues');
   }, [activeSessionId]);
 
@@ -385,6 +390,7 @@ const App: React.FC = () => {
     handleStopTTS(); // Also stop TTS
     agentLastSpokeAt.current.clear(); // Reset cooldowns
     mentionQueueRef.current = []; // Clear mention queue
+    pendingMentionsRef.current.clear(); // Clear pending mentions
   };
 
   // --- TTS FUNCTIONS ---
@@ -1104,34 +1110,43 @@ const App: React.FC = () => {
         const visionProvider = providers.find(p => p.id === agent.config.visionProxyProviderId);
 
         if (visionProvider && visionProvider.apiKey) {
-          // Find messages with image attachments
-          const messagesWithImages = messages.filter(m => m.attachment?.type === 'image');
+          // Find messages with image attachments (now supports multiple)
+          const messagesWithImages = messages.filter(m =>
+            m.attachments?.some(att => att.type === 'image')
+          );
 
           if (messagesWithImages.length > 0) {
-            // Process images in parallel
+            // Process all images in parallel, keyed by "msgId-attachmentIndex"
             const imageDescriptions = new Map<string, string>();
 
-            await Promise.all(messagesWithImages.map(async (msg) => {
-              if (msg.attachment?.content) {
-                const base64Data = msg.attachment.content.split(',')[1] || msg.attachment.content;
-                const description = await describeImage(base64Data, msg.attachment.mimeType, visionProvider, agent.config.visionProxyModelId);
-                imageDescriptions.set(msg.id, description);
-              }
-            }));
+            await Promise.all(messagesWithImages.flatMap(msg =>
+              (msg.attachments || [])
+                .map((att, idx) => ({ att, idx, msgId: msg.id }))
+                .filter(({ att }) => att.type === 'image' && att.content)
+                .map(async ({ att, idx, msgId }) => {
+                  const base64Data = att.content.split(',')[1] || att.content;
+                  const description = await describeImage(base64Data, att.mimeType, visionProvider, agent.config.visionProxyModelId);
+                  imageDescriptions.set(`${msgId}-${idx}`, description);
+                })
+            ));
 
             // Replace image attachments with text descriptions
             processedMessages = messages.map(msg => {
-              if (msg.attachment?.type === 'image' && imageDescriptions.has(msg.id)) {
-                return {
-                  ...msg,
-                  attachment: {
-                    ...msg.attachment,
+              if (!msg.attachments?.some(att => att.type === 'image')) return msg;
+
+              const newAttachments = msg.attachments.map((att, idx) => {
+                const key = `${msg.id}-${idx}`;
+                if (att.type === 'image' && imageDescriptions.has(key)) {
+                  return {
+                    ...att,
                     type: 'document' as const,
-                    textContent: `[图片内容描述]\n${imageDescriptions.get(msg.id)}\n[描述结束]`
-                  }
-                };
-              }
-              return msg;
+                    textContent: `[图片${idx + 1}内容描述]\n${imageDescriptions.get(key)}\n[描述结束]`
+                  };
+                }
+                return att;
+              });
+
+              return { ...msg, attachments: newAttachments };
             });
           }
         }
@@ -1545,6 +1560,7 @@ const App: React.FC = () => {
       console.log(`[${agent.name}] 🏁 Cleanup: releasing locks`);
       clearTimeout(timeoutId);
       pendingTriggerRef.current.delete(agentId); // Clear pending flag
+      pendingMentionsRef.current.delete(agentId); // Clear from pending mentions (they responded!)
       // Record message count when this agent finished speaking (for cooldown)
       agentLastSpokeAt.current.set(agentId, messages.length);
       setProcessingAgents(prev => {
@@ -1612,7 +1628,7 @@ const App: React.FC = () => {
 
   const handleUserSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim() && !attachment) return;
+    if (!inputText.trim() && attachments.length === 0) return;
 
     // Clear mention queue when user sends a new message (fresh start)
     mentionQueueRef.current = [];
@@ -1700,9 +1716,9 @@ const App: React.FC = () => {
     // Check if narrator mode
     const isNarratorMode = settings.activeProfileId === 'narrator';
 
-    // Get active profile for senderId (use profile id for multi-identity tracking)
-    const activeProfile = (settings.userProfiles || []).find(p => p.id === settings.activeProfileId);
-    const effectiveSenderId = isNarratorMode ? 'narrator' : (activeProfile?.id || USER_ID);
+    // Always use USER_ID for user messages (AI recognizes this)
+    // Profile only affects display name (settings.userName), not senderId
+    const effectiveSenderId = isNarratorMode ? 'narrator' : USER_ID;
 
     const newMessage: Message = {
       id: Date.now().toString(),
@@ -1710,7 +1726,7 @@ const App: React.FC = () => {
       text: inputText,
       timestamp: Date.now(),
       replyToId: replyToId || undefined,
-      attachment: attachment || undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
       isSystem: isNarratorMode // Narrator messages are system messages
     };
 
@@ -1763,7 +1779,7 @@ const App: React.FC = () => {
     }));
     setInputText('');
     setReplyToId(null);
-    setAttachment(null);
+    setAttachments([]);
     setShowMentionPopup(false);
 
     // Reset textarea height
@@ -1773,16 +1789,20 @@ const App: React.FC = () => {
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
     setIsParsingFile(true);
     try {
-        const parsedAttachment = await parseFile(file, {
-          enabled: settings.compressImages,
-          maxSizeMB: settings.maxImageSizeMB
-        });
-        setAttachment(parsedAttachment);
+        const newAttachments: Attachment[] = [];
+        for (const file of Array.from(files)) {
+          const parsedAttachment = await parseFile(file, {
+            enabled: settings.compressImages,
+            maxSizeMB: settings.maxImageSizeMB
+          });
+          newAttachments.push(parsedAttachment);
+        }
+        setAttachments(prev => [...prev, ...newAttachments]);
     } catch (err) {
         console.error("Failed to parse file", err);
         alert("文件解析失败");
@@ -1818,16 +1838,20 @@ const App: React.FC = () => {
     e.stopPropagation();
     setIsDragging(false);
 
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
 
     setIsParsingFile(true);
     try {
-      const parsedAttachment = await parseFile(file, {
-        enabled: settings.compressImages,
-        maxSizeMB: settings.maxImageSizeMB
-      });
-      setAttachment(parsedAttachment);
+      const newAttachments: Attachment[] = [];
+      for (const file of Array.from(files)) {
+        const parsedAttachment = await parseFile(file, {
+          enabled: settings.compressImages,
+          maxSizeMB: settings.maxImageSizeMB
+        });
+        newAttachments.push(parsedAttachment);
+      }
+      setAttachments(prev => [...prev, ...newAttachments]);
     } catch (err) {
       console.error("Failed to parse file", err);
       alert("文件解析失败");
@@ -1950,6 +1974,35 @@ const App: React.FC = () => {
         }
     }
 
+    // --- PROCESS PENDING MENTIONS ---
+    // Persistent mentions that haven't responded yet - keep trying until they do
+    if (pendingMentionsRef.current.size > 0) {
+        const pendingAgents = sessionMembers.filter(a => {
+            if (!pendingMentionsRef.current.has(a.id)) return false;
+            const isProcessing = processingAgents.has(a.id);
+            const isPending = pendingTriggerRef.current.has(a.id);
+            const isMuted = (activeSession.mutedAgentIds || []).includes(a.id);
+            const isUnconfigured = !a.providerId || !a.modelId;
+            return !isProcessing && !isPending && !isMuted && !isUnconfigured;
+        });
+
+        if (pendingAgents.length > 0) {
+            console.log('[PendingMentions] Retrying', pendingAgents.length, 'agents:', pendingAgents.map(a => a.name));
+            if (settings.enableConcurrency) {
+                const timeoutId = setTimeout(() => {
+                    pendingAgents.forEach(a => triggerAgentReply(a.id));
+                }, settings.breathingTime);
+                return () => clearTimeout(timeoutId);
+            } else {
+                // Sequential: trigger first ready agent
+                const timeoutId = setTimeout(() => {
+                    triggerAgentReply(pendingAgents[0].id);
+                }, settings.breathingTime);
+                return () => clearTimeout(timeoutId);
+            }
+        }
+    }
+
     if (eligibleAgents.length === 0) return;
 
     // --- REPLY PRIORITY: Check if replying to an AI message ---
@@ -1981,17 +2034,21 @@ const App: React.FC = () => {
     // Check for @全体成员
     if (lastTextLower.includes('@全体成员') || lastTextLower.includes('@all')) {
         // @全体成员 bypasses cooldown - use sessionMembers, not eligibleAgents
-        // Only filter out: processing, pending, muted, unconfigured
+        // Only filter out: muted, unconfigured (processing/pending will be added to persistent queue)
         const allMentionAgents = sessionMembers.filter(a => {
-            const isProcessing = processingAgents.has(a.id);
-            const isPending = pendingTriggerRef.current.has(a.id);
             const isMuted = (activeSession.mutedAgentIds || []).includes(a.id);
             const isUnconfigured = !a.providerId || !a.modelId;
-            return !isProcessing && !isPending && !isMuted && !isUnconfigured;
+            return !isMuted && !isUnconfigured;
         });
+        // Add all to persistent pending mentions (will retry until they respond)
+        allMentionAgents.forEach(a => pendingMentionsRef.current.add(a.id));
+        // Filter out currently busy ones for immediate queue
+        const readyAgents = allMentionAgents.filter(a =>
+            !processingAgents.has(a.id) && !pendingTriggerRef.current.has(a.id)
+        );
         // Shuffle randomly
-        agentsToQueue = allMentionAgents.sort(() => Math.random() - 0.5);
-        console.log('[Mention] @全体成员 detected (bypassing cooldown), queuing', agentsToQueue.length, 'agents:', agentsToQueue.map(a => a.name));
+        agentsToQueue = readyAgents.sort(() => Math.random() - 0.5);
+        console.log('[Mention] @全体成员 detected, added', allMentionAgents.length, 'to pending, queuing', agentsToQueue.length, 'ready agents');
     } else {
         // Extract all @mentions in order
         const mentionMatches = lastMessage.text.matchAll(/@(\S+)/g);
@@ -2021,16 +2078,20 @@ const App: React.FC = () => {
                     const isMuted = (activeSession.mutedAgentIds || []).includes(matchedAgent.id);
                     const isUnconfigured = !matchedAgent.providerId || !matchedAgent.modelId;
 
-                    if (isProcessing || isPending) {
-                        console.log('[Mention] Agent busy (processing/pending):', matchedAgent.name);
-                    } else if (isMuted) {
+                    if (isMuted) {
                         console.log('[Mention] Agent is muted:', matchedAgent.name);
                     } else if (isUnconfigured) {
                         console.log('[Mention] Agent not configured:', matchedAgent.name);
                     } else {
-                        // @mention bypasses cooldown and yield status!
-                        agentsToQueue.push(matchedAgent);
-                        console.log('[Mention] Agent queued (bypassing cooldown):', matchedAgent.name);
+                        // Add to persistent pending mentions (will retry until they respond)
+                        pendingMentionsRef.current.add(matchedAgent.id);
+                        if (isProcessing || isPending) {
+                            console.log('[Mention] Agent busy, added to pending:', matchedAgent.name);
+                        } else {
+                            // @mention bypasses cooldown and yield status!
+                            agentsToQueue.push(matchedAgent);
+                            console.log('[Mention] Agent queued (bypassing cooldown):', matchedAgent.name);
+                        }
                     }
                 }
             }
@@ -2367,16 +2428,19 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Attachment Preview */}
-            {attachment && (
-              <div className="flex items-center justify-between bg-gray-50 dark:bg-zinc-700 px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-600 text-xs text-gray-600 dark:text-gray-300">
-                 <div className="flex items-center gap-2 truncate">
-                    {attachment.type === 'image' ? <ImageIcon size={14} className="text-blue-500" /> : <FileText size={14} className="text-orange-500" />}
-                    <div className="font-bold text-zinc-800 dark:text-white">
-                      {attachment.type === 'image' ? '图片已就绪' : `文档: ${attachment.fileName}`}
-                    </div>
-                 </div>
-                 <button onClick={() => setAttachment(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={14} /></button>
+            {/* Attachments Preview */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachments.map((att, idx) => (
+                  <div key={idx} className="flex items-center gap-2 bg-gray-50 dark:bg-zinc-700 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-zinc-600 text-xs text-gray-600 dark:text-gray-300">
+                    {att.type === 'image' ? <ImageIcon size={12} className="text-blue-500" /> : <FileText size={12} className="text-orange-500" />}
+                    <span className="text-zinc-800 dark:text-white max-w-[100px] truncate">
+                      {att.type === 'image' ? `图片${idx + 1}` : att.fileName}
+                    </span>
+                    <button onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500"><X size={12} /></button>
+                  </div>
+                ))}
+                <button onClick={() => setAttachments([])} className="text-xs text-gray-400 hover:text-red-500 px-2">清空全部</button>
               </div>
             )}
 
@@ -2422,7 +2486,7 @@ const App: React.FC = () => {
             )}
 
             <form onSubmit={handleUserSend} className="relative flex items-end">
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt,.md,.js,.ts,.py,.json" onChange={handleFileSelect} />
+              <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt,.md,.js,.ts,.py,.json" onChange={handleFileSelect} multiple />
 
               {/* File Upload Button */}
               <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" title="上传文件 (图片/文档)">
@@ -2445,7 +2509,7 @@ const App: React.FC = () => {
                 className="w-full bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-xl px-4 py-3.5 pl-10 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-hidden"
                 style={{ minHeight: '52px', maxHeight: '150px' }}
               />
-              <button type="submit" disabled={(!inputText.trim() && !attachment) || isParsingFile} className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm">
+              <button type="submit" disabled={(!inputText.trim() && attachments.length === 0) || isParsingFile} className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm">
                 <Send size={18} />
               </button>
             </form>

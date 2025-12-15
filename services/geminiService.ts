@@ -423,22 +423,26 @@ export async function* streamGeminiReply(
         }
     }
 
-    // Document Attachment
-    if (m.attachment && m.attachment.type === 'document' && m.attachment.textContent) {
-        textContent += `\n\n[Attached File: ${m.attachment.fileName}]\n${m.attachment.textContent}\n[End of File]`;
+    // Document Attachments (multiple)
+    if (m.attachments) {
+      m.attachments.filter(att => att.type === 'document' && att.textContent).forEach((att, idx) => {
+        textContent += `\n\n[Attached File ${idx + 1}: ${att.fileName}]\n${att.textContent}\n[End of File]`;
+      });
     }
 
     parts.push({ text: textContent });
 
-    // Image Part
-    if (m.attachment && m.attachment.type === 'image') {
-       const base64Data = m.attachment.content.split(',')[1];
-       parts.push({
-         inlineData: {
-           mimeType: m.attachment.mimeType,
-           data: base64Data
-         }
-       });
+    // Image Parts (multiple)
+    if (m.attachments) {
+      m.attachments.filter(att => att.type === 'image').forEach(att => {
+        const base64Data = att.content.split(',')[1];
+        parts.push({
+          inlineData: {
+            mimeType: att.mimeType,
+            data: base64Data
+          }
+        });
+      });
     }
 
     formattedContents.push({ role, parts });

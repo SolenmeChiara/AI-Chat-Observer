@@ -361,14 +361,16 @@ export async function* streamAnthropicReply(
         }
     }
 
-    // Handle Document Attachment
-    if (m.attachment && m.attachment.type === 'document' && m.attachment.textContent) {
-        textContent += `\n\n[Attached File: ${m.attachment.fileName}]\n${m.attachment.textContent}\n[End of File]`;
+    // Handle Document Attachments (multiple)
+    if (m.attachments) {
+      m.attachments.filter(att => att.type === 'document' && att.textContent).forEach((att, idx) => {
+        textContent += `\n\n[Attached File ${idx + 1}: ${att.fileName}]\n${att.textContent}\n[End of File]`;
+      });
     }
 
     const role = isSelf ? 'assistant' : 'user';
 
-    // Build Content Block (Text + Image)
+    // Build Content Block (Text + Images)
     const contentBlocks: any[] = [];
 
     // For assistant messages when thinking is enabled: add thinking block FIRST (required by Anthropic)
@@ -381,23 +383,25 @@ export async function* streamAnthropicReply(
       });
     }
 
-    // Image First (Anthropic best practice often puts image first)
-    if (m.attachment && m.attachment.type === 'image') {
+    // Images First (Anthropic best practice often puts images first) - multiple supported
+    if (m.attachments) {
+      m.attachments.filter(att => att.type === 'image').forEach(att => {
         // Extract base64 data from data URL
-        const dataUrlMatch = m.attachment.content.match(/^data:[^;]+;base64,(.+)$/);
+        const dataUrlMatch = att.content.match(/^data:[^;]+;base64,(.+)$/);
         if (dataUrlMatch) {
-            const base64Data = dataUrlMatch[1];
-            // Detect actual image format from magic bytes (more reliable than URL header)
-            const actualMediaType = detectImageFormat(base64Data);
-            contentBlocks.push({
-                type: "image",
-                source: {
-                    type: "base64",
-                    media_type: actualMediaType,
-                    data: base64Data
-                }
-            });
+          const base64Data = dataUrlMatch[1];
+          // Detect actual image format from magic bytes (more reliable than URL header)
+          const actualMediaType = detectImageFormat(base64Data);
+          contentBlocks.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: actualMediaType,
+              data: base64Data
+            }
+          });
         }
+      });
     }
 
     // Only push text block if content is non-empty (Anthropic requires non-empty text)

@@ -364,23 +364,24 @@ export async function* streamOpenAIReply(
           }
        }
 
-       // Handle Document Attachment (Text Injection)
-       if (m.attachment && m.attachment.type === 'document' && m.attachment.textContent) {
-           textContent += `\n\n[Attached File: ${m.attachment.fileName}]\n${m.attachment.textContent}\n[End of File]`;
+       // Handle Document Attachments (multiple)
+       if (m.attachments) {
+         m.attachments.filter(att => att.type === 'document' && att.textContent).forEach((att, idx) => {
+           textContent += `\n\n[Attached File ${idx + 1}: ${att.fileName}]\n${att.textContent}\n[End of File]`;
+         });
        }
 
-       // Handle Multimodal (Image)
-       if (m.attachment && m.attachment.type === 'image') {
-         return {
-           role: 'user',
-           content: [
-             { type: "text", text: textContent },
-             { 
-               type: "image_url", 
-               image_url: { url: m.attachment.content } // data:image/png;base64,...
-             }
-           ]
-         };
+       // Handle Multimodal (Images - multiple)
+       const imageAttachments = m.attachments?.filter(att => att.type === 'image') || [];
+       if (imageAttachments.length > 0) {
+         const contentParts: any[] = [{ type: "text", text: textContent }];
+         imageAttachments.forEach(att => {
+           contentParts.push({
+             type: "image_url",
+             image_url: { url: att.content } // data:image/png;base64,...
+           });
+         });
+         return { role: 'user', content: contentParts };
        }
 
        return { role: 'user', content: textContent };

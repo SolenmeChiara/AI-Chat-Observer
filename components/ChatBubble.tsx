@@ -218,28 +218,34 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           `}
           style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
         >
-          {/* Document Attachment */}
-          {message.attachment && message.attachment.type === 'document' && (
-             <div className="mb-3 p-3 bg-black/5 rounded-lg border border-black/10 flex items-center gap-3">
-                <div className="bg-white p-2 rounded shadow-sm">
-                  <FileText size={24} className="text-gray-600" />
+          {/* Attachments (Multiple) */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="mb-3 space-y-2">
+              {/* Images */}
+              {message.attachments.filter(att => att.type === 'image').length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {message.attachments.filter(att => att.type === 'image').map((att, idx) => (
+                    <img
+                      key={idx}
+                      src={att.content}
+                      alt={`Image ${idx + 1}`}
+                      className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90"
+                      style={{ maxHeight: '150px', maxWidth: '200px' }}
+                      onClick={() => window.open(att.content, '_blank')}
+                    />
+                  ))}
                 </div>
-                <div className="flex-1 min-w-0">
-                   <div className="font-bold text-xs truncate max-w-[150px]">{message.attachment.fileName}</div>
-                   <div className="text-[10px] opacity-70 uppercase">{message.attachment.mimeType.split('/').pop()} 文件</div>
+              )}
+              {/* Documents */}
+              {message.attachments.filter(att => att.type === 'document').map((att, idx) => (
+                <div key={idx} className="p-2 bg-black/5 rounded-lg border border-black/10 flex items-center gap-2">
+                  <FileText size={18} className="text-gray-600 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-xs truncate">{att.fileName}</div>
+                    <div className="text-[10px] opacity-70 uppercase">{att.mimeType.split('/').pop()}</div>
+                  </div>
                 </div>
-             </div>
-          )}
-
-          {/* Image Attachment */}
-          {message.attachment && message.attachment.type === 'image' && (
-            <div className="mb-3">
-              <img 
-                src={message.attachment.content} 
-                alt="Uploaded" 
-                className="max-w-full rounded-lg border border-white/20" 
-                style={{ maxHeight: '200px' }}
-              />
+              ))}
             </div>
           )}
 
