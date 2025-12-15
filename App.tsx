@@ -1499,10 +1499,11 @@ const App: React.FC = () => {
         }
 
         // EXECUTE ENTERTAINMENT COMMANDS (Dice, Tarot)
+        // Note: Use extractedContent (before cleanup) to parse commands
         const entertainmentConfig = activeGroup?.entertainmentConfig;
         if (entertainmentConfig) {
           const entertainmentCmds = parseEntertainmentCommands(
-            finalText,
+            extractedContent,
             entertainmentConfig.enableDice || false,
             entertainmentConfig.enableTarot || false
           );
