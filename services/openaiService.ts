@@ -39,6 +39,20 @@ function mapBudgetToEffort(budget: number): 'low' | 'medium' | 'high' {
   return 'high';
 }
 
+// Helper: Check if model is a DeepSeek model (for thinking mode support)
+function isDeepSeekModel(modelId: string, baseUrl?: string): boolean {
+  const lowerModel = modelId.toLowerCase();
+  const lowerUrl = baseUrl?.toLowerCase() || '';
+
+  // Check model ID patterns
+  if (lowerModel.includes('deepseek')) return true;
+
+  // Check baseUrl for DeepSeek API endpoint
+  if (lowerUrl.includes('deepseek')) return true;
+
+  return false;
+}
+
 export async function* streamOpenAIReply(
   agent: Agent,
   baseUrl: string,
@@ -395,7 +409,9 @@ export async function* streamOpenAIReply(
     try {
       // Build request body with correct token parameter based on model
       const isNewModel = useMaxCompletionTokens(modelId);
-      const isReasoningModel = /^o[13](-|$)/.test(modelId.toLowerCase());
+      const isOpenAIReasoningModel = /^o[13](-|$)/.test(modelId.toLowerCase());
+      const isDeepSeek = isDeepSeekModel(modelId, baseUrl);
+      const isDeepSeekThinking = isDeepSeek && agent.config.enableReasoning;
 
       const requestBody: any = {
         model: modelId,
@@ -404,8 +420,8 @@ export async function* streamOpenAIReply(
         stream_options: { include_usage: true },
       };
 
-      // o1/o3 reasoning models don't support temperature (fixed at 1.0)
-      if (!isReasoningModel) {
+      // o1/o3 and DeepSeek thinking mode don't support temperature
+      if (!isOpenAIReasoningModel && !isDeepSeekThinking) {
         requestBody.temperature = agent.config.temperature;
       }
 
@@ -417,8 +433,14 @@ export async function* streamOpenAIReply(
       }
 
       // Add reasoning_effort for o1/o3 models when reasoning is enabled
-      if (isReasoningModel && agent.config.enableReasoning) {
+      if (isOpenAIReasoningModel && agent.config.enableReasoning) {
         requestBody.reasoning_effort = mapBudgetToEffort(agent.config.reasoningBudget || 8000);
+      }
+
+      // Add thinking parameter for DeepSeek models when reasoning is enabled
+      if (isDeepSeekThinking) {
+        requestBody.thinking = { type: "enabled" };
+        console.log(`[OpenAI] 🧠 DeepSeek thinking mode enabled for ${modelId}`);
       }
 
       response = await fetch(`${baseUrl}/chat/completions`, {
