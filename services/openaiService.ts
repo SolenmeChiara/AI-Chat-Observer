@@ -53,6 +53,12 @@ function isDeepSeekModel(modelId: string, baseUrl?: string): boolean {
   return false;
 }
 
+// Helper: Check if using OpenRouter API
+function isOpenRouterAPI(baseUrl?: string): boolean {
+  const lowerUrl = baseUrl?.toLowerCase() || '';
+  return lowerUrl.includes('openrouter');
+}
+
 export async function* streamOpenAIReply(
   agent: Agent,
   baseUrl: string,
@@ -437,10 +443,18 @@ export async function* streamOpenAIReply(
         requestBody.reasoning_effort = mapBudgetToEffort(agent.config.reasoningBudget || 8000);
       }
 
-      // Add thinking parameter for DeepSeek models when reasoning is enabled
+      // Add thinking/reasoning parameter for DeepSeek models when reasoning is enabled
       if (isDeepSeekThinking) {
-        requestBody.thinking = { type: "enabled" };
-        console.log(`[OpenAI] 🧠 DeepSeek thinking mode enabled for ${modelId}`);
+        const isOpenRouter = isOpenRouterAPI(baseUrl);
+        if (isOpenRouter) {
+          // OpenRouter uses "reasoning" parameter
+          requestBody.reasoning = { enabled: true };
+          console.log(`[OpenAI] 🧠 DeepSeek thinking mode enabled via OpenRouter for ${modelId}`);
+        } else {
+          // DeepSeek official API uses "thinking" parameter
+          requestBody.thinking = { type: "enabled" };
+          console.log(`[OpenAI] 🧠 DeepSeek thinking mode enabled for ${modelId}`);
+        }
       }
 
       response = await fetch(`${baseUrl}/chat/completions`, {
