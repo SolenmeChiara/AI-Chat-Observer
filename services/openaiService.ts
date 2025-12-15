@@ -553,9 +553,23 @@ export async function* streamOpenAIReply(
           const delta = json.choices?.[0]?.delta;
 
           if (delta) {
-             // 1. Explicit Reasoning Content (DeepSeek standard)
+             // 1. Explicit Reasoning Content (multiple formats)
+             // - DeepSeek official API: delta.reasoning_content
+             // - OpenRouter: delta.reasoning or delta.reasoning_details
              if (delta.reasoning_content) {
                  yield { reasoning: delta.reasoning_content, isComplete: false };
+             } else if (delta.reasoning) {
+                 // OpenRouter format
+                 yield { reasoning: delta.reasoning, isComplete: false };
+             } else if (delta.reasoning_details && Array.isArray(delta.reasoning_details)) {
+                 // OpenRouter detailed format
+                 for (const detail of delta.reasoning_details) {
+                     if (detail.text) {
+                         yield { reasoning: detail.text, isComplete: false };
+                     } else if (detail.summary) {
+                         yield { reasoning: detail.summary, isComplete: false };
+                     }
+                 }
              }
 
              // 2. Standard Content (check for <think> tags if not using dedicated field)
