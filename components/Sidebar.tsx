@@ -911,12 +911,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isActiveGroup ? 'bg-zinc-900 dark:bg-zinc-500 text-white' : 'bg-gray-100 dark:bg-zinc-600 text-gray-500 dark:text-gray-400'}`}>
                        {isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />}
                      </div>
-                     <div className="flex-1 min-w-0">
+                     <div
+                       className="flex-1 min-w-0"
+                       onDoubleClick={(e) => {
+                         e.stopPropagation();
+                         const input = e.currentTarget.querySelector('input');
+                         if (input) {
+                           input.classList.remove('pointer-events-none');
+                           input.focus();
+                           input.select();
+                         }
+                       }}
+                     >
                        <input
                          className={`w-full bg-transparent text-sm font-semibold focus:outline-none pointer-events-none ${isActiveGroup ? 'text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}`}
                          value={group.name}
                          onChange={(e) => onRenameGroup(group.id, e.target.value)}
-                         onDoubleClick={(e) => { e.stopPropagation(); (e.target as HTMLInputElement).classList.remove('pointer-events-none'); (e.target as HTMLInputElement).select(); }}
                          onBlur={(e) => (e.target as HTMLInputElement).classList.add('pointer-events-none')}
                        />
                        <div className="text-[10px] text-gray-400">{groupSessions.length} 个对话 • {group.memberIds.length} 位成员</div>
