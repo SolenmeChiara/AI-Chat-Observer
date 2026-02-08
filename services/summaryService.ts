@@ -3,6 +3,48 @@ import { ApiProvider, Message, AgentType, GeminiMode } from '../types';
 import { GoogleGenAI } from "@google/genai";
 import { USER_ID } from '../constants';
 
+// Helper function for fetch with timeout and retry
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 15000,
+  retries: number = 2
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      lastError = error;
+
+      // If aborted (timeout), log and retry
+      if (error.name === 'AbortError') {
+        console.warn(`[fetchWithTimeout] Request timed out (attempt ${attempt + 1}/${retries + 1})`);
+      } else {
+        console.warn(`[fetchWithTimeout] Request failed (attempt ${attempt + 1}/${retries + 1}):`, error.message);
+      }
+
+      // Don't retry on last attempt
+      if (attempt < retries) {
+        // Wait a bit before retrying (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError || new Error('Request failed after retries');
+}
+
 // Helper to create Gemini client based on provider config
 const getGeminiClient = (provider: ApiProvider) => {
   const { apiKey, geminiMode, vertexProject, vertexLocation } = provider;
@@ -43,6 +85,10 @@ const hasValidCredentials = (provider: ApiProvider): boolean => {
     }
     return !!provider.apiKey;
   }
+  // Anthropic requires baseUrl and apiKey
+  if (provider.type === AgentType.ANTHROPIC) {
+    return !!(provider.baseUrl && provider.apiKey);
+  }
   // OpenAI-compatible requires baseUrl and apiKey
   return !!(provider.baseUrl && provider.apiKey);
 };
@@ -76,9 +122,12 @@ const findSummaryAgent = (providers: ApiProvider[]) => {
 
   // 3. Fallback to first available with credentials
   if (validProviders[0].models.length > 0) {
-    return { provider: validProviders[0], modelId: validProviders[0].models[0].id };
+    const result = { provider: validProviders[0], modelId: validProviders[0].models[0].id };
+    console.log('[findSummaryAgent] Using fallback:', result.provider.name, result.modelId);
+    return result;
   }
 
+  console.warn('[findSummaryAgent] Valid providers found but none have models:', validProviders.map(p => p.name));
   return null;
 };
 
@@ -89,9 +138,13 @@ export const generateSessionName = async (
 ): Promise<string | null> => {
 
   const target = findSummaryAgent(providers);
-  if (!target) return null;
+  if (!target) {
+    console.warn('[Auto-Rename] No suitable provider/model found for auto-naming. Providers:', providers.map(p => `${p.name}(${p.type}, key=${!!p.apiKey}, url=${!!p.baseUrl}, models=${p.models.length})`));
+    return null;
+  }
 
   const { provider, modelId } = target;
+  console.log('[Auto-Rename] Using provider:', provider.name, 'model:', modelId);
 
   // Prepare simple context with agent names
   const transcript = messages.slice(-5).map(m => {
@@ -119,27 +172,61 @@ export const generateSessionName = async (
         contents: prompt
       });
       return response.text?.trim() || null;
-    } 
-    
-    // 2. OpenAI Compatible Implementation (Covers everything else)
+    }
+
+    // 2. Anthropic Implementation
+    else if (provider.type === AgentType.ANTHROPIC) {
+      if (!provider.baseUrl || !provider.apiKey) return null;
+      const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+
+      const response = await fetchWithTimeout(
+        `${baseUrl}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': provider.apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: modelId,
+            max_tokens: 50,
+            messages: [{ role: 'user', content: prompt }]
+          })
+        },
+        15000,
+        2
+      );
+
+      if (!response.ok) return null;
+      const json = await response.json();
+      return json.content?.[0]?.text?.trim() || null;
+    }
+
+    // 3. OpenAI Compatible Implementation
     else {
       if (!provider.baseUrl || !provider.apiKey) return null;
 
-      // Ensure /chat/completions endpoint
       const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-      
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${provider.apiKey}`
+
+      const response = await fetchWithTimeout(
+        `${baseUrl}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 20
+          })
         },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 20
-        })
-      });
+        15000, // 15 second timeout
+        2 // 2 retries
+      );
 
       if (!response.ok) return null;
       const json = await response.json();
@@ -216,18 +303,50 @@ export const updateSessionSummary = async (
            config: { maxOutputTokens: 2000 }
         });
         return res.text?.trim() || null;
-     } else {
+     } else if (provider.type === AgentType.ANTHROPIC) {
+        // Anthropic uses different endpoint and headers
         if (!provider.baseUrl || !provider.apiKey) return null;
         const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-        const res = await fetch(`${baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}` },
-            body: JSON.stringify({
-                model: modelId,
-                messages: [{ role: 'user', content: prompt }],
-                max_tokens: 2000
-            })
-        });
+        const res = await fetchWithTimeout(
+            `${baseUrl}/messages`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': provider.apiKey,
+                    'anthropic-version': '2023-06-01',
+                    'anthropic-dangerous-direct-browser-access': 'true'
+                },
+                body: JSON.stringify({
+                    model: modelId,
+                    max_tokens: 2000,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            },
+            30000,
+            1
+        );
+        if (!res.ok) return null;
+        const json = await res.json();
+        return json.content?.[0]?.text?.trim() || null;
+     } else {
+        // OpenAI-compatible
+        if (!provider.baseUrl || !provider.apiKey) return null;
+        const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+        const res = await fetchWithTimeout(
+            `${baseUrl}/chat/completions`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}` },
+                body: JSON.stringify({
+                    model: modelId,
+                    messages: [{ role: 'user', content: prompt }],
+                    max_tokens: 2000
+                })
+            },
+            30000, // 30 second timeout (longer for summary updates)
+            1 // 1 retry
+        );
         if (!res.ok) return null;
         const json = await res.json();
         return json.choices?.[0]?.message?.content?.trim() || null;
