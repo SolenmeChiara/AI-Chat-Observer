@@ -80,6 +80,7 @@ export interface Attachment {
   type: 'image' | 'document';
   content: string; // Base64 string for images, or just filename/placeholder for docs
   textContent?: string; // The parsed text from the document
+  visionDescription?: string; // Cached description from vision proxy model
   mimeType: string; // e.g. image/png, application/pdf
   fileName?: string;
 }

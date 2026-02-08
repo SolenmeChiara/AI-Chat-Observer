@@ -1116,19 +1116,66 @@ const App: React.FC = () => {
           );
 
           if (messagesWithImages.length > 0) {
-            // Process all images in parallel, keyed by "msgId-attachmentIndex"
+            // Process images sequentially to avoid overwhelming the API
             const imageDescriptions = new Map<string, string>();
 
-            await Promise.all(messagesWithImages.flatMap(msg =>
-              (msg.attachments || [])
-                .map((att, idx) => ({ att, idx, msgId: msg.id }))
-                .filter(({ att }) => att.type === 'image' && att.content)
-                .map(async ({ att, idx, msgId }) => {
-                  const base64Data = att.content.split(',')[1] || att.content;
-                  const description = await describeImage(base64Data, att.mimeType, visionProvider, agent.config.visionProxyModelId);
-                  imageDescriptions.set(`${msgId}-${idx}`, description);
-                })
-            ));
+            // Collect image tasks, separating cached from uncached
+            const uncachedTasks: { att: Attachment; idx: number; msgId: string }[] = [];
+            for (const msg of messagesWithImages) {
+              (msg.attachments || []).forEach((att, idx) => {
+                if (att.type === 'image' && att.content) {
+                  const key = `${msg.id}-${idx}`;
+                  if (att.visionDescription) {
+                    // Use cached description
+                    imageDescriptions.set(key, att.visionDescription);
+                    console.log(`[VisionProxy] Using cached description for ${key}`);
+                  } else {
+                    // Need to fetch description
+                    uncachedTasks.push({ att, idx, msgId: msg.id });
+                  }
+                }
+              });
+            }
+
+            // Process uncached images one by one (sequential, not parallel)
+            const newDescriptions = new Map<string, string>();
+            for (const { att, idx, msgId } of uncachedTasks) {
+              try {
+                const base64Data = att.content.split(',')[1] || att.content;
+                const description = await describeImage(base64Data, att.mimeType, visionProvider, agent.config.visionProxyModelId);
+                const key = `${msgId}-${idx}`;
+                imageDescriptions.set(key, description);
+                newDescriptions.set(key, description);
+              } catch (err) {
+                console.error(`[VisionProxy] Failed to describe image ${msgId}-${idx}:`, err);
+                const key = `${msgId}-${idx}`;
+                imageDescriptions.set(key, '[图片描述失败]');
+                newDescriptions.set(key, '[图片描述失败]');
+              }
+            }
+
+            // Save new descriptions to session state for future caching
+            if (newDescriptions.size > 0) {
+              setSessions(prev => prev.map(s => {
+                if (s.id !== activeSessionId) return s;
+                return {
+                  ...s,
+                  messages: s.messages.map(msg => {
+                    if (!msg.attachments?.some(att => att.type === 'image')) return msg;
+                    return {
+                      ...msg,
+                      attachments: msg.attachments.map((att, idx) => {
+                        const key = `${msg.id}-${idx}`;
+                        if (att.type === 'image' && newDescriptions.has(key)) {
+                          return { ...att, visionDescription: newDescriptions.get(key) };
+                        }
+                        return att;
+                      })
+                    };
+                  })
+                };
+              }));
+            }
 
             // Replace image attachments with text descriptions
             processedMessages = messages.map(msg => {

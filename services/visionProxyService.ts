@@ -46,6 +46,26 @@ export async function describeImage(
   }
 }
 
+// Helper function for fetch with timeout
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function describeWithOpenAI(
   imageBase64: string,
   mimeType: string,
@@ -55,27 +75,31 @@ async function describeWithOpenAI(
   const effectiveModelId = modelId || 'gpt-4o-mini';
   console.log(`[VLM/OpenAI] 📡 Calling ${provider.baseUrl}/chat/completions with model: ${effectiveModelId}`);
 
-  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${provider.apiKey}`
+  const response = await fetchWithTimeout(
+    `${provider.baseUrl}/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({
+        model: effectiveModelId,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: VISION_PROMPT },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,${imageBase64}` }
+            }
+          ]
+        }],
+        max_tokens: 500
+      })
     },
-    body: JSON.stringify({
-      model: effectiveModelId,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: VISION_PROMPT },
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mimeType};base64,${imageBase64}` }
-          }
-        ]
-      }],
-      max_tokens: 500
-    })
-  });
+    30000 // 30 second timeout
+  );
 
   console.log(`[VLM/OpenAI] 📥 Response status: ${response.status}`);
   if (!response.ok) {
