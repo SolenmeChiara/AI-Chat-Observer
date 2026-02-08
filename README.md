@@ -205,5 +205,4 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 无论是增加新的文件解析器、优化 Prompt 策略，还是改进 UI，都非常欢迎。
 
 ## License
-
 [GPL-3.0](LICENSE) - 任何修改或衍生作品必须同样开源。

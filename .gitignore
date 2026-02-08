@@ -25,6 +25,8 @@ dist-ssr
 
 # Claude Code
 .claude/
+CLAUDE.md
+nul
 
 # Local dev notes
-mofalajidui/ 
+mofalajidui/
