@@ -15,6 +15,7 @@ const TTSSettingsPanel: React.FC<{
   ttsProviders: TTSProvider[];
   setTTSProviders: React.Dispatch<React.SetStateAction<TTSProvider[]>>;
 }> = ({ settings, setSettings, agents, setAgents, ttsProviders, setTTSProviders }) => {
+  const [collapsed, setCollapsed] = useState(true);
   const [browserVoices, setBrowserVoices] = useState<TTSVoice[]>([]);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [newVoiceName, setNewVoiceName] = useState('');
@@ -141,22 +142,26 @@ const TTSSettingsPanel: React.FC<{
   const supportsFetchVoices = activeProvider?.type === 'elevenlabs' || activeProvider?.type === 'fishaudio';
 
   return (
-    <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
-      <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-        <Volume2 size={16}/> 语音朗读 (TTS)
-      </h3>
-      <div className="space-y-4">
-        {/* Enable TTS */}
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-600 dark:text-gray-300">启用语音朗读</span>
+    <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+      <div
+        className="p-4 flex items-center justify-between cursor-pointer select-none"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <Volume2 size={16}/> 语音朗读 (TTS)
+        </h3>
+        <div className="flex items-center gap-2">
           <input
             type="checkbox"
             className="accent-zinc-900"
             checked={ttsSettings.enabled}
-            onChange={(e) => updateTTSSettings({ enabled: e.target.checked })}
+            onChange={(e) => { e.stopPropagation(); updateTTSSettings({ enabled: e.target.checked }); }}
           />
+          {collapsed ? <ChevronRight size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
         </div>
-
+      </div>
+      {!collapsed && (
+      <div className="px-4 pb-4 space-y-4">
         {ttsSettings.enabled && (
           <>
             {/* Provider Selection */}
@@ -431,6 +436,7 @@ const TTSSettingsPanel: React.FC<{
           </>
         )}
       </div>
+      )}
     </div>
   );
 };
@@ -1960,9 +1966,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </p>
              </div>
 
-             {/* TTS (TEXT-TO-SPEECH) */}
-             <TTSSettingsPanel settings={settings} setSettings={setSettings} agents={agents} setAgents={setAgents} ttsProviders={ttsProviders} setTTSProviders={setTTSProviders} />
-
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Clock size={16}/> 思考呼吸时间</h3>
                 <div className="flex items-center gap-4">
@@ -2011,6 +2014,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                    </button>
                 </div>
              </div>
+
+             {/* TTS (TEXT-TO-SPEECH) - collapsible */}
+             <TTSSettingsPanel settings={settings} setSettings={setSettings} agents={agents} setAgents={setAgents} ttsProviders={ttsProviders} setTTSProviders={setTTSProviders} />
            </div>
         )}
       </div>

@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
-import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square } from 'lucide-react';
+import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square, Trash2 } from 'lucide-react';
 import { marked } from 'marked';
 
 interface ChatBubbleProps {
@@ -14,13 +14,14 @@ interface ChatBubbleProps {
   onReply?: (message: Message) => void;
   onMention?: (name: string) => void;
   isStreaming?: boolean; // If true, skip markdown rendering for performance
+  onDelete?: (messageId: string) => void; // Callback to delete this message
   onPlayTTS?: (message: Message) => void; // Callback to play TTS for this message
   onStopTTS?: () => void; // Callback to stop TTS
   isTTSPlaying?: boolean; // Is TTS currently playing this message
   currentPlayingMessageId?: string; // ID of the message currently being played
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId }) => {
+const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, onDelete, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
@@ -284,6 +285,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
               {!isUser && sender && (
                 <button onClick={() => onMention && onMention(sender.name)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded" title="@Ta">
                    <AtSign size={12} />
+                </button>
+              )}
+              {onDelete && (
+                <button onClick={() => onDelete(message.id)} className="text-gray-400 hover:text-red-500 p-0.5 rounded" title="删除消息">
+                   <Trash2 size={12} />
                 </button>
               )}
            </div>
