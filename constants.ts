@@ -1,5 +1,5 @@
 
-import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, MemoryConfig, UserProfile, EntertainmentConfig } from './types';
+import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, MemoryConfig, UserProfile, EntertainmentConfig, DebateConfig } from './types';
 
 export const USER_ID = 'user';
 
@@ -204,6 +204,13 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
 export const DEFAULT_ENTERTAINMENT_CONFIG: EntertainmentConfig = {
   enableDice: false,
   enableTarot: false
+};
+
+// 默认辩论模式配置
+export const DEFAULT_DEBATE_CONFIG: DebateConfig = {
+  turnMode: 'random',
+  assignments: [],
+  currentTurnIndex: 0,
 };
 
 // 初始群组

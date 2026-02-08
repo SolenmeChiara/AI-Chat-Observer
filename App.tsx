@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
-import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile, EntertainmentConfig } from './types';
+import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile, EntertainmentConfig, DebateConfig, DebateAssignment } from './types';
 import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
 import Sidebar from './components/Sidebar';
 import RightSidebar from './components/RightSidebar';
@@ -23,6 +23,39 @@ import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCo
 const formatErrorTimestamp = () => {
   const now = new Date();
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+};
+
+// 辩论模式：将正反方 assignments 展平为交替发言序列
+const buildDebateTurnSequence = (assignments: DebateAssignment[]): DebateAssignment[] => {
+  const pro = assignments.filter(a => a.side === 'pro').sort((a, b) => a.order - b.order);
+  const con = assignments.filter(a => a.side === 'con').sort((a, b) => a.order - b.order);
+  const sequence: DebateAssignment[] = [];
+  const maxLen = Math.max(pro.length, con.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (i < pro.length) sequence.push(pro[i]);
+    if (i < con.length) sequence.push(con[i]);
+  }
+  return sequence;
+};
+
+// 辩论模式：获取下一个应发言的 agent（纯函数，不触发 state 更新）
+const getNextDebateAgent = (
+  assignments: DebateAssignment[],
+  eligibleAgentIds: Set<string>,
+  currentIndex: number,
+): { agentId: string; nextIndex: number } | null => {
+  const sequence = buildDebateTurnSequence(assignments);
+  if (sequence.length === 0) return null;
+
+  // 从 currentIndex 开始，找下一个 eligible 的 agent，最多循环一圈
+  for (let i = 0; i < sequence.length; i++) {
+    const idx = (currentIndex + i) % sequence.length;
+    const agentId = sequence[idx].agentId;
+    if (eligibleAgentIds.has(agentId)) {
+      return { agentId, nextIndex: (idx + 1) % sequence.length };
+    }
+  }
+  return null;
 };
 
 const App: React.FC = () => {
@@ -90,6 +123,13 @@ const App: React.FC = () => {
   // Persistent pending mentions: agents that were @mentioned but haven't responded yet
   // These will keep being retried until the agent actually responds
   const pendingMentionsRef = useRef<Set<string>>(new Set());
+
+  // @mention 概率衰减：跟踪同一对 agent 连续互 @ 的次数
+  // pairKey = sorted [idA, idB].join('|'), count = 连续次数
+  const mentionPairRef = useRef<{ pairKey: string; count: number } | null>(null);
+
+  // 辩论模式：用 ref 跟踪发言序列 index，避免在 autoplay useEffect 中更新 session state 导致死循环
+  const debateTurnIndexRef = useRef<number>(0);
 
   // Track last message count when summary was triggered (per session)
   const lastSummaryCountRef = useRef<Map<string, number>>(new Map());
@@ -369,6 +409,9 @@ const App: React.FC = () => {
       setIsAutoPlay(false);
     }
     setActiveSessionId(id);
+    // 同步辩论 turn index ref
+    const targetSession = sessions.find(s => s.id === id);
+    debateTurnIndexRef.current = targetSession?.debateConfig?.currentTurnIndex ?? 0;
   };
 
   const handleUpdateSummary = (id: string, summary: string) => {
@@ -383,14 +426,26 @@ const App: React.FC = () => {
     setProcessingAgents(new Set());
   };
 
+  const handleDeleteMessage = (messageId: string) => {
+    updateActiveSessionMessages(prev => prev.filter(m => m.id !== messageId));
+  };
+
   const handleClearMessages = () => {
-    updateActiveSession(s => ({ ...s, messages: [], yieldedAgentIds: [], adminNotes: [] }));
+    updateActiveSession(s => ({
+      ...s,
+      messages: [],
+      yieldedAgentIds: [],
+      adminNotes: [],
+      debateConfig: s.debateConfig ? { ...s.debateConfig, currentTurnIndex: 0 } : s.debateConfig // 同时 ref 在下面重置
+    }));
     setTotalCost(0);
     handleStopAll();
     handleStopTTS(); // Also stop TTS
     agentLastSpokeAt.current.clear(); // Reset cooldowns
     mentionQueueRef.current = []; // Clear mention queue
     pendingMentionsRef.current.clear(); // Clear pending mentions
+    mentionPairRef.current = null; // Reset mention pair decay
+    debateTurnIndexRef.current = 0; // Reset debate turn index
   };
 
   // --- TTS FUNCTIONS ---
@@ -638,12 +693,15 @@ const App: React.FC = () => {
       memberIds: g.memberIds.filter(mid => mid !== id)
     } : g));
 
-    // Also clean up mute records for this agent in all sessions of this group
-    // to prevent "unmuted" notifications for kicked members
+    // Also clean up mute records and debate assignments for this agent in all sessions of this group
     setSessions(prev => prev.map(s => s.groupId === activeGroupId ? {
       ...s,
       mutedAgentIds: (s.mutedAgentIds || []).filter(mid => mid !== id),
-      mutedAgents: (s.mutedAgents || []).filter(m => m.agentId !== id)
+      mutedAgents: (s.mutedAgents || []).filter(m => m.agentId !== id),
+      debateConfig: s.debateConfig ? {
+        ...s.debateConfig,
+        assignments: s.debateConfig.assignments.filter(a => a.agentId !== id)
+      } : s.debateConfig
     } : s));
   };
 
@@ -1093,8 +1151,26 @@ const App: React.FC = () => {
       let streamGenerator;
       // 从群组获取场景设定
       const currentGroup = groups.find(g => g.id === activeSession.groupId);
-      const scenario = currentGroup?.scenario || "";
+      let scenario = currentGroup?.scenario || "";
       const summary = activeSession.summary;
+
+      // 辩论模式：注入角色阵营信息到 scenario
+      const debateCfg = activeSession.debateConfig;
+      if (debateCfg?.turnMode === 'debate' && debateCfg.assignments.length > 0) {
+        const myAssignment = debateCfg.assignments.find(a => a.agentId === agentId);
+        if (myAssignment) {
+          const sideLabel = myAssignment.side === 'pro' ? '正方' : '反方';
+          const proMembers = debateCfg.assignments
+            .filter(a => a.side === 'pro').sort((a, b) => a.order - b.order)
+            .map(a => { const ag = agents.find(x => x.id === a.agentId); return ag ? `${a.order}. ${ag.name}` : null; })
+            .filter(Boolean).join(', ');
+          const conMembers = debateCfg.assignments
+            .filter(a => a.side === 'con').sort((a, b) => a.order - b.order)
+            .map(a => { const ag = agents.find(x => x.id === a.agentId); return ag ? `${a.order}. ${ag.name}` : null; })
+            .filter(Boolean).join(', ');
+          scenario += `\n\n[辩论模式]\n当前为辩论模式，你被分配为【${sideLabel}第${myAssignment.order}号辩手】。\n正方成员: ${proMembers}\n反方成员: ${conMembers}\n请站在${sideLabel}的立场进行论述，与对方阵营展开辩论。发言顺序为正反方交替。`;
+        }
+      }
 
       // 获取当前群组的成员列表
       const currentSessionMembers = currentGroup?.memberIds
@@ -1954,17 +2030,22 @@ const App: React.FC = () => {
     // Minimum 2 messages must pass before the same agent can speak again
     const cooldownMessages = Math.max(2, Math.floor(sessionMembers.length / 2));
 
+    // 辩论模式下，发言顺序由 turn sequence 管理，跳过 cooldown 和 lastSpeaker 限制
+    const isDebateModeActive = activeSession.debateConfig?.turnMode === 'debate' && (activeSession.debateConfig?.assignments.length ?? 0) > 0;
+
     const eligibleAgents = sessionMembers.filter(a => {
         if (!a.providerId || !a.modelId) return false; // Skip unconfigured agents
         if (processingAgents.has(a.id)) return false;
         if (pendingTriggerRef.current.has(a.id)) return false; // Also check pending
         if ((activeSession.mutedAgentIds || []).includes(a.id)) return false;
         if ((activeSession.yieldedAgentIds || []).includes(a.id)) return false;
-        if (sessionMembers.length > 1 && a.id === lastSpeakerId) return false;  // Use lastSpeakerId to handle system messages
 
-        // Message-count cooldown: Don't trigger agents until enough messages have passed
-        const spokeAtCount = agentLastSpokeAt.current.get(a.id);
-        if (spokeAtCount !== undefined && (messages.length - spokeAtCount) < cooldownMessages) return false;
+        // 辩论模式跳过 cooldown 和 lastSpeaker 检查（顺序由 debate sequence 保证）
+        if (!isDebateModeActive) {
+            if (sessionMembers.length > 1 && a.id === lastSpeakerId) return false;
+            const spokeAtCount = agentLastSpokeAt.current.get(a.id);
+            if (spokeAtCount !== undefined && (messages.length - spokeAtCount) < cooldownMessages) return false;
+        }
 
         return true;
     });
@@ -1999,10 +2080,10 @@ const App: React.FC = () => {
                 }
             }
             if (agentsToTrigger.length > 0) {
-                const timeoutId = setTimeout(() => {
-                    agentsToTrigger.forEach(id => triggerAgentReply(id));
-                }, settings.breathingTime);
-                return () => clearTimeout(timeoutId);
+                const timeoutIds = agentsToTrigger.map((id, i) =>
+                    setTimeout(() => triggerAgentReply(id), (i + 1) * settings.breathingTime)
+                );
+                return () => timeoutIds.forEach(id => clearTimeout(id));
             }
             // If no agents were eligible, fall through to normal selection
         } else {
@@ -2037,10 +2118,10 @@ const App: React.FC = () => {
         if (pendingAgents.length > 0) {
             console.log('[PendingMentions] Retrying', pendingAgents.length, 'agents:', pendingAgents.map(a => a.name));
             if (settings.enableConcurrency) {
-                const timeoutId = setTimeout(() => {
-                    pendingAgents.forEach(a => triggerAgentReply(a.id));
-                }, settings.breathingTime);
-                return () => clearTimeout(timeoutId);
+                const timeoutIds = pendingAgents.map((a, i) =>
+                    setTimeout(() => triggerAgentReply(a.id), (i + 1) * settings.breathingTime)
+                );
+                return () => timeoutIds.forEach(id => clearTimeout(id));
             } else {
                 // Sequential: trigger first ready agent
                 const timeoutId = setTimeout(() => {
@@ -2053,9 +2134,12 @@ const App: React.FC = () => {
 
     if (eligibleAgents.length === 0) return;
 
+    // --- 辩论模式：AI 发的 @mention 和 reply 不劫持 turn sequence ---
+    const isDebateAutoplay = isDebateModeActive && lastMessage.senderId !== USER_ID && lastMessage.senderId !== 'narrator';
+
     // --- REPLY PRIORITY: Check if replying to an AI message ---
     let replyTargetAgent: typeof eligibleAgents[0] | null = null;
-    if (lastMessage.replyToId) {
+    if (!isDebateAutoplay && lastMessage.replyToId) {
         const repliedMessage = messages.find(m => m.id === lastMessage.replyToId);
         if (repliedMessage && repliedMessage.senderId !== USER_ID && repliedMessage.senderId !== 'SYSTEM' && repliedMessage.senderId !== 'narrator') {
             // Find the agent who sent the replied message
@@ -2075,12 +2159,13 @@ const App: React.FC = () => {
     }
 
     // --- @MENTION PRIORITY: Check for @全体成员 or multiple @mentions ---
+    // 辩论模式下，AI 的 @mention 不劫持发言顺序（用户 @mention 仍生效）
     const lastTextLower = lastMessage.text.toLowerCase();
     let selectedAgent = null;
     let agentsToQueue: typeof eligibleAgents = [];
 
     // Check for @全体成员
-    if (lastTextLower.includes('@全体成员') || lastTextLower.includes('@all')) {
+    if (!isDebateAutoplay && (lastTextLower.includes('@全体成员') || lastTextLower.includes('@all'))) {
         // @全体成员 bypasses cooldown - use sessionMembers, not eligibleAgents
         // Only filter out: muted, unconfigured (processing/pending will be added to persistent queue)
         const allMentionAgents = sessionMembers.filter(a => {
@@ -2097,8 +2182,8 @@ const App: React.FC = () => {
         // Shuffle randomly
         agentsToQueue = readyAgents.sort(() => Math.random() - 0.5);
         console.log('[Mention] @全体成员 detected, added', allMentionAgents.length, 'to pending, queuing', agentsToQueue.length, 'ready agents');
-    } else {
-        // Extract all @mentions in order
+    } else if (!isDebateAutoplay) {
+        // Extract all @mentions in order (skipped in debate mode for AI messages)
         const mentionMatches = lastMessage.text.matchAll(/@(\S+)/g);
         const mentionedNames: string[] = [];
         for (const match of mentionMatches) {
@@ -2146,14 +2231,40 @@ const App: React.FC = () => {
         }
     }
 
+    // --- @MENTION 概率衰减：防止两个 AI 互 @ 形成二人转 ---
+    if (agentsToQueue.length === 1 && lastMessage.senderId !== USER_ID && lastMessage.senderId !== 'narrator') {
+        const mentionedId = agentsToQueue[0].id;
+        const senderId = lastMessage.senderId;
+        const pairKey = [senderId, mentionedId].sort().join('|');
+        const prev = mentionPairRef.current;
+
+        if (prev && prev.pairKey === pairKey) {
+            prev.count++;
+            // 衰减曲线：第1次=100%, 第2次=70%, 第3次=40%, 第4次+=10%
+            const probability = Math.max(0.1, 1 - prev.count * 0.3);
+            if (Math.random() > probability) {
+                console.log(`[MentionDecay] Pair ${pairKey} count=${prev.count}, prob=${(probability * 100).toFixed(0)}% → SKIPPED, falling to random`);
+                agentsToQueue = [];
+            } else {
+                console.log(`[MentionDecay] Pair ${pairKey} count=${prev.count}, prob=${(probability * 100).toFixed(0)}% → honored`);
+            }
+        } else {
+            // 新的 pair 或第一次
+            mentionPairRef.current = { pairKey, count: 0 };
+        }
+    } else if (agentsToQueue.length !== 1) {
+        // 不是单 @mention（@全体 或无 @），重置 pair 计数
+        mentionPairRef.current = null;
+    }
+
     // If we have multiple agents to trigger
     if (agentsToQueue.length > 1) {
         if (settings.enableConcurrency) {
-            // Concurrency mode: trigger all at once
-            const timeoutId = setTimeout(() => {
-                agentsToQueue.forEach(a => triggerAgentReply(a.id));
-            }, settings.breathingTime);
-            return () => clearTimeout(timeoutId);
+            // Concurrency mode: stagger triggers
+            const timeoutIds = agentsToQueue.map((a, i) =>
+                setTimeout(() => triggerAgentReply(a.id), (i + 1) * settings.breathingTime)
+            );
+            return () => timeoutIds.forEach(id => clearTimeout(id));
         } else {
             // Sequential mode: put all except first into queue
             mentionQueueRef.current = agentsToQueue.slice(1).map(a => a.id);
@@ -2165,14 +2276,27 @@ const App: React.FC = () => {
         // No mention, but replying to an AI - prioritize that agent
         selectedAgent = replyTargetAgent;
     } else {
-        // No mention, no reply target, pick randomly
-        selectedAgent = eligibleAgents[Math.floor(Math.random() * eligibleAgents.length)];
+        // No mention, no reply target
+        const debateCfg = activeSession.debateConfig;
+        if (debateCfg?.turnMode === 'debate' && debateCfg.assignments.length > 0) {
+            // 辩论模式：按展平序列选择下一个 agent
+            const eligibleIds = new Set(eligibleAgents.map(a => a.id));
+            const result = getNextDebateAgent(debateCfg.assignments, eligibleIds, debateTurnIndexRef.current);
+            if (result) {
+                debateTurnIndexRef.current = result.nextIndex;
+                selectedAgent = eligibleAgents.find(a => a.id === result.agentId) || null;
+            }
+        } else {
+            // 随机模式
+            selectedAgent = eligibleAgents[Math.floor(Math.random() * eligibleAgents.length)];
+        }
     }
 
     if (selectedAgent) {
+        const effectiveBreathingTime = activeSession.debateConfig?.breathingTime ?? settings.breathingTime;
         const timeoutId = setTimeout(() => {
            triggerAgentReply(selectedAgent.id);
-        }, settings.breathingTime);
+        }, effectiveBreathingTime);
         return () => clearTimeout(timeoutId);
     }
 
@@ -2233,6 +2357,8 @@ const App: React.FC = () => {
         onActivateAgent={handleActivateAgent}
         onToggleAdmin={handleToggleAdmin}
         userName={settings.userName || 'User'}
+        debateConfig={activeSession.debateConfig}
+        onUpdateDebateConfig={(config) => updateActiveSession(s => ({ ...s, debateConfig: config }))}
         userProfiles={settings.userProfiles}
         activeProfileId={settings.activeProfileId}
         onSwitchProfile={(profileId) => {
@@ -2399,6 +2525,7 @@ const App: React.FC = () => {
                   replyToMessage={msg.replyToId ? messages.find(m => m.id === msg.replyToId) : undefined}
                   onReply={(targetMsg) => setReplyToId(targetMsg.id)}
                   onMention={(name) => setInputText(prev => `${prev}@${name} `)}
+                  onDelete={handleDeleteMessage}
                   isStreaming={processingAgents.has(msg.senderId)}
                   onPlayTTS={settings.ttsSettings?.enabled ? handlePlayTTS : undefined}
                   onStopTTS={handleStopTTS}

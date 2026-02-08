@@ -156,6 +156,9 @@ export interface ChatSession {
   // Memory System (独立于群组)
   summary?: string; // Long term memory text
   adminNotes?: string[]; // Temporary notes from Admins
+
+  // 辩论/发言顺序模式
+  debateConfig?: DebateConfig;
 }
 
 // User Profile for multi-identity support
@@ -241,3 +244,20 @@ export interface TTSSettings {
 
 // Legacy compatibility alias
 export type TTSEngine = TTSEngineType;
+
+// 辩论/发言顺序模式
+export type TurnMode = 'random' | 'debate';
+export type DebateSide = 'pro' | 'con';
+
+export interface DebateAssignment {
+  agentId: string;
+  side: DebateSide;
+  order: number;       // 1-based, side 内的发言序号
+}
+
+export interface DebateConfig {
+  turnMode: TurnMode;
+  assignments: DebateAssignment[];
+  breathingTime?: number;        // 会话级发言间隔覆盖（ms），undefined 时用全局值
+  currentTurnIndex: number;      // 当前轮到第几个（在展平序列中的索引）
+}

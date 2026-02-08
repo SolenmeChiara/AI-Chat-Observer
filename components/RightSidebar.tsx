@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { Agent, MuteInfo, UserProfile } from '../types';
-import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone } from 'lucide-react';
+import { Agent, MuteInfo, UserProfile, DebateConfig, DebateAssignment } from '../types';
+import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone, Swords, ArrowUp, ArrowDown, ArrowRightLeft } from 'lucide-react';
 
 // Mute duration options (in minutes)
 const MUTE_DURATIONS = [
@@ -28,6 +28,9 @@ interface RightSidebarProps {
   onActivateAgent: (agentId: string) => void;  // 激活角色加入群聊
   onToggleAdmin: (agentId: string) => void;    // 切换管理员状态
   userName: string;
+  // 辩论模式
+  debateConfig?: DebateConfig;
+  onUpdateDebateConfig?: (config: DebateConfig) => void;
   // User profile switching
   userProfiles?: UserProfile[];
   activeProfileId?: string | 'narrator';
@@ -36,6 +39,7 @@ interface RightSidebarProps {
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
   isOpen, onClose, agents, inactiveAgents, adminIds, mutedAgents, onRemoveAgent, onMuteAgent, onUnmuteAgent, onActivateAgent, onToggleAdmin, userName,
+  debateConfig, onUpdateDebateConfig,
   userProfiles, activeProfileId, onSwitchProfile
 }) => {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -43,6 +47,93 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [showMuteMenu, setShowMuteMenu] = useState<string | null>(null); // agentId being muted
   const [customDuration, setCustomDuration] = useState('60'); // minutes
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showDebateConfig, setShowDebateConfig] = useState(false);
+
+  // 辩论模式 helpers
+  const isDebateMode = debateConfig?.turnMode === 'debate';
+
+  const handleToggleTurnMode = () => {
+    if (!onUpdateDebateConfig) return;
+    if (isDebateMode) {
+      // 切回随机
+      onUpdateDebateConfig({ turnMode: 'random', assignments: [], currentTurnIndex: 0 });
+    } else {
+      // 切到辩论模式，自动将成员交替分配正反方
+      const newAssignments: DebateAssignment[] = [];
+      let proOrder = 1, conOrder = 1;
+      agents.forEach((agent, i) => {
+        const side = i % 2 === 0 ? 'pro' as const : 'con' as const;
+        newAssignments.push({
+          agentId: agent.id,
+          side,
+          order: side === 'pro' ? proOrder++ : conOrder++,
+        });
+      });
+      onUpdateDebateConfig({ turnMode: 'debate', assignments: newAssignments, currentTurnIndex: 0, breathingTime: debateConfig?.breathingTime });
+    }
+  };
+
+  const handleMoveOrder = (agentId: string, direction: 'up' | 'down') => {
+    if (!onUpdateDebateConfig || !debateConfig) return;
+    const assignments = [...debateConfig.assignments];
+    const idx = assignments.findIndex(a => a.agentId === agentId);
+    if (idx === -1) return;
+    const current = assignments[idx];
+    const sameSide = assignments.filter(a => a.side === current.side).sort((a, b) => a.order - b.order);
+    const posInSide = sameSide.findIndex(a => a.agentId === agentId);
+    if (direction === 'up' && posInSide > 0) {
+      // swap order with previous
+      const prevId = sameSide[posInSide - 1].agentId;
+      const prevIdx = assignments.findIndex(a => a.agentId === prevId);
+      const tmpOrder = assignments[idx].order;
+      assignments[idx] = { ...assignments[idx], order: assignments[prevIdx].order };
+      assignments[prevIdx] = { ...assignments[prevIdx], order: tmpOrder };
+    } else if (direction === 'down' && posInSide < sameSide.length - 1) {
+      const nextId = sameSide[posInSide + 1].agentId;
+      const nextIdx = assignments.findIndex(a => a.agentId === nextId);
+      const tmpOrder = assignments[idx].order;
+      assignments[idx] = { ...assignments[idx], order: assignments[nextIdx].order };
+      assignments[nextIdx] = { ...assignments[nextIdx], order: tmpOrder };
+    }
+    onUpdateDebateConfig({ ...debateConfig, assignments });
+  };
+
+  const handleSwitchSide = (agentId: string) => {
+    if (!onUpdateDebateConfig || !debateConfig) return;
+    const assignments = [...debateConfig.assignments];
+    const idx = assignments.findIndex(a => a.agentId === agentId);
+    if (idx === -1) return;
+    const newSide = assignments[idx].side === 'pro' ? 'con' as const : 'pro' as const;
+    const maxOrder = assignments.filter(a => a.side === newSide).reduce((max, a) => Math.max(max, a.order), 0);
+    assignments[idx] = { ...assignments[idx], side: newSide, order: maxOrder + 1 };
+    // 重新排列原 side 的 order
+    const oldSide = assignments[idx].side === 'con' ? 'pro' as const : 'con' as const;
+    // Actually need to recompute based on original side before switch
+    const originalSide = newSide === 'con' ? 'pro' : 'con';
+    let orderCounter = 1;
+    assignments
+      .filter(a => a.side === originalSide)
+      .sort((a, b) => a.order - b.order)
+      .forEach(a => {
+        const aIdx = assignments.findIndex(x => x.agentId === a.agentId);
+        assignments[aIdx] = { ...assignments[aIdx], order: orderCounter++ };
+      });
+    onUpdateDebateConfig({ ...debateConfig, assignments });
+  };
+
+  const handleAssignAgent = (agentId: string, side: 'pro' | 'con') => {
+    if (!onUpdateDebateConfig || !debateConfig) return;
+    const assignments = [...debateConfig.assignments];
+    const maxOrder = assignments.filter(a => a.side === side).reduce((max, a) => Math.max(max, a.order), 0);
+    assignments.push({ agentId, side, order: maxOrder + 1 });
+    onUpdateDebateConfig({ ...debateConfig, assignments });
+  };
+
+  const handleBreathingTimeChange = (value: string) => {
+    if (!onUpdateDebateConfig || !debateConfig) return;
+    const num = value === '' ? undefined : parseInt(value);
+    onUpdateDebateConfig({ ...debateConfig, breathingTime: num && !isNaN(num) ? num : undefined });
+  };
 
   // Get current profile info
   const currentProfile = userProfiles?.find(p => p.id === activeProfileId);
@@ -174,6 +265,166 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           </div>
         )}
 
+        {/* 辩论/发言模式配置 */}
+        {onUpdateDebateConfig && agents.length > 0 && (
+          <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-100 dark:border-zinc-700 shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowDebateConfig(!showDebateConfig)}
+              className="w-full px-3 py-2.5 flex items-center justify-between text-sm font-semibold text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-zinc-700/50 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <Swords size={14} className={isDebateMode ? 'text-orange-500' : 'text-gray-400'} />
+                发言模式
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                  isDebateMode
+                    ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                    : 'bg-gray-100 dark:bg-zinc-700 text-gray-500 dark:text-gray-400'
+                }`}>
+                  {isDebateMode ? '辩论' : '随机'}
+                </span>
+              </span>
+              <ChevronDown size={14} className={`text-gray-400 transition-transform ${showDebateConfig ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showDebateConfig && (
+              <div className="px-3 pb-3 border-t border-gray-100 dark:border-zinc-700 space-y-3">
+                {/* 模式切换 */}
+                <div className="flex gap-2 pt-3">
+                  <button
+                    onClick={() => { if (isDebateMode) handleToggleTurnMode(); }}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      !isDebateMode
+                        ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                        : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'
+                    }`}
+                  >
+                    随机
+                  </button>
+                  <button
+                    onClick={() => { if (!isDebateMode) handleToggleTurnMode(); }}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      isDebateMode
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'
+                    }`}
+                  >
+                    辩论
+                  </button>
+                </div>
+
+                {/* 辩论模式详细配置 */}
+                {isDebateMode && debateConfig && (
+                  <>
+                    {/* 发言间隔 */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">发言间隔</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="500"
+                        value={debateConfig.breathingTime ?? ''}
+                        onChange={(e) => handleBreathingTimeChange(e.target.value)}
+                        placeholder="使用全局值"
+                        className="flex-1 px-2 py-1 text-[10px] bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded focus:outline-none focus:border-orange-400 text-gray-700 dark:text-gray-200"
+                      />
+                      <span className="text-[10px] text-gray-400">ms</span>
+                    </div>
+
+                    {/* 正方 */}
+                    <div>
+                      <div className="flex items-center gap-1 mb-1.5">
+                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">正方</span>
+                      </div>
+                      <div className="space-y-1">
+                        {debateConfig.assignments
+                          .filter(a => a.side === 'pro')
+                          .sort((a, b) => a.order - b.order)
+                          .map(assignment => {
+                            const agent = agents.find(a => a.id === assignment.agentId);
+                            if (!agent) return null;
+                            return (
+                              <div key={assignment.agentId} className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 px-2 py-1.5 rounded-lg">
+                                <span className="text-[10px] font-bold text-blue-500 w-4">{assignment.order}</span>
+                                <img src={agent.avatar} className="w-5 h-5 rounded-full bg-white object-contain border border-blue-200 dark:border-blue-700" />
+                                <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">{agent.name}</span>
+                                <button onClick={() => handleMoveOrder(assignment.agentId, 'up')} className="p-0.5 text-gray-400 hover:text-blue-500"><ArrowUp size={10} /></button>
+                                <button onClick={() => handleMoveOrder(assignment.agentId, 'down')} className="p-0.5 text-gray-400 hover:text-blue-500"><ArrowDown size={10} /></button>
+                                <button onClick={() => handleSwitchSide(assignment.agentId)} className="p-0.5 text-gray-400 hover:text-orange-500" title="移至反方"><ArrowRightLeft size={10} /></button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    {/* 反方 */}
+                    <div>
+                      <div className="flex items-center gap-1 mb-1.5">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <span className="text-[10px] font-bold text-red-600 dark:text-red-400">反方</span>
+                      </div>
+                      <div className="space-y-1">
+                        {debateConfig.assignments
+                          .filter(a => a.side === 'con')
+                          .sort((a, b) => a.order - b.order)
+                          .map(assignment => {
+                            const agent = agents.find(a => a.id === assignment.agentId);
+                            if (!agent) return null;
+                            return (
+                              <div key={assignment.agentId} className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 px-2 py-1.5 rounded-lg">
+                                <span className="text-[10px] font-bold text-red-500 w-4">{assignment.order}</span>
+                                <img src={agent.avatar} className="w-5 h-5 rounded-full bg-white object-contain border border-red-200 dark:border-red-700" />
+                                <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">{agent.name}</span>
+                                <button onClick={() => handleMoveOrder(assignment.agentId, 'up')} className="p-0.5 text-gray-400 hover:text-red-500"><ArrowUp size={10} /></button>
+                                <button onClick={() => handleMoveOrder(assignment.agentId, 'down')} className="p-0.5 text-gray-400 hover:text-red-500"><ArrowDown size={10} /></button>
+                                <button onClick={() => handleSwitchSide(assignment.agentId)} className="p-0.5 text-gray-400 hover:text-orange-500" title="移至正方"><ArrowRightLeft size={10} /></button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    {/* 未分配 */}
+                    {(() => {
+                      const assignedIds = new Set(debateConfig.assignments.map(a => a.agentId));
+                      const unassigned = agents.filter(a => !assignedIds.has(a.id));
+                      if (unassigned.length === 0) return null;
+                      return (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1.5">
+                            <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                            <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">未分配</span>
+                          </div>
+                          <div className="space-y-1">
+                            {unassigned.map(agent => (
+                              <div key={agent.id} className="flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-700/50 px-2 py-1.5 rounded-lg">
+                                <img src={agent.avatar} className="w-5 h-5 rounded-full bg-white object-contain border border-gray-200 dark:border-zinc-600" />
+                                <span className="text-xs text-gray-600 dark:text-gray-300 flex-1 truncate">{agent.name}</span>
+                                <button
+                                  onClick={() => handleAssignAgent(agent.id, 'pro')}
+                                  className="px-1.5 py-0.5 text-[9px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50"
+                                >
+                                  +正方
+                                </button>
+                                <button
+                                  onClick={() => handleAssignAgent(agent.id, 'con')}
+                                  className="px-1.5 py-0.5 text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50"
+                                >
+                                  +反方
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Divider if user profiles exist */}
         {userProfiles && onSwitchProfile && agents.length > 0 && (
           <div className="flex items-center gap-2 py-1">
@@ -187,6 +438,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           const muteInfo = getMuteInfo(agent.id);
           const isMuted = !!muteInfo;
           const isAdmin = adminIds.includes(agent.id);
+          const debateAssignment = isDebateMode ? debateConfig?.assignments.find(a => a.agentId === agent.id) : null;
           return (
             <div key={agent.id} className={`bg-white dark:bg-zinc-800 p-3 rounded-xl border shadow-sm relative group transition-all hover:shadow-md ${isMuted ? 'opacity-60 border-gray-100 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-700' : 'border-gray-100 dark:border-zinc-700'} ${isAdmin ? 'ring-1 ring-amber-300 dark:ring-amber-600' : ''}`}>
               <div className="flex items-center gap-3">
@@ -217,6 +469,15 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     {isMuted && (
                       <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                         <VolumeX size={10} /> 禁言中
+                      </span>
+                    )}
+                    {debateAssignment && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        debateAssignment.side === 'pro'
+                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                          : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                      }`}>
+                        {debateAssignment.side === 'pro' ? '正' : '反'}{debateAssignment.order}
                       </span>
                     )}
                   </h4>
