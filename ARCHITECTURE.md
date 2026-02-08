@@ -1,8 +1,16 @@
 # 🏗️ 项目架构文档 (Project Architecture)
 
-本文档详细描述了 **AI 群聊观察会 (V5.3)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
+本文档详细描述了 **AI 群聊观察会 (V5.4)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
 
-**V5.3 新增功能：**
+**V5.4 新增功能：**
+- 辩论/发言顺序模式：会话级正反方分组 + 交替发言 turn sequence
+- @mention 概率衰减：防止随机模式下两个 AI 互 @ 形成二人转
+- 辩论模式下 AI 的 @mention 不劫持 turn sequence
+- 辩论角色自动注入 system prompt（告知 AI 自己是正方/反方第几号）
+- 单条消息删除按钮
+- TTS 设置面板可折叠
+
+**V5.3 功能：**
 - 娱乐工具：骰子 `{{ROLL: XdY+Z}}` 和塔罗牌 `{{TAROT: N}}`
 - 群组级娱乐功能开关
 - 自动提示词注入 (AI 自动获知可用的娱乐工具)
@@ -96,8 +104,32 @@ interface ChatSession {
   // 独立记忆 (每个对话单独)
   summary?: string;        // 长期记忆文本
   adminNotes?: string[];   // 管理员临时便签
+
+  // 辩论/发言顺序模式 (V5.4)
+  debateConfig?: DebateConfig; // undefined = 随机模式
 }
 ```
+
+### 3.5 `DebateConfig` (辩论配置) - V5.4 新增
+会话级的发言顺序配置，支持随机和辩论两种模式。
+```typescript
+type TurnMode = 'random' | 'debate';
+type DebateSide = 'pro' | 'con';
+
+interface DebateAssignment {
+  agentId: string;
+  side: DebateSide;        // 正方 or 反方
+  order: number;           // 1-based, side 内的发言序号
+}
+
+interface DebateConfig {
+  turnMode: TurnMode;
+  assignments: DebateAssignment[];
+  breathingTime?: number;  // 会话级发言间隔覆盖 (ms)，undefined 时用全局值
+  currentTurnIndex: number;// 当前轮到第几个 (展平序列中的索引)
+}
+```
+*   **无需 DB migration**：Dexie 存 JSON，新字段 `undefined` = 随机模式，向后兼容。
 
 ### 3.3 `Agent` (智能体/角色)
 定义一个 AI 人格。
@@ -155,8 +187,14 @@ interface TTSSettings {
 ### 4.1 自动对战循环 (Auto-Play Loop)
 位于 `App.tsx` 的 `useEffect` 中：
 1.  **Check**: 检查并发锁 (`processingAgents`)、暂停状态 (`isAutoPlay`)。
-2.  **Select**: 筛选符合条件的 AI（未禁言、未 Yield、非上一轮发言者）。
-3.  **Trigger**: 随机选择一个 AI，调用 `triggerAgentReply`。
+2.  **Filter**: 筛选符合条件的 AI（未禁言、未 Yield、非上一轮发言者）。
+    *   辩论模式下跳过 cooldown 和 lastSpeaker 限制（顺序由 turn sequence 保证）。
+3.  **@Mention Priority**: 处理 @mention 优先级（辩论模式下 AI 的 @mention 不劫持顺序）。
+4.  **@Mention Decay**: 随机模式下，同一对 agent 连续互 @ 时概率递减（100%→70%→40%→10%），防止二人转。
+5.  **Select**: 根据模式选择 agent：
+    *   **随机模式**: 随机选择。
+    *   **辩论模式**: 按展平序列 (pro1→con1→pro2→con2...) 选择下一个，使用 `debateTurnIndexRef` 跟踪进度。
+6.  **Trigger**: 调用 `triggerAgentReply`，使用会话级 `breathingTime` 覆盖（如有配置）。
 
 ### 4.2 触发回复 (`triggerAgentReply`)
 这是系统的核心调度函数：
@@ -276,6 +314,46 @@ Anthropic API 限制图片 5MB，因此在上传时自动压缩：
 **自定义音色管理：**
 *   用户可手动添加服务商未自动获取的音色（输入名称 + ID）。
 *   支持为每个 Agent 单独指定音色。
+
+### 4.10 辩论/发言顺序模式 (Debate Turn Mode) - V5.4 新增
+支持在会话级别配置 agent 的发言顺序，适用于正式辩论、角色对抗等场景。
+
+**发言序列构建：**
+```
+assignments: [pro1, pro2, con1, con2, con3]
+  → buildDebateTurnSequence()
+  → [pro1, con1, pro2, con2, con3]  (交替插入)
+```
+
+**UI 配置 (RightSidebar)：**
+*   模式切换：随机 / 辩论
+*   切换到辩论时自动将成员交替分配正反方
+*   支持拖动排序 (上/下箭头) 和切换阵营
+*   可设置会话级发言间隔覆盖
+*   Agent 卡片上显示阵营徽章（正1、反2 等）
+
+**Prompt 注入：**
+辩论模式下，`triggerAgentReply` 自动在 `scenario` 末尾追加阵营信息：
+```
+[辩论模式]
+当前为辩论模式，你被分配为【正方第1号辩手】。
+正方成员: 1. Gemini, 2. GPT-4o
+反方成员: 1. DeepSeek, 2. Claude
+请站在正方的立场进行论述，与对方阵营展开辩论。
+```
+*   注入到 `scenario` 而非单独参数，三个 service 文件无需修改。
+
+**防二人转机制 (@Mention Decay)：**
+*   随机模式下，`mentionPairRef` 跟踪同一对 agent 连续互 @ 次数。
+*   衰减曲线：`prob = max(0.1, 1 - count * 0.3)` → 第 4 次起仅 10%。
+*   概率不通过时 fall through 到随机选人。
+*   辩论模式下直接跳过 AI @mention 优先级，完全由 turn sequence 控制。
+
+**关键实现细节：**
+*   `currentTurnIndex` 使用 `useRef` 而非 session state，避免在 autoplay `useEffect` 中触发无限循环。
+*   切换会话时从 session 的 `debateConfig.currentTurnIndex` 同步到 ref。
+*   清空消息时重置 ref 和 session 中的 index。
+*   移除 agent 时自动清理对应 assignment。
 
 ---
 
