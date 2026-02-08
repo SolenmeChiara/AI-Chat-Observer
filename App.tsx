@@ -1627,10 +1627,10 @@ const App: React.FC = () => {
     const val = e.target.value;
     setInputText(val);
 
-    // Auto-resize textarea
+    // Auto-resize textarea up to max, then scroll
     const textarea = e.target;
     textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 150) + 'px'; // Max 150px
+    textarea.style.height = Math.min(textarea.scrollHeight, 150) + 'px';
 
     const match = val.match(/@(\S*)$/);
     if (match) {
@@ -2554,7 +2554,7 @@ const App: React.FC = () => {
                       : `在 "${activeSession.name}" 发言... (Enter发送, Shift+Enter换行)`
                 }
                 rows={1}
-                className="w-full bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-xl px-4 py-3.5 pl-10 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-hidden"
+                className="w-full bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-xl px-4 py-3.5 pl-10 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-y-auto"
                 style={{ minHeight: '52px', maxHeight: '150px' }}
               />
               <button type="submit" disabled={(!inputText.trim() && attachments.length === 0) || isParsingFile} className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm">
