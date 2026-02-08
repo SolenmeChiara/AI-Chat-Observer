@@ -883,7 +883,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <div key={group.id} className="rounded-xl border border-gray-200 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-800">
                    {/* 群组头部 */}
                    <div
-                     className={`p-3 flex items-center gap-2 cursor-pointer transition-colors ${isActiveGroup ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}`}
+                     className={`group p-3 flex items-center gap-2 cursor-pointer transition-colors ${isActiveGroup ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}`}
                      onClick={() => {
                        // Always expand when clicking (don't toggle if not expanded)
                        if (!isExpanded) {
@@ -933,7 +933,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                      </div>
                      {groups.length > 1 && (
                        <button
-                         onClick={(e) => { e.stopPropagation(); onDeleteGroup(group.id); }}
+                         onClick={(e) => { e.stopPropagation(); if (window.confirm(`确定要删除群组「${group.name}」吗？该群组下的所有对话都会被删除。`)) onDeleteGroup(group.id); }}
                          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg opacity-0 group-hover:opacity-100"
                        >
                          <Trash2 size={14} />
@@ -953,12 +953,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                            <div className={`w-5 h-5 rounded flex items-center justify-center ${activeSessionId === session.id ? 'bg-zinc-900 dark:bg-zinc-500 text-white' : 'bg-gray-200 dark:bg-zinc-600 text-gray-400'}`}>
                              <MessageSquare size={10} />
                            </div>
-                           <div className="flex-1 min-w-0" onClick={() => onSwitchSession(session.id)}>
+                           <div
+                             className="flex-1 min-w-0"
+                             onClick={() => onSwitchSession(session.id)}
+                             onDoubleClick={(e) => {
+                               e.stopPropagation();
+                               const input = e.currentTarget.querySelector('input');
+                               if (input) {
+                                 input.classList.remove('pointer-events-none');
+                                 input.focus();
+                                 input.select();
+                               }
+                             }}
+                           >
                              <input
                                className={`w-full bg-transparent text-xs font-medium focus:outline-none pointer-events-none ${activeSessionId === session.id ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}
                                value={session.name}
                                onChange={(e) => onRenameSession(session.id, e.target.value)}
-                               onDoubleClick={(e) => { e.stopPropagation(); (e.target as HTMLInputElement).classList.remove('pointer-events-none'); (e.target as HTMLInputElement).select(); }}
                                onBlur={(e) => (e.target as HTMLInputElement).classList.add('pointer-events-none')}
                              />
                            </div>
