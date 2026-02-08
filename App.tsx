@@ -2183,28 +2183,27 @@ const App: React.FC = () => {
         agentsToQueue = readyAgents.sort(() => Math.random() - 0.5);
         console.log('[Mention] @全体成员 detected, added', allMentionAgents.length, 'to pending, queuing', agentsToQueue.length, 'ready agents');
     } else if (!isDebateAutoplay) {
-        // Extract all @mentions in order (skipped in debate mode for AI messages)
-        const mentionMatches = lastMessage.text.matchAll(/@(\S+)/g);
-        const mentionedNames: string[] = [];
-        for (const match of mentionMatches) {
-            mentionedNames.push(match[1].toLowerCase());
+        // Extract @mentions by matching known agent names in the text
+        // 先按名字长度降序排列，优先匹配最长的名字（避免 "Claude" 抢走 "Claude Opus 4.6" 的匹配）
+        const lastText = lastMessage.text;
+        const seenIds = new Set<string>();
+        const sortedMembers = [...sessionMembers].sort((a, b) => b.name.length - a.name.length);
+        const mentionedAgentIds: string[] = [];
+
+        for (const member of sortedMembers) {
+            // 检查文本中是否包含 @AgentName（不区分大小写）
+            const pattern = new RegExp(`@${member.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\w)`, 'i');
+            if (pattern.test(lastText) && !seenIds.has(member.id)) {
+                mentionedAgentIds.push(member.id);
+                seenIds.add(member.id);
+            }
         }
 
-        if (mentionedNames.length > 0) {
-            // Find agents matching each mention in order (no duplicates)
-            // Match against ALL session members, @mention bypasses cooldown
-            const seenIds = new Set<string>();
-
-            for (const mentionName of mentionedNames) {
-                // Find the agent in ALL session members (not just eligible)
-                const matchedAgent = sessionMembers.find(a => {
-                    if (seenIds.has(a.id)) return false;
-                    const nameLower = a.name.toLowerCase();
-                    return nameLower === mentionName || nameLower.startsWith(mentionName);
-                });
+        if (mentionedAgentIds.length > 0) {
+            for (const agentId of mentionedAgentIds) {
+                const matchedAgent = sessionMembers.find(a => a.id === agentId);
 
                 if (matchedAgent) {
-                    seenIds.add(matchedAgent.id);
                     // Check basic blockers (can't bypass these)
                     const isProcessing = processingAgents.has(matchedAgent.id);
                     const isPending = pendingTriggerRef.current.has(matchedAgent.id);
