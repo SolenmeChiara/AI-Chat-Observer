@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   enableConcurrency: false, // Default to sequential (polite)
   timeoutDuration: 30000,   // Default 30s timeout
   compressImages: true,     // Default ON (Anthropic has 5MB limit)
-  maxImageSizeMB: 4,        // Default 4MB (safe margin below 5MB)
+  maxImageSizeMB: 1,        // Default 1MB (better for OpenRouter/network stability)
   darkMode: false,          // Default to light mode
   expandAllReasoning: false, // Default to collapsed reasoning chains
   ttsSettings: {
