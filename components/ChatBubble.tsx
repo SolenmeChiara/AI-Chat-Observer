@@ -176,6 +176,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                    <Shield size={8} /> ADMIN
                 </span>
               )}
+              {message.pmTargetId && (
+                <span className="text-[9px] bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded">
+                  私讯→{message.pmTargetId === USER_ID ? (userProfile?.userName || 'User') : (allAgents?.find(a => a.id === message.pmTargetId)?.name || '未知')}
+                </span>
+              )}
             </span>
         </div>
         
@@ -215,6 +220,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
               ? 'bg-zinc-900 text-white rounded-br-sm prose-invert'
               : 'bg-white dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-bl-sm border border-gray-100 dark:border-zinc-700'
             }
+            ${message.pmTargetId ? 'text-purple-600 dark:text-purple-400' : ''}
             ${message.isError ? 'border-red-200 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300' : ''}
           `}
           style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}

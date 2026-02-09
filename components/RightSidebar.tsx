@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Agent, MuteInfo, UserProfile, DebateConfig, DebateAssignment } from '../types';
-import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone, Swords, ArrowUp, ArrowDown, ArrowRightLeft } from 'lucide-react';
+import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone, Swords, ArrowUp, ArrowDown, ArrowRightLeft, EyeOff } from 'lucide-react';
 
 // Mute duration options (in minutes)
 const MUTE_DURATIONS = [
@@ -31,6 +31,12 @@ interface RightSidebarProps {
   // 辩论模式
   debateConfig?: DebateConfig;
   onUpdateDebateConfig?: (config: DebateConfig) => void;
+  // 人类伪装
+  humanDisguise?: string[];
+  onToggleHumanDisguise?: (agentId: string) => void;
+  // 可见性屏蔽
+  agentVisibility?: Record<string, string[]>;
+  onUpdateAgentVisibility?: (agentId: string, blockedIds: string[]) => void;
   // User profile switching
   userProfiles?: UserProfile[];
   activeProfileId?: string | 'narrator';
@@ -40,6 +46,8 @@ interface RightSidebarProps {
 const RightSidebar: React.FC<RightSidebarProps> = ({
   isOpen, onClose, agents, inactiveAgents, adminIds, mutedAgents, onRemoveAgent, onMuteAgent, onUnmuteAgent, onActivateAgent, onToggleAdmin, userName,
   debateConfig, onUpdateDebateConfig,
+  humanDisguise, onToggleHumanDisguise,
+  agentVisibility, onUpdateAgentVisibility,
   userProfiles, activeProfileId, onSwitchProfile
 }) => {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -48,6 +56,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [customDuration, setCustomDuration] = useState('60'); // minutes
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showDebateConfig, setShowDebateConfig] = useState(false);
+  const [showVisibilityFor, setShowVisibilityFor] = useState<string | null>(null); // agentId with expanded visibility panel
 
   // 辩论模式 helpers
   const isDebateMode = debateConfig?.turnMode === 'debate';
@@ -550,6 +559,68 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       自定义
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Human Disguise Toggle */}
+              {onToggleHumanDisguise && (
+                <div className="mt-2 pt-2 border-t border-gray-100 dark:border-zinc-700">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="accent-purple-500"
+                      checked={humanDisguise?.includes(agent.id) || false}
+                      onChange={() => onToggleHumanDisguise(agent.id)}
+                    />
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <User size={10} /> 向其他 Agent 标记为人类
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {/* Visibility Block Config */}
+              {onUpdateAgentVisibility && agents.length > 1 && (
+                <div className="mt-2">
+                  <button
+                    onClick={() => setShowVisibilityFor(showVisibilityFor === agent.id ? null : agent.id)}
+                    className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  >
+                    <EyeOff size={10} />
+                    <span>可见性屏蔽 ({(agentVisibility?.[agent.id] || []).length})</span>
+                    <ChevronDown size={10} className={`transition-transform ${showVisibilityFor === agent.id ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showVisibilityFor === agent.id && (
+                    <div className="mt-2 pt-2 border-t border-gray-100 dark:border-zinc-700 space-y-1">
+                      <div className="text-[10px] text-gray-400 mb-1">勾选后该成员将看不到对方的消息：</div>
+                      {agents.filter(a => a.id !== agent.id).map(otherAgent => {
+                        const blockedList = agentVisibility?.[agent.id] || [];
+                        const isBlocked = blockedList.includes(otherAgent.id);
+                        return (
+                          <label
+                            key={otherAgent.id}
+                            className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${isBlocked ? 'bg-red-50 dark:bg-red-900/20' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="accent-red-500"
+                              checked={isBlocked}
+                              onChange={() => {
+                                const newBlocked = isBlocked
+                                  ? blockedList.filter(id => id !== otherAgent.id)
+                                  : [...blockedList, otherAgent.id];
+                                onUpdateAgentVisibility(agent.id, newBlocked);
+                              }}
+                            />
+                            <img src={otherAgent.avatar} className="w-4 h-4 rounded-full bg-white object-contain border border-gray-200 dark:border-zinc-600" />
+                            <span className={`text-xs ${isBlocked ? 'line-through text-red-400' : 'text-gray-600 dark:text-gray-300'}`}>
+                              {otherAgent.name}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

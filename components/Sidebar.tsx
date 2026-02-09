@@ -1128,6 +1128,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                              onChange={(e) => onUpdateGroupEntertainmentConfig(activeGroup.id, { enableTarot: e.target.checked })}
                           />
                        </div>
+                       {/* 私讯开关 */}
+                       <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                             <MessageSquare size={14} className="text-gray-400" />
+                             <span className="text-xs text-gray-600 dark:text-gray-300">私讯</span>
+                             <span className="text-[10px] text-gray-400 font-mono">{'{{RES_PM_Name: msg}}'}</span>
+                          </div>
+                          <input
+                             type="checkbox"
+                             className="accent-zinc-900"
+                             checked={activeGroup.entertainmentConfig?.enablePM || false}
+                             onChange={(e) => onUpdateGroupEntertainmentConfig(activeGroup.id, { enablePM: e.target.checked })}
+                          />
+                       </div>
                     </div>
                  </div>
 
@@ -1472,6 +1486,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     </div>
                                 </div>
                             )}
+
+                            {/* 私讯 PM 功能 (需群组总开关也开启) */}
+                            <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                        <MessageSquare size={10} /> 允许私讯 (PM)
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        className="accent-zinc-900"
+                                        checked={editData.enablePM || false}
+                                        onChange={(e) => updateDraftAgent(agent.id, { enablePM: e.target.checked })}
+                                    />
+                                </div>
+                                <p className="text-[9px] text-gray-400 mt-0.5">
+                                    允许该角色发送私讯，需群组娱乐功能中的私讯总开关也开启
+                                </p>
+                            </div>
 
                             {/* Gemini 原生 Google 搜索 (仅 Gemini 模型可用) */}
                             {currentProvider?.type === AgentType.GEMINI && (

@@ -1,8 +1,17 @@
 # 🏗️ 项目架构文档 (Project Architecture)
 
-本文档详细描述了 **AI 群聊观察会 (V5.4)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
+本文档详细描述了 **AI 群聊观察会 (V5.5)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
 
-**V5.4 新增功能：**
+**V5.5 新增功能：**
+- 私讯系统 (PM)：AI 和人类均可发送私讯，仅目标成员和人类用户可见
+- 双重输出：AI 可同时发公开消息 + 私讯（`{{RESPONSE:}}` + `{{RES_PM_Name:}}`）
+- 单向可见性屏蔽：会话级配置某 agent 看不到特定成员的消息
+- 人类伪装：将 agent 标记为"人类"以欺骗其他 agent
+- Per-agent PM 开关：群组总开关 + 每个 agent 单独启用/禁用私讯
+- PM 消息紫色文字渲染 + 徽章标记
+- Anthropic thinking mode 防中毒：历史消息缺少 thinking block 不再永久禁用思维链
+
+**V5.4 功能：**
 - 辩论/发言顺序模式：会话级正反方分组 + 交替发言 turn sequence
 - @mention 概率衰减：防止随机模式下两个 AI 互 @ 形成二人转
 - 辩论模式下 AI 的 @mention 不劫持 turn sequence
@@ -85,6 +94,7 @@ interface ChatGroup {
 interface EntertainmentConfig {
   enableDice: boolean;     // 启用骰子 {{ROLL: XdY+Z}}
   enableTarot: boolean;    // 启用塔罗牌 {{TAROT: N}}
+  enablePM?: boolean;      // 启用私讯功能 (V5.5)
 }
 ```
 
@@ -107,6 +117,10 @@ interface ChatSession {
 
   // 辩论/发言顺序模式 (V5.4)
   debateConfig?: DebateConfig; // undefined = 随机模式
+
+  // 精细可见性控制 (V5.5)
+  agentVisibility?: Record<string, string[]>; // key=agentId, value=该agent看不到的agentId列表
+  humanDisguise?: string[];    // 被标记为"人类"的agentId列表
 }
 ```
 
@@ -143,6 +157,7 @@ interface Agent {
   config: AgentConfig;     // 独立参数 (Temperature, MaxTokens, Reasoning)
   role: AgentRole;         // 'MEMBER' | 'ADMIN'
   isActive?: boolean;      // 是否启用
+  enablePM?: boolean;      // 该 agent 是否可以使用私讯 (V5.5)
   searchConfig?: SearchConfig; // 搜索工具配置
   voiceId?: string;        // TTS 音色 ID
   voiceProviderId?: string;// TTS 服务商 ID
@@ -217,6 +232,7 @@ interface TTSSettings {
 | `{{SEARCH: query}}` | 需配置 | AI 主动联网搜索 |
 | `{{ROLL: XdY+Z}}` | 需开启 | 投掷骰子 (如 2d6+3) |
 | `{{TAROT: N}}` | 需开启 | 抽取 N 张塔罗牌 (支持正逆位) |
+| `{{RES_PM_Name: content}}` | 需开启 | 发送私讯给指定成员 (V5.5) |
 | `{{MUTE: Name, Duration}}` | Admin | 禁言成员 (10min/1h/1d/永久) |
 | `{{UNMUTE: Name}}` | Admin | 解除禁言 |
 | `{{NOTE: content}}` | Admin | 添加记忆便签 |
@@ -354,6 +370,45 @@ assignments: [pro1, pro2, con1, con2, con3]
 *   切换会话时从 session 的 `debateConfig.currentTurnIndex` 同步到 ref。
 *   清空消息时重置 ref 和 session 中的 index。
 *   移除 agent 时自动清理对应 assignment。
+
+### 4.11 私讯与精细可见性系统 (PM & Visibility) - V5.5 新增
+支持 AI 和人类之间的私密通信，以及会话级的可见性控制。
+
+**私讯 (Private Message) 系统：**
+*   **AI 发送 PM**: 使用 `{{RES_PM_Name: content}}`，可与 `{{RESPONSE:}}` 同时使用（双重输出）。
+*   **人类发送 PM**: 输入框旁的 PM 按钮选择目标，发送后仅目标和自己可见。
+*   **可见性规则**: PM 消息仅 sender + target + 人类用户 可见，优先级最高（高于 OPEN/BLIND 模式）。
+*   **双重输出**: AI 可同时发公开消息和私讯，保存为两条独立消息。
+*   **UI 表现**: PM 消息文字渲染为紫色，名字旁显示紫色徽章 `私讯→目标名`。
+
+**可见性过滤优先级 (三个 service 统一)：**
+```
+1. 系统消息 → 始终可见
+2. PM 消息 → 仅 sender 和 target 可见
+3. 用户消息 → 始终可见
+4. 自己的消息 → 始终可见
+5. 单向屏蔽 → agentVisibility 配置
+6. 全局模式 → OPEN (全可见) / BLIND (仅看到自己)
+```
+
+**单向可见性屏蔽：**
+*   会话级配置 `agentVisibility: Record<string, string[]>`
+*   RightSidebar 中每个 agent 可折叠配置"看不到谁的消息"
+*   PM 优先级高于屏蔽（被屏蔽的人发 PM 仍可送达）
+
+**人类伪装 (Human Disguise)：**
+*   会话级 `humanDisguise: string[]`，被标记的 agent 在其他 AI 的成员列表中显示为 "(Human)"
+*   不影响自身视角（agent 自己仍知道自己是 AI）
+
+**Auto-Play 与 PM 交互：**
+*   PM 发给人类 → 不触发任何 agent
+*   PM 发给 AI → 仅触发目标 agent 回复
+*   双重输出 → 以公开消息为准触发 auto-play，PM 部分静默
+
+**Anthropic Thinking Mode 兼容：**
+*   PM 消息和历史中缺少 thinking block 的 assistant 消息会被降级为 user 角色的回忆注释
+*   避免"中毒"：一旦 thinking 被意外禁用，不会因旧消息永久无法恢复
+*   `shouldEnableThinking` 只看 agent 配置，不再检查历史完整性
 
 ---
 

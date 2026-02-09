@@ -41,7 +41,9 @@ export async function* streamAnthropicReply(
   userPersona?: string,
   hasSearchTool?: boolean,
   groupAdminIds?: string[],
-  entertainmentConfig?: EntertainmentConfig
+  entertainmentConfig?: EntertainmentConfig,
+  agentVisibility?: Record<string, string[]>,
+  humanDisguise?: string[]
 ): AsyncGenerator<StreamChunk> {
   
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -54,8 +56,16 @@ export async function* streamAnthropicReply(
   // 2. Visibility Logic
   const visibleMessages = effectiveMessages.filter(m => {
     if (m.isSystem) return true;
+    // PM：仅 sender 和 target 可见（最高优先级，包括用户发的 PM）
+    if (m.pmTargetId) {
+      if (m.senderId === agent.id) return true;
+      return m.pmTargetId === agent.id;
+    }
     if (m.senderId === USER_ID) return true;
     if (m.senderId === agent.id) return true;
+    // 单向屏蔽
+    const blocked = agentVisibility?.[agent.id];
+    if (blocked?.includes(m.senderId)) return false;
     return visibilityMode === 'OPEN';
   });
 
@@ -68,7 +78,9 @@ export async function* streamAnthropicReply(
   // 4. Build Group Member List
   const memberList = allAgents.map(a => {
       const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
-      return `- ${a.name} (AI Robot)${roleBadge}`;
+      const isDisguised = humanDisguise?.includes(a.id) && a.id !== agent.id;
+      const typeLabel = isDisguised ? "(Human)" : "(AI Robot)";
+      return `- ${a.name} ${typeLabel}${roleBadge}`;
   }).join('\n');
 
   // --- 5. ATTENTION / ADDRESSING LOGIC ---
@@ -209,6 +221,33 @@ export async function* streamAnthropicReply(
     {{RESPONSE: Drawing a tarot card for you {{TAROT: 1}}}}
     `;
   }
+
+  // --- PM (Private Message) PROTOCOL ---
+  let pmProtocol = "";
+  if (entertainmentConfig?.enablePM && agent.enablePM) {
+    const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
+    const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
+    pmProtocol = `
+    [PRIVATE MESSAGE (PM) - 私讯功能]
+    You can send a private message visible only to a specific member (including the Human user "${userName || 'User'}").
+    Use {{RES_PM_Name: your private message}} to send a PM.
+    You CAN use both {{RESPONSE:}} and {{RES_PM_Name:}} in the same turn to speak publicly AND send a PM.
+
+    Available targets: ${pmTargetNames}
+
+    Examples (PM only):
+    {{RES_PM_${allAgents.find(a => a.id !== agent.id)?.name || 'Alice'}: 这条消息只有你能看到}}
+
+    Examples (public + PM in same turn):
+    {{RESPONSE: 大家好，今天天气不错}}{{RES_PM_${allAgents.find(a => a.id !== agent.id)?.name || 'Alice'}: 悄悄告诉你一个秘密}}
+
+    Rules:
+    - Only one PM target per turn
+    - Do NOT wrap PM inside {{RESPONSE:}} - keep them separate
+    - The Human user can always see all PMs
+    - Use PM for secrets, strategy, private advice, etc.
+    `;
+  }
   // -------------------------------
 
   // 6. System Prompt Injection
@@ -314,6 +353,8 @@ export async function* streamAnthropicReply(
 
     ${entertainmentProtocol}
 
+    ${pmProtocol}
+
     Directives:
     - Think freely. Change topics if you wish.
     - Be strict about your personality. Don't blindly agree.
@@ -327,26 +368,43 @@ export async function* streamAnthropicReply(
 
     1. To SPEAK: {{RESPONSE: your message here}}
        Example: {{RESPONSE: 这个观点很有意思，我觉得...}}
-
+${entertainmentConfig?.enablePM ? `
+    3. To SEND PRIVATE MESSAGE: {{RES_PM_TargetName: your private message}}
+       Example: {{RES_PM_Alice: 这条只有你能看到}}
+    4. To SPEAK publicly AND send PM in the same turn: use BOTH {{RESPONSE:}} and {{RES_PM_Name:}}
+` : ''}
     2. To STAY SILENT: {{PASS}}
 
-    ⚠️ REMEMBER: Anything not wrapped in {{RESPONSE: ...}} will be silently discarded!
+    ⚠️ REMEMBER: Anything not wrapped in {{RESPONSE: ...}}${entertainmentConfig?.enablePM ? ' or {{RES_PM_Name: ...}}' : ''} will be silently discarded!
   `;
 
   // Anthropic Format Prep
   const formattedMessages: any[] = [];
 
-  // Pre-calculate: Can we safely enable thinking mode?
-  // When thinking is enabled, ALL assistant messages must have thinking blocks with signatures
-  // redacted_thinking can't be faked - it's encrypted content from Anthropic
-  const myMessages = visibleMessages.filter(m => m.senderId === agent.id && !m.isSystem);
-  const hasIncompleteThinking = myMessages.length > 0 && myMessages.some(m =>
-    !m.reasoningText || !m.reasoningSignature
-  );
-  const shouldEnableThinking = agent.config.enableReasoning && !hasIncompleteThinking;
+  // Thinking mode: always enable if configured. Messages without thinking data are
+  // downgraded to user-role notes so they don't break Anthropic's thinking block requirement.
+  const shouldEnableThinking = !!agent.config.enableReasoning;
 
   for (const m of visibleMessages) {
     const isSelf = m.senderId === agent.id;
+    const hasThinking = !!(m.reasoningText && m.reasoningSignature);
+
+    // For own messages without thinking data (PM or old messages from when thinking was disabled):
+    // Convert to user-role recall note instead of assistant, to avoid breaking thinking mode
+    if (isSelf && shouldEnableThinking && !hasThinking) {
+      const pmNote = m.pmTargetId
+        ? ` (私讯→${m.pmTargetId === USER_ID ? (userName || 'User') : (allAgents.find(a => a.id === m.pmTargetId)?.name || '未知')})`
+        : '';
+      const recallText = `[你之前说过${pmNote}: ${m.text}]`;
+      const recallBlock = [{ type: "text", text: recallText }];
+      if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
+        (formattedMessages[formattedMessages.length - 1].content as any[]).push(...recallBlock);
+      } else {
+        formattedMessages.push({ role: 'user', content: recallBlock });
+      }
+      continue;
+    }
+
     const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
 
     // INJECT ID AND TIMESTAMP INTO CONTENT
@@ -374,8 +432,7 @@ export async function* streamAnthropicReply(
     const contentBlocks: any[] = [];
 
     // For assistant messages when thinking is enabled: add thinking block FIRST (required by Anthropic)
-    // Only add if we have complete thinking (text + signature)
-    if (isSelf && shouldEnableThinking && m.reasoningText && m.reasoningSignature) {
+    if (isSelf && shouldEnableThinking && hasThinking) {
       contentBlocks.push({
         type: "thinking",
         thinking: m.reasoningText,

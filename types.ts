@@ -74,6 +74,7 @@ export interface Agent {
   enableGoogleSearch?: boolean; // Gemini 原生 Google 搜索 (仅 Gemini 模型可用)
   voiceId?: string;      // TTS voice ID for this agent
   voiceProviderId?: string; // TTS provider ID for this agent
+  enablePM?: boolean;    // 启用私讯功能 (需群组总开关也开启)
 }
 
 export interface Attachment {
@@ -108,6 +109,9 @@ export interface Message {
 
   // 流式生成中 (占位符，对其他AI不可见)
   isStreaming?: boolean;
+
+  // 私讯目标 agent ID，仅 sender/target/user 可见
+  pmTargetId?: string;
 }
 
 export interface MemoryConfig {
@@ -127,6 +131,7 @@ export interface MuteInfo {
 export interface EntertainmentConfig {
   enableDice: boolean;    // 启用骰子 {{ROLL: XdY+Z}}
   enableTarot: boolean;   // 启用塔罗牌 {{TAROT: N}}
+  enablePM?: boolean;     // 启用私讯 {{RES_PM_Name: content}}
 }
 
 // 群组：包含多个对话，共享成员和场景
@@ -159,6 +164,12 @@ export interface ChatSession {
 
   // 辩论/发言顺序模式
   debateConfig?: DebateConfig;
+
+  // 单向屏蔽：key=agentId, value=该agent看不到的agentId列表
+  agentVisibility?: Record<string, string[]>;
+
+  // 人类伪装：列表中的 agentId 在其他 agent 的上下文中显示为人类
+  humanDisguise?: string[];
 }
 
 // User Profile for multi-identity support

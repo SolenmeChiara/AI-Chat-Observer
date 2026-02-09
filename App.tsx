@@ -87,9 +87,11 @@ const App: React.FC = () => {
   // Input State
   const [inputText, setInputText] = useState('');
   const [replyToId, setReplyToId] = useState<string | null>(null);
+  const [pmTargetId, setPmTargetId] = useState<string | null>(null); // 人类私讯目标
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isParsingFile, setIsParsingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [showPmPopup, setShowPmPopup] = useState(false); // PM 目标选择弹出菜单
 
   // Mention State
   const [showMentionPopup, setShowMentionPopup] = useState(false);
@@ -693,7 +695,7 @@ const App: React.FC = () => {
       memberIds: g.memberIds.filter(mid => mid !== id)
     } : g));
 
-    // Also clean up mute records and debate assignments for this agent in all sessions of this group
+    // Also clean up mute records, debate assignments, and visibility config for this agent in all sessions of this group
     setSessions(prev => prev.map(s => s.groupId === activeGroupId ? {
       ...s,
       mutedAgentIds: (s.mutedAgentIds || []).filter(mid => mid !== id),
@@ -701,7 +703,16 @@ const App: React.FC = () => {
       debateConfig: s.debateConfig ? {
         ...s.debateConfig,
         assignments: s.debateConfig.assignments.filter(a => a.agentId !== id)
-      } : s.debateConfig
+      } : s.debateConfig,
+      // Clean up agentVisibility: remove the agent's key and remove from all other agents' blocked lists
+      agentVisibility: s.agentVisibility ? Object.fromEntries(
+        Object.entries(s.agentVisibility)
+          .filter(([key]) => key !== id)
+          .map(([key, blocked]) => [key, blocked.filter(bid => bid !== id)])
+          .filter(([, blocked]) => (blocked as string[]).length > 0)
+      ) : undefined,
+      // Clean up humanDisguise
+      humanDisguise: s.humanDisguise?.filter(aid => aid !== id)
     } : s));
   };
 
@@ -1285,6 +1296,10 @@ const App: React.FC = () => {
       // Get entertainment config from current group
       const entertainmentConfig = currentGroup?.entertainmentConfig;
 
+      // Get agent visibility config from active session
+      const agentVisibility = activeSession.agentVisibility;
+      const humanDisguise = activeSession.humanDisguise;
+
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(
           agent, agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
@@ -1295,19 +1310,19 @@ const App: React.FC = () => {
             vertexLocation: provider.vertexLocation
           },
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
-          agent.enableGoogleSearch, groupAdminIds, entertainmentConfig
+          agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise
         );
       }
 
@@ -1328,6 +1343,9 @@ const App: React.FC = () => {
 
       // SEARCH COMMAND STATE
       let detectedSearchQuery: string | null = null;
+
+      // PM COMMAND STATE
+      let detectedPMTargetId: string | undefined = undefined;
 
       console.log(`[${agent.name}] 📥 Starting to receive stream...`);
 
@@ -1396,13 +1414,47 @@ const App: React.FC = () => {
             }
           }
 
-          // Extract content from {{RESPONSE:...}} for streaming display
+          // Detect PM command: {{RES_PM_AgentName: content}}
+          // Match agent names + human user name (longest first to handle multi-word names)
+          if (entertainmentConfig?.enablePM && agent.enablePM && !detectedPMTargetId) {
+            const userName = settings.userName || 'User';
+            const pmCandidates: { id: string; name: string }[] = [
+              ...currentSessionMembers.filter(a => a.id !== agentId),
+              { id: USER_ID, name: userName },
+            ].sort((a, b) => b.name.length - a.name.length);
+            for (const targetAgent of pmCandidates) {
+              const escapedName = targetAgent.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const pmRegex = new RegExp(`\\{\\{RES_PM_${escapedName}:\\s*`, 'i');
+              if (pmRegex.test(accumulatedText)) {
+                detectedPMTargetId = targetAgent.id;
+                break;
+              }
+            }
+          }
+
+          // Extract content from {{RESPONSE:...}} or {{RES_PM_Name:...}} for streaming display
           let displayText = accumulatedText;
 
-          // Try to extract content from partial {{RESPONSE: ...
-          const partialResponseMatch = accumulatedText.match(/\{\{RESPONSE:\s*([\s\S]*?)(\}\})?$/);
-          if (partialResponseMatch) {
-            displayText = partialResponseMatch[1] || '';
+          // Try PM format first
+          if (detectedPMTargetId) {
+            const userName = settings.userName || 'User';
+            const pmTarget = detectedPMTargetId === USER_ID
+              ? { id: USER_ID, name: userName }
+              : currentSessionMembers.find(a => a.id === detectedPMTargetId);
+            if (pmTarget) {
+              const escapedName = pmTarget.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const pmContentRegex = new RegExp(`\\{\\{RES_PM_${escapedName}:\\s*([\\s\\S]*?)(\\}\\})?$`, 'i');
+              const pmMatch = accumulatedText.match(pmContentRegex);
+              if (pmMatch) {
+                displayText = pmMatch[1] || '';
+              }
+            }
+          } else {
+            // Try to extract content from partial {{RESPONSE: ...
+            const partialResponseMatch = accumulatedText.match(/\{\{RESPONSE:\s*([\s\S]*?)(\}\})?$/);
+            if (partialResponseMatch) {
+              displayText = partialResponseMatch[1] || '';
+            }
           }
 
           // Clean Text (Remove commands)
@@ -1488,35 +1540,70 @@ const App: React.FC = () => {
          }
       }
 
-      // === DECISION GATE: Extract content from {{RESPONSE:...}} or treat as PASS ===
-      // Match {{RESPONSE: content}} - need to handle nested braces carefully
-      const responseMatch = accumulatedText.match(/\{\{RESPONSE:\s*([\s\S]*)\}\}$/);
-      let extractedContent = '';
+      // === DECISION GATE: Extract {{RESPONSE:...}} and/or {{RES_PM_Name:...}} ===
+      // AI can now output BOTH in the same turn: public message + private PM
+      let extractedContent = '';    // Public RESPONSE content
+      let extractedPMContent = '';  // PM content (separate message)
 
-      if (responseMatch) {
-        // Extract content from inside {{RESPONSE: ... }}
-        extractedContent = responseMatch[1].trim();
-        // Handle case where content might have trailing }}
-        // Count braces to handle nested ones like {{RESPONSE: {{MUTE: x}} text}}
+      // Helper: extract content after "prefix" using brace counting
+      const extractBraceContent = (text: string, prefixEndIndex: number): string => {
+        let content = text.substring(prefixEndIndex);
         let braceCount = 0;
-        let endIndex = extractedContent.length;
-        for (let i = 0; i < extractedContent.length; i++) {
-          if (extractedContent[i] === '{' && extractedContent[i+1] === '{') {
-            braceCount++;
-            i++;
-          } else if (extractedContent[i] === '}' && extractedContent[i+1] === '}') {
-            braceCount--;
-            i++;
-            if (braceCount < 0) {
-              endIndex = i - 1;
-              break;
-            }
+        let endIndex = content.length;
+        for (let i = 0; i < content.length; i++) {
+          if (content[i] === '{' && content[i+1] === '{') { braceCount++; i++; }
+          else if (content[i] === '}' && content[i+1] === '}') { braceCount--; i++; if (braceCount < 0) { endIndex = i - 1; break; } }
+        }
+        return content.substring(0, endIndex).trim();
+      };
+
+      const pmUserName = settings.userName || 'User';
+
+      // 1. Extract PM content (if any)
+      if (detectedPMTargetId && entertainmentConfig?.enablePM && agent.enablePM) {
+        const pmTarget = detectedPMTargetId === USER_ID
+          ? { id: USER_ID, name: pmUserName }
+          : currentSessionMembers.find(a => a.id === detectedPMTargetId);
+        if (pmTarget) {
+          const escapedName = pmTarget.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const pmOpenRegex = new RegExp(`\\{\\{RES_PM_${escapedName}:\\s*`, 'i');
+          const pmOpenMatch = pmOpenRegex.exec(accumulatedText);
+          if (pmOpenMatch) {
+            extractedPMContent = extractBraceContent(accumulatedText, pmOpenMatch.index + pmOpenMatch[0].length);
+            console.log(`[${agent.name}] 📨 PM detected → ${pmTarget.name}`);
           }
         }
-        extractedContent = extractedContent.substring(0, endIndex).trim();
       }
 
-      // If no valid RESPONSE content found, treat as PASS
+      // 2. Extract RESPONSE content (if any)
+      const responseOpenRegex = /\{\{RESPONSE:\s*/;
+      const responseOpenMatch = responseOpenRegex.exec(accumulatedText);
+      if (responseOpenMatch) {
+        extractedContent = extractBraceContent(accumulatedText, responseOpenMatch.index + responseOpenMatch[0].length);
+        // If PM was nested inside RESPONSE, clean it out of the public content
+        if (extractedPMContent && detectedPMTargetId) {
+          const pmTarget = detectedPMTargetId === USER_ID
+            ? { id: USER_ID, name: pmUserName }
+            : currentSessionMembers.find(a => a.id === detectedPMTargetId);
+          if (pmTarget) {
+            const escapedName = pmTarget.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pmCleanRegex = new RegExp(`\\{\\{RES_PM_${escapedName}:[\\s\\S]*?\\}\\}`, 'i');
+            extractedContent = extractedContent.replace(pmCleanRegex, '').trim();
+          }
+        }
+      }
+
+      // 3. If only PM (no RESPONSE), the PM becomes the main message
+      if (!extractedContent && extractedPMContent) {
+        extractedContent = extractedPMContent;
+        extractedPMContent = ''; // No separate PM message needed
+      } else if (extractedContent && !extractedPMContent) {
+        // Only RESPONSE, no PM → clear PM target
+        detectedPMTargetId = undefined;
+      }
+      // If both exist: extractedContent = public, extractedPMContent = PM (saved as separate message below)
+
+      // If no valid RESPONSE/PM content found, treat as PASS
       if (!extractedContent || isPass) {
         isPass = true;
       }
@@ -1549,6 +1636,7 @@ const App: React.FC = () => {
              .trimStart();
 
         console.log(`[${agent.name}] 💬 Final text (${finalText.length} chars):`, finalText.substring(0, 300) + (finalText.length > 300 ? '...' : ''));
+        if (extractedPMContent) console.log(`[${agent.name}] 📨 PM text (${extractedPMContent.length} chars):`, extractedPMContent.substring(0, 200));
         if (detectedAdminAction) console.log(`[${agent.name}] 🔧 Admin action:`, detectedAdminAction);
         if (detectedSearchQuery) console.log(`[${agent.name}] 🔍 Search query:`, detectedSearchQuery);
         if (detectedReplyId) console.log(`[${agent.name}] ↩️ Reply to:`, detectedReplyId);
@@ -1556,10 +1644,21 @@ const App: React.FC = () => {
         // Calculate reasoning duration
         const reasoningDuration = reasoningEndTime ? reasoningEndTime - streamStartTime : undefined;
 
+        // Build the PM message if both RESPONSE and PM exist (dual output)
+        const pmMessage: Message | null = extractedPMContent ? {
+          id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          senderId: agentId,
+          text: extractedPMContent,
+          timestamp: Date.now() + 1,  // +1ms to sort after public message
+          pmTargetId: detectedPMTargetId,
+        } : null;
+
         // Update the placeholder message with final data (clear isStreaming)
+        // When dual output: main message is public (no pmTargetId), PM is a separate message
         updateThisSession(s => ({
             ...s,
-            messages: s.messages.map(m => m.id === newMessageId ? {
+            messages: [
+              ...s.messages.map(m => m.id === newMessageId ? {
                 ...m,
                 text: finalText,
                 reasoningText: accumulatedReasoning || undefined,
@@ -1568,8 +1667,11 @@ const App: React.FC = () => {
                 tokens: accumulatedUsage,
                 cost: cost,
                 replyToId: detectedReplyId,
-                isStreaming: undefined  // 生成完毕，清除占位符标记
-            } : m),
+                pmTargetId: extractedPMContent ? undefined : detectedPMTargetId,  // Only set if PM-only (no dual output)
+                isStreaming: undefined
+              } : m),
+              ...(pmMessage ? [pmMessage] : []),
+            ],
             lastUpdated: Date.now()
             // NOTE: Don't clear yieldedAgentIds here - only USER messages should wake up PASSed agents
         }));
@@ -1850,6 +1952,7 @@ const App: React.FC = () => {
       text: inputText,
       timestamp: Date.now(),
       replyToId: replyToId || undefined,
+      pmTargetId: pmTargetId || undefined,
       attachments: attachments.length > 0 ? attachments : undefined,
       isSystem: isNarratorMode // Narrator messages are system messages
     };
@@ -1903,6 +2006,7 @@ const App: React.FC = () => {
     }));
     setInputText('');
     setReplyToId(null);
+    setPmTargetId(null);
     setAttachments([]);
     setShowMentionPopup(false);
 
@@ -2003,15 +2107,39 @@ const App: React.FC = () => {
     if (lastMessage.isError) return;
     if (lastMessage.isStreaming) return;  // Don't trigger while another agent is still streaming
 
+    // PM handling: PM-only messages should only trigger the target; dual-output should use the public message for auto-play
+    let effectiveLastMessage = lastMessage;
+    if (lastMessage.pmTargetId) {
+      // Check if the message before this PM is a public message from the same sender (dual output)
+      const prevMsg = messages.length >= 2 ? messages[messages.length - 2] : null;
+      if (prevMsg && prevMsg.senderId === lastMessage.senderId && !prevMsg.pmTargetId && !prevMsg.isSystem) {
+        // Dual output: use the public message for auto-play triggering (normal flow)
+        effectiveLastMessage = prevMsg;
+      } else {
+        // PM-only message
+        if (lastMessage.pmTargetId === USER_ID) return; // PM to human → no auto-play trigger
+        // PM to AI agent → only trigger that specific agent
+        const pmTargetAgent = sessionMembers.find(a => a.id === lastMessage.pmTargetId);
+        if (pmTargetAgent && pmTargetAgent.providerId && pmTargetAgent.modelId
+            && !processingAgents.has(pmTargetAgent.id)
+            && !(activeSession.mutedAgentIds || []).includes(pmTargetAgent.id)) {
+          const effectiveBreathingTime = activeSession.debateConfig?.breathingTime ?? settings.breathingTime;
+          const timeoutId = setTimeout(() => triggerAgentReply(pmTargetAgent.id), effectiveBreathingTime);
+          return () => clearTimeout(timeoutId);
+        }
+        return; // Target not eligible → don't trigger anyone
+      }
+    }
+
     // Debug: Log mention detection
-    if (lastMessage.text.includes('@')) {
-      console.log('[AutoPlay] Message with @ detected:', lastMessage.text.substring(0, 100));
+    if (effectiveLastMessage.text.includes('@')) {
+      console.log('[AutoPlay] Message with @ detected:', effectiveLastMessage.text.substring(0, 100));
     }
 
     // For system messages, find the actual last speaker to avoid re-triggering them
     // System messages are visible to AI but shouldn't re-trigger the command sender
-    const lastNonSystemMessage = [...messages].reverse().find(m => !m.isSystem);
-    const lastSpeakerId = lastNonSystemMessage?.senderId || lastMessage.senderId;
+    const lastNonSystemMessage = [...messages].reverse().find(m => !m.isSystem && !m.pmTargetId);
+    const lastSpeakerId = lastNonSystemMessage?.senderId || effectiveLastMessage.senderId;
 
     // 5-MESSAGE COOLDOWN: Clear yielded agents after 5 any messages
     if ((activeSession.yieldedAgentIds || []).length > 0 && activeSession.yieldedAtCount !== undefined) {
@@ -2135,12 +2263,12 @@ const App: React.FC = () => {
     if (eligibleAgents.length === 0) return;
 
     // --- 辩论模式：AI 发的 @mention 和 reply 不劫持 turn sequence ---
-    const isDebateAutoplay = isDebateModeActive && lastMessage.senderId !== USER_ID && lastMessage.senderId !== 'narrator';
+    const isDebateAutoplay = isDebateModeActive && effectiveLastMessage.senderId !== USER_ID && effectiveLastMessage.senderId !== 'narrator';
 
     // --- REPLY PRIORITY: Check if replying to an AI message ---
     let replyTargetAgent: typeof eligibleAgents[0] | null = null;
-    if (!isDebateAutoplay && lastMessage.replyToId) {
-        const repliedMessage = messages.find(m => m.id === lastMessage.replyToId);
+    if (!isDebateAutoplay && effectiveLastMessage.replyToId) {
+        const repliedMessage = messages.find(m => m.id === effectiveLastMessage.replyToId);
         if (repliedMessage && repliedMessage.senderId !== USER_ID && repliedMessage.senderId !== 'SYSTEM' && repliedMessage.senderId !== 'narrator') {
             // Find the agent who sent the replied message
             const agent = sessionMembers.find(a => a.id === repliedMessage.senderId);
@@ -2160,7 +2288,7 @@ const App: React.FC = () => {
 
     // --- @MENTION PRIORITY: Check for @全体成员 or multiple @mentions ---
     // 辩论模式下，AI 的 @mention 不劫持发言顺序（用户 @mention 仍生效）
-    const lastTextLower = lastMessage.text.toLowerCase();
+    const lastTextLower = effectiveLastMessage.text.toLowerCase();
     let selectedAgent = null;
     let agentsToQueue: typeof eligibleAgents = [];
 
@@ -2185,7 +2313,7 @@ const App: React.FC = () => {
     } else if (!isDebateAutoplay) {
         // Extract @mentions by matching known agent names in the text
         // 先按名字长度降序排列，优先匹配最长的名字（避免 "Claude" 抢走 "Claude Opus 4.6" 的匹配）
-        const lastText = lastMessage.text;
+        const lastText = effectiveLastMessage.text;
         const seenIds = new Set<string>();
         const sortedMembers = [...sessionMembers].sort((a, b) => b.name.length - a.name.length);
         const mentionedAgentIds: string[] = [];
@@ -2231,9 +2359,9 @@ const App: React.FC = () => {
     }
 
     // --- @MENTION 概率衰减：防止两个 AI 互 @ 形成二人转 ---
-    if (agentsToQueue.length === 1 && lastMessage.senderId !== USER_ID && lastMessage.senderId !== 'narrator') {
+    if (agentsToQueue.length === 1 && effectiveLastMessage.senderId !== USER_ID && effectiveLastMessage.senderId !== 'narrator') {
         const mentionedId = agentsToQueue[0].id;
-        const senderId = lastMessage.senderId;
+        const senderId = effectiveLastMessage.senderId;
         const pairKey = [senderId, mentionedId].sort().join('|');
         const prev = mentionPairRef.current;
 
@@ -2358,6 +2486,26 @@ const App: React.FC = () => {
         userName={settings.userName || 'User'}
         debateConfig={activeSession.debateConfig}
         onUpdateDebateConfig={(config) => updateActiveSession(s => ({ ...s, debateConfig: config }))}
+        humanDisguise={activeSession.humanDisguise}
+        onToggleHumanDisguise={(agentId) => {
+          updateActiveSession(s => {
+            const list = s.humanDisguise || [];
+            const newList = list.includes(agentId) ? list.filter(id => id !== agentId) : [...list, agentId];
+            return { ...s, humanDisguise: newList.length > 0 ? newList : undefined };
+          });
+        }}
+        agentVisibility={activeSession.agentVisibility}
+        onUpdateAgentVisibility={(agentId, blockedIds) => {
+          updateActiveSession(s => {
+            const newVis = { ...(s.agentVisibility || {}) };
+            if (blockedIds.length > 0) {
+              newVis[agentId] = blockedIds;
+            } else {
+              delete newVis[agentId];
+            }
+            return { ...s, agentVisibility: Object.keys(newVis).length > 0 ? newVis : undefined };
+          });
+        }}
         userProfiles={settings.userProfiles}
         activeProfileId={settings.activeProfileId}
         onSwitchProfile={(profileId) => {
@@ -2602,6 +2750,18 @@ const App: React.FC = () => {
               </div>
             )}
 
+            {/* PM Target Indicator */}
+            {pmTargetId && (
+              <div className="flex items-center justify-between bg-purple-50 dark:bg-purple-900/30 px-3 py-2 rounded-lg border border-purple-200 dark:border-purple-700 text-xs text-purple-600 dark:text-purple-300">
+                 <div className="flex items-center gap-2">
+                    <div className="font-bold">私讯</div>
+                    <div>→ {sessionMembers.find(a => a.id === pmTargetId)?.name || '未知'}</div>
+                    <div className="text-purple-400 text-[10px]">仅该成员可见</div>
+                 </div>
+                 <button onClick={() => setPmTargetId(null)} className="text-purple-400 hover:text-purple-600 dark:hover:text-purple-200"><X size={14} /></button>
+              </div>
+            )}
+
             {/* Attachments Preview */}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2">
@@ -2663,9 +2823,51 @@ const App: React.FC = () => {
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt,.md,.js,.ts,.py,.json" onChange={handleFileSelect} multiple />
 
               {/* File Upload Button */}
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" title="上传文件 (图片/文档)">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors z-10" title="上传文件 (图片/文档)">
                 <Paperclip size={18} />
               </button>
+
+              {/* PM Button (only when group PM is enabled) */}
+              {activeGroup?.entertainmentConfig?.enablePM && sessionMembers.length > 0 && (
+                <div className="absolute left-9 bottom-4 z-10">
+                  <button
+                    type="button"
+                    onClick={() => setShowPmPopup(!showPmPopup)}
+                    className={`transition-colors ${pmTargetId ? 'text-purple-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+                    title="发送私讯"
+                  >
+                    <MessageSquare size={16} />
+                  </button>
+                  {showPmPopup && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-52 max-h-48 overflow-y-auto z-50">
+                      <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-800">
+                        选择私讯目标
+                      </div>
+                      {pmTargetId && (
+                        <button
+                          onClick={() => { setPmTargetId(null); setShowPmPopup(false); }}
+                          className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors border-b border-gray-50 dark:border-zinc-700"
+                        >
+                          取消私讯
+                        </button>
+                      )}
+                      {sessionMembers.map(agent => (
+                        <button
+                          key={agent.id}
+                          onClick={() => { setPmTargetId(agent.id); setShowPmPopup(false); }}
+                          className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors ${
+                            pmTargetId === agent.id ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-700'
+                          }`}
+                        >
+                          <img src={agent.avatar} className="w-5 h-5 rounded-full border border-gray-100 dark:border-zinc-600 object-contain"/>
+                          <span>{agent.name}</span>
+                          {pmTargetId === agent.id && <span className="ml-auto text-[9px] bg-purple-500 text-white px-1 rounded">当前</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <textarea
                 ref={inputRef}
@@ -2673,14 +2875,18 @@ const App: React.FC = () => {
                 onChange={handleInputChange}
                 onKeyDown={handleInputKeyDown}
                 placeholder={
-                  settings.activeProfileId === 'narrator'
+                  pmTargetId
+                    ? `私讯给 ${sessionMembers.find(a => a.id === pmTargetId)?.name || ''}...`
+                    : settings.activeProfileId === 'narrator'
                     ? '以旁白身份发言... (系统消息样式)'
                     : processingAgents.size > 0
                       ? "AI正在输入中..."
                       : `在 "${activeSession.name}" 发言... (Enter发送, Shift+Enter换行)`
                 }
                 rows={1}
-                className="w-full bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-xl px-4 py-3.5 pl-10 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-y-auto"
+                className={`w-full bg-gray-50 dark:bg-zinc-700 border rounded-xl px-4 py-3.5 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-y-auto ${
+                  activeGroup?.entertainmentConfig?.enablePM && sessionMembers.length > 0 ? 'pl-16' : 'pl-10'
+                } ${pmTargetId ? 'border-purple-300 dark:border-purple-600' : 'border-gray-200 dark:border-zinc-600'}`}
                 style={{ minHeight: '52px', maxHeight: '150px' }}
               />
               <button type="submit" disabled={(!inputText.trim() && attachments.length === 0) || isParsingFile} className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm">

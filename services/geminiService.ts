@@ -84,7 +84,9 @@ export async function* streamGeminiReply(
   hasSearchTool?: boolean,
   enableGoogleSearch?: boolean,
   groupAdminIds?: string[],
-  entertainmentConfig?: EntertainmentConfig
+  entertainmentConfig?: EntertainmentConfig,
+  agentVisibility?: Record<string, string[]>,
+  humanDisguise?: string[]
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
   
@@ -96,8 +98,16 @@ export async function* streamGeminiReply(
   // 2. Visibility Logic
   const visibleMessages = effectiveMessages.filter(m => {
     if (m.isSystem) return true; // Everyone sees system messages
+    // PM：仅 sender 和 target 可见（最高优先级，包括用户发的 PM）
+    if (m.pmTargetId) {
+      if (m.senderId === agent.id) return true; // sender sees own PM
+      return m.pmTargetId === agent.id; // only target can see
+    }
     if (m.senderId === USER_ID) return true; // Always see user
     if (m.senderId === agent.id) return true; // Always see self
+    // 单向屏蔽
+    const blocked = agentVisibility?.[agent.id];
+    if (blocked?.includes(m.senderId)) return false;
     return visibilityMode === 'OPEN'; // Only see others if OPEN
   });
 
@@ -110,7 +120,9 @@ export async function* streamGeminiReply(
   // 4. Build Group Member List for Context
   const memberList = allAgents.map(a => {
       const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
-      return `- ${a.name} (AI Robot)${roleBadge}`;
+      const isDisguised = humanDisguise?.includes(a.id) && a.id !== agent.id;
+      const typeLabel = isDisguised ? "(Human)" : "(AI Robot)";
+      return `- ${a.name} ${typeLabel}${roleBadge}`;
   }).join('\n');
 
   // --- 5. ATTENTION / ADDRESSING LOGIC ---
@@ -253,6 +265,33 @@ export async function* streamGeminiReply(
     {{RESPONSE: Drawing a tarot card for you {{TAROT: 1}}}}
     `;
   }
+
+  // --- PM (Private Message) PROTOCOL ---
+  let pmProtocol = "";
+  if (entertainmentConfig?.enablePM && agent.enablePM) {
+    const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
+    const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
+    pmProtocol = `
+    [PRIVATE MESSAGE (PM) - 私讯功能]
+    You can send a private message visible only to a specific member (including the Human user "${userName || 'User'}").
+    Use {{RES_PM_Name: your private message}} to send a PM.
+    You CAN use both {{RESPONSE:}} and {{RES_PM_Name:}} in the same turn to speak publicly AND send a PM.
+
+    Available targets: ${pmTargetNames}
+
+    Examples (PM only):
+    {{RES_PM_${allAgents.find(a => a.id !== agent.id)?.name || 'Alice'}: 这条消息只有你能看到}}
+
+    Examples (public + PM in same turn):
+    {{RESPONSE: 大家好，今天天气不错}}{{RES_PM_${allAgents.find(a => a.id !== agent.id)?.name || 'Alice'}: 悄悄告诉你一个秘密}}
+
+    Rules:
+    - Only one PM target per turn
+    - Do NOT wrap PM inside {{RESPONSE:}} - keep them separate
+    - The Human user can always see all PMs
+    - Use PM for secrets, strategy, private advice, etc.
+    `;
+  }
   // -------------------------------
 
   // System Instruction
@@ -360,6 +399,8 @@ export async function* streamGeminiReply(
 
     ${entertainmentProtocol}
 
+    ${pmProtocol}
+
     Directives:
     1. FREE THINKING: Feel free to change topics or be creative. Do not be rigid.
     2. PERSONALITY: Stick to your persona. Do NOT blindly agree with other bots. If they are wrong, say so.
@@ -374,10 +415,14 @@ export async function* streamGeminiReply(
 
     1. To SPEAK: {{RESPONSE: your message here}}
        Example: {{RESPONSE: 这个观点很有意思，我觉得...}}
-
+${entertainmentConfig?.enablePM ? `
+    3. To SEND PRIVATE MESSAGE: {{RES_PM_TargetName: your private message}}
+       Example: {{RES_PM_Alice: 这条只有你能看到}}
+    4. To SPEAK publicly AND send PM in the same turn: use BOTH {{RESPONSE:}} and {{RES_PM_Name:}}
+` : ''}
     2. To STAY SILENT: {{PASS}}
 
-    ⚠️ REMEMBER: Anything not wrapped in {{RESPONSE: ...}} will be silently discarded!
+    ⚠️ REMEMBER: Anything not wrapped in {{RESPONSE: ...}}${entertainmentConfig?.enablePM ? ' or {{RES_PM_Name: ...}}' : ''} will be silently discarded!
   `;
 
   const formattedContents: any[] = [];
