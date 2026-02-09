@@ -409,7 +409,8 @@ ${entertainmentConfig?.enablePM ? `
 
     // INJECT ID AND TIMESTAMP INTO CONTENT
     const timeStr = formatMessageTime(m.timestamp);
-    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
+    const pmLabel = m.pmTargetId ? ' [私讯/PM]' : '';
+    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${m.text}`;
 
     // Handle Reply Reference
     if (m.replyToId) {

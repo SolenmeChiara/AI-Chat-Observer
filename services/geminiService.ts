@@ -459,7 +459,8 @@ ${entertainmentConfig?.enablePM ? `
 
     // Text Part WITH ID AND TIMESTAMP INJECTION
     const timeStr = formatMessageTime(m.timestamp);
-    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}] ${senderName}: ${m.text}`;
+    const pmLabel = m.pmTargetId ? ' [私讯/PM]' : '';
+    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${m.text}`;
 
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);
