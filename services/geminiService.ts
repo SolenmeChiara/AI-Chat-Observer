@@ -497,7 +497,7 @@ ${entertainmentConfig?.enablePM ? `
   // Last turn: The "Trigger"
   formattedContents.push({
     role: 'user',
-    parts: [{ text: `[END OF LOG]\nIt is now your turn, ${agent.name}. Respond, {{REPLY: id}}, or {{PASS}}.` }]
+    parts: [{ text: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` }]
   });
 
   const MAX_RETRIES = 3;

@@ -451,7 +451,8 @@ ${entertainmentConfig?.enablePM ? `
        }
 
        return { role: 'user', content: textContent };
-    })
+    }),
+    { role: 'user', content: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` }
   ];
 
   const MAX_RETRIES = 3;

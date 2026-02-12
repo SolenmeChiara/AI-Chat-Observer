@@ -482,6 +482,19 @@ ${entertainmentConfig?.enablePM ? `
     }
   }
 
+  // Add end-of-log format reminder as the last thing the model sees
+  const endOfLogBlock = { type: "text", text: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` };
+  if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
+    const lastMsg = formattedMessages[formattedMessages.length - 1];
+    if (typeof lastMsg.content === 'string') {
+      lastMsg.content = [{ type: 'text', text: lastMsg.content }, endOfLogBlock];
+    } else {
+      lastMsg.content.push(endOfLogBlock);
+    }
+  } else {
+    formattedMessages.push({ role: 'user', content: [endOfLogBlock] });
+  }
+
   // Ensure first message is user
   if (formattedMessages.length > 0 && formattedMessages[0].role === 'assistant') {
     formattedMessages.unshift({ role: 'user', content: '[System: Conversation Continued]' });

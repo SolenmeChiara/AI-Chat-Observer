@@ -93,7 +93,14 @@ const hasValidCredentials = (provider: ApiProvider): boolean => {
   return !!(provider.baseUrl && provider.apiKey);
 };
 
-// Helper to find the best model for summarization (Prefer Qwen/Small models)
+// Reasoning models are unsuitable for simple tasks like naming — they waste tokens on <think> tags
+const isReasoningModel = (modelId: string): boolean => {
+  const id = modelId.toLowerCase();
+  // Match reasoning model patterns: r1, o1, o3, o4-mini, thinking, reasoner, etc.
+  return /\b(r1|o1|o3|o4)\b/.test(id) || id.includes('thinking') || id.includes('reasoner');
+};
+
+// Helper to find the best model for summarization (Prefer Qwen/Small models, exclude reasoning)
 const findSummaryAgent = (providers: ApiProvider[]) => {
   // Filter to only providers with valid credentials
   const validProviders = providers.filter(hasValidCredentials);
@@ -103,27 +110,39 @@ const findSummaryAgent = (providers: ApiProvider[]) => {
     return null;
   }
 
-  // 1. Try to find a model with 'qwen' in id
+  // 1. Try to find a non-reasoning model with 'qwen' in id
   for (const p of validProviders) {
-    const qwenModel = p.models.find(m => m.id.toLowerCase().includes('qwen'));
+    const qwenModel = p.models.find(m => m.id.toLowerCase().includes('qwen') && !isReasoningModel(m.id));
     if (qwenModel) return { provider: p, modelId: qwenModel.id };
   }
 
-  // 2. Try to find a model with 'flash' or 'mini' or '7b' or 'haiku' (fast models)
+  // 2. Try to find a non-reasoning model with 'flash' or 'mini' or '7b' or 'haiku' (fast models)
   for (const p of validProviders) {
-    const fastModel = p.models.find(m =>
-      m.id.toLowerCase().includes('flash') ||
-      m.id.toLowerCase().includes('mini') ||
-      m.id.toLowerCase().includes('7b') ||
-      m.id.toLowerCase().includes('haiku')
-    );
+    const fastModel = p.models.find(m => {
+      const id = m.id.toLowerCase();
+      return !isReasoningModel(m.id) && (
+        id.includes('flash') ||
+        id.includes('mini') ||
+        id.includes('7b') ||
+        id.includes('haiku')
+      );
+    });
     if (fastModel) return { provider: p, modelId: fastModel.id };
   }
 
-  // 3. Fallback to first available with credentials
+  // 3. Fallback to first non-reasoning model with credentials
+  for (const p of validProviders) {
+    const nonReasoningModel = p.models.find(m => !isReasoningModel(m.id));
+    if (nonReasoningModel) {
+      console.log('[findSummaryAgent] Using fallback:', p.name, nonReasoningModel.id);
+      return { provider: p, modelId: nonReasoningModel.id };
+    }
+  }
+
+  // 4. Last resort: use any model (even reasoning), but warn
   if (validProviders[0].models.length > 0) {
     const result = { provider: validProviders[0], modelId: validProviders[0].models[0].id };
-    console.log('[findSummaryAgent] Using fallback:', result.provider.name, result.modelId);
+    console.warn('[findSummaryAgent] ⚠️ Only reasoning models available, using:', result.provider.name, result.modelId);
     return result;
   }
 
@@ -199,7 +218,10 @@ export const generateSessionName = async (
         2
       );
 
-      if (!response.ok) return null;
+      if (!response.ok) {
+        console.warn('[Auto-Rename] Anthropic API error:', response.status, await response.text().catch(() => ''));
+        return null;
+      }
       const json = await response.json();
       return json.content?.[0]?.text?.trim() || null;
     }
@@ -221,16 +243,23 @@ export const generateSessionName = async (
           body: JSON.stringify({
             model: modelId,
             messages: [{ role: 'user', content: prompt }],
-            max_tokens: 20
+            max_tokens: 50
           })
         },
         15000, // 15 second timeout
         2 // 2 retries
       );
 
-      if (!response.ok) return null;
+      if (!response.ok) {
+        console.warn('[Auto-Rename] OpenAI API error:', response.status, await response.text().catch(() => ''));
+        return null;
+      }
       const json = await response.json();
-      return json.choices?.[0]?.message?.content?.trim() || null;
+      const result = json.choices?.[0]?.message?.content?.trim() || null;
+      if (!result) {
+        console.warn('[Auto-Rename] API returned empty content:', JSON.stringify(json.choices?.[0]?.message));
+      }
+      return result;
     }
 
   } catch (e) {

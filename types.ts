@@ -119,6 +119,7 @@ export interface MemoryConfig {
   threshold: number; // e.g. 20 messages
   summaryModelId: string; // e.g. 'gemini-flash'
   summaryProviderId: string;
+  excludePM?: boolean; // 总结时排除私讯
 }
 
 export interface MuteInfo {

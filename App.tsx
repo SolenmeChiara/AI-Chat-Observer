@@ -977,7 +977,10 @@ const App: React.FC = () => {
             lastSummaryCountRef.current.set(activeSessionId, count);
 
             // Take recent messages (from last summary point)
-            const recent = activeSession.messages.slice(lastCount);
+            let recent = activeSession.messages.slice(lastCount);
+            if (conf.excludePM) {
+              recent = recent.filter(m => !m.pmTargetId);
+            }
             const notes = activeSession.adminNotes;
 
             console.log("[Summary] Triggering with", recent.length, "messages, provider:", provider.name, "model:", conf.summaryModelId);
@@ -1593,8 +1596,11 @@ const App: React.FC = () => {
         }
       }
 
-      // 3. If only PM (no RESPONSE), the PM becomes the main message
-      if (!extractedContent && extractedPMContent) {
+      // 3. If only PM (no RESPONSE), handle based on PASS status
+      if (!extractedContent && extractedPMContent && isPass) {
+        // PM + PASS: keep PM separate, it will be saved in the PASS branch
+      } else if (!extractedContent && extractedPMContent) {
+        // Only PM (no PASS), the PM becomes the main message
         extractedContent = extractedPMContent;
         extractedPMContent = ''; // No separate PM message needed
       } else if (extractedContent && !extractedPMContent) {
@@ -1603,17 +1609,38 @@ const App: React.FC = () => {
       }
       // If both exist: extractedContent = public, extractedPMContent = PM (saved as separate message below)
 
+      // 记录是否是格式错误导致的 PASS（isPass 此时仍为 false，但没有提取到内容）
+      const isFormatError = !extractedContent && !isPass;
       // If no valid RESPONSE/PM content found, treat as PASS
       if (!extractedContent || isPass) {
         isPass = true;
       }
 
       if (isPass) {
-        console.log(`[${agent.name}] ⏸️ PASS - agent chose to skip this turn`);
-        // Agent passed (or invalid format), remove placeholder message and update yield tracking
+        if (isFormatError) {
+          console.warn(`[${agent.name}] ⚠️ 格式输出错误，视为PASS — 模型未使用 {{RESPONSE:}} 格式`);
+          console.warn(`[${agent.name}] 📝 原始输出全文:`, accumulatedText);
+        } else {
+          console.log(`[${agent.name}] ⏸️ 模型选择PASS`);
+        }
+
+        // If agent sent PM + PASS, still deliver the PM
+        const passPmMessage: Message | null = (extractedPMContent && detectedPMTargetId) ? {
+          id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          senderId: agentId,
+          text: extractedPMContent,
+          timestamp: Date.now(),
+          pmTargetId: detectedPMTargetId,
+        } : null;
+
+        if (passPmMessage) {
+          console.log(`[${agent.name}] 📨 PM saved despite PASS → ${currentSessionMembers.find(a => a.id === detectedPMTargetId)?.name || pmUserName}`);
+        }
+
+        // Remove placeholder message but keep PM if exists, and update yield tracking
         updateThisSession(s => ({
             ...s,
-            messages: s.messages.filter(m => m.id !== newMessageId),
+            messages: [...s.messages.filter(m => m.id !== newMessageId), ...(passPmMessage ? [passPmMessage] : [])],
             yieldedAgentIds: [...(s.yieldedAgentIds || []), agentId],
             // Track message count when first agent yields (for 5-message cooldown)
             yieldedAtCount: (s.yieldedAgentIds || []).length === 0 ? s.messages.length : s.yieldedAtCount

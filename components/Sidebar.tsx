@@ -1073,6 +1073,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                                </select>
                             </div>
                          </div>
+                         <div className="flex items-center gap-2">
+                            <input
+                               type="checkbox"
+                               className="accent-zinc-900"
+                               checked={activeGroup.memoryConfig?.excludePM || false}
+                               onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { excludePM: e.target.checked })}
+                            />
+                            <span className="text-[10px] text-gray-400">排除私讯</span>
+                         </div>
                          {activeGroup.memoryConfig?.summaryProviderId && (
                             <div>
                                <label className="text-[10px] text-gray-400 block mb-1">总结模型</label>
