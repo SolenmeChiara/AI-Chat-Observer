@@ -523,13 +523,14 @@ ${entertainmentConfig?.enablePM ? `
 
       // Build config object
       // Note: Gemini 3 recommends using default temperature (1.0) for thinking mode
+      const effectiveTemp = isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature;
       const apiConfig: any = {
         systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
-        temperature: isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature,
         maxOutputTokens: agent.config.maxTokens,
-        // Gemini 原生 Google 搜索 (Grounding)
         tools: enableGoogleSearch ? [{ googleSearch: {} }] : undefined,
       };
+      if (effectiveTemp !== null) apiConfig.temperature = effectiveTemp;
+      if (agent.config.topP !== null) apiConfig.topP = agent.config.topP;
 
       // Add thinkingConfig based on model version
       // For Gemini 3: skip if there's incomplete thinking in history (missing signatures)

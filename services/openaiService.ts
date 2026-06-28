@@ -473,9 +473,10 @@ ${entertainmentConfig?.enablePM ? `
         stream_options: { include_usage: true },
       };
 
-      // o1/o3 and DeepSeek thinking mode don't support temperature
+      // o1/o3/o4 and DeepSeek thinking mode don't support temperature/top_p
       if (!isOpenAIReasoningModel && !isDeepSeekThinking) {
-        requestBody.temperature = agent.config.temperature;
+        if (agent.config.temperature !== null) requestBody.temperature = agent.config.temperature;
+        if (agent.config.topP !== null) requestBody.top_p = agent.config.topP;
       }
 
       // Use max_completion_tokens for newer models (o1, o3, gpt-4.5+)

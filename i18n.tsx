@@ -357,6 +357,7 @@ const en: Record<string, string> = {
   '推理模式': 'Reasoning Mode',
   '手动预算': 'Manual Budget',
   '自适应': 'Adaptive',
+  '使用默认': 'Default',
 };
 
 let currentLocale: Locale = 'zh';

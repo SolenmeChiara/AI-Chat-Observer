@@ -543,7 +543,8 @@ ${entertainmentConfig?.enablePM ? `
         if (thinkingConfig) {
             body.thinking = thinkingConfig;
         } else {
-            body.temperature = temperatureConfig;
+            if (temperatureConfig !== null) body.temperature = temperatureConfig;
+            if (agent.config.topP !== null) body.top_p = agent.config.topP;
         }
         if (outputConfig) {
             body.output_config = outputConfig;

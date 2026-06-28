@@ -40,8 +40,9 @@ export type ReasoningMode = 'manual' | 'adaptive';
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface AgentConfig {
-  temperature: number;      // 0.0 - 2.0
-  maxTokens: number;        // e.g. 100 - 8192
+  temperature: number | null; // 0.0 - 2.0, null = use provider default
+  topP: number | null;        // 0.0 - 1.0, null = use provider default
+  maxTokens: number;          // e.g. 100 - 8192
   enableReasoning: boolean; // For DeepSeek R1 or Claude Thinking
   reasoningBudget: number;  // Token budget for thinking (1024 - 32000), used in manual mode
   reasoningMode?: ReasoningMode; // 'manual' = budget_tokens, 'adaptive' = let model decide

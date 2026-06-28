@@ -172,7 +172,8 @@ export const INITIAL_AGENTS: Agent[] = [
     systemPrompt: '',
     color: 'bg-gray-600',
     config: {
-      temperature: 0.7,
+      temperature: null,
+      topP: null,
       maxTokens: 2000,
       enableReasoning: false,
       reasoningBudget: 0

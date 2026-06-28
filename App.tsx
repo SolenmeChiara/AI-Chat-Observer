@@ -681,7 +681,7 @@ const App: React.FC = () => {
       modelId: modelId,
       systemPrompt: t('你是一个乐于助人的群聊参与者。'),
       color: 'bg-gray-600',
-      config: { temperature: 0.7, maxTokens: 2000, enableReasoning: false, reasoningBudget: 0 },
+      config: { temperature: null, topP: null, maxTokens: 2000, enableReasoning: false, reasoningBudget: 0 },
       role: AgentRole.MEMBER
     };
     setAgents(prev => [...prev, newAgent]);

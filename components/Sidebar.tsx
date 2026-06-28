@@ -656,7 +656,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       systemPrompt: '',
       color: 'bg-gray-600',
       config: {
-        temperature: 0.7,
+        temperature: null,
+        topP: null,
         maxTokens: 2000,
         enableReasoning: false,
         reasoningBudget: 0
@@ -1368,13 +1369,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                         </div>
                         <div className="space-y-2">
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('温度')}: {editData.config.temperature}</span>
-                                <input
-                                    type="range" min="0" max="2" step="0.1"
-                                    className="flex-1 h-1 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none accent-zinc-800"
-                                    value={editData.config.temperature}
-                                    onChange={(e) => updateDraftAgentConfig(agent.id, { temperature: parseFloat(e.target.value) })}
-                                />
+                                <label className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 w-16 cursor-pointer">
+                                    <input type="checkbox" className="accent-zinc-900" checked={editData.config.temperature !== null} onChange={(e) => updateDraftAgentConfig(agent.id, { temperature: e.target.checked ? 0.7 : null })} />
+                                    {t('温度')}{editData.config.temperature !== null ? `: ${editData.config.temperature}` : ''}
+                                </label>
+                                {editData.config.temperature !== null ? (
+                                    <input type="range" min="0" max="2" step="0.1" className="flex-1 h-1 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none accent-zinc-800" value={editData.config.temperature} onChange={(e) => updateDraftAgentConfig(agent.id, { temperature: parseFloat(e.target.value) })} />
+                                ) : (
+                                    <span className="flex-1 text-[10px] text-gray-400 italic">{t('使用默认')}</span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <label className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 w-16 cursor-pointer">
+                                    <input type="checkbox" className="accent-zinc-900" checked={editData.config.topP !== null && editData.config.topP !== undefined} onChange={(e) => updateDraftAgentConfig(agent.id, { topP: e.target.checked ? 0.9 : null })} />
+                                    Top-P{editData.config.topP != null ? `: ${editData.config.topP}` : ''}
+                                </label>
+                                {editData.config.topP != null ? (
+                                    <input type="range" min="0" max="1" step="0.05" className="flex-1 h-1 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none accent-zinc-800" value={editData.config.topP} onChange={(e) => updateDraftAgentConfig(agent.id, { topP: parseFloat(e.target.value) })} />
+                                ) : (
+                                    <span className="flex-1 text-[10px] text-gray-400 italic">{t('使用默认')}</span>
+                                )}
                             </div>
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">MaxToken</span>
