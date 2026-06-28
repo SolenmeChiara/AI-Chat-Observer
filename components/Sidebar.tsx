@@ -1391,8 +1391,36 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 />
                             </div>
                             {editData.config.enableReasoning && (
+                                <>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('推理预算')}</span>
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16">{t('推理模式')}</span>
+                                    <select
+                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                        value={editData.config.reasoningMode || 'manual'}
+                                        onChange={(e) => updateDraftAgentConfig(agent.id, { reasoningMode: e.target.value as any })}
+                                    >
+                                        <option value="manual">{t('手动预算')}</option>
+                                        <option value="adaptive">{t('自适应')}</option>
+                                    </select>
+                                </div>
+                                {editData.config.reasoningMode === 'adaptive' ? (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16">Effort</span>
+                                    <select
+                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                        value={editData.config.effort || 'high'}
+                                        onChange={(e) => updateDraftAgentConfig(agent.id, { effort: e.target.value as any })}
+                                    >
+                                        <option value="low">Low</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="high">High</option>
+                                        <option value="xhigh">X-High</option>
+                                        <option value="max">Max</option>
+                                    </select>
+                                </div>
+                                ) : (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16">{t('推理预算')}</span>
                                     <input
                                         type="number"
                                         className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
@@ -1401,6 +1429,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         onChange={(e) => updateDraftAgentConfig(agent.id, { reasoningBudget: parseInt(e.target.value) })}
                                     />
                                 </div>
+                                )}
+                                </>
                             )}
 
                             {/* Vision Proxy - Give text-only models "eyes" */}

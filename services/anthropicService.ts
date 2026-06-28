@@ -500,24 +500,30 @@ ${entertainmentConfig?.enablePM ? `
     formattedMessages.unshift({ role: 'user', content: '[System: Conversation Continued]' });
   }
 
-  // Handle Reasoning Configuration for Claude 3.7
-  let thinkingConfig = undefined;
+  // Handle Reasoning Configuration
+  let thinkingConfig: any = undefined;
+  let outputConfig: any = undefined;
   let temperatureConfig = agent.config.temperature;
   let maxTokensConfig = agent.config.maxTokens;
 
-  // Use the pre-calculated shouldEnableThinking flag
   if (shouldEnableThinking) {
-      // Claude 3.7 Thinking mode requires temperature to be 1.0 (or not sent, defaulting to 1)
       temperatureConfig = 1.0;
 
-      thinkingConfig = {
-          type: "enabled",
-          budget_tokens: agent.config.reasoningBudget || 2048
-      };
+      const useAdaptive = agent.config.reasoningMode === 'adaptive';
 
-      // Safety: max_tokens must be > budget_tokens
-      if (maxTokensConfig <= (thinkingConfig.budget_tokens || 0)) {
-          maxTokensConfig = (thinkingConfig.budget_tokens || 2048) + 1024;
+      if (useAdaptive) {
+          thinkingConfig = { type: "adaptive" };
+          if (agent.config.effort) {
+              outputConfig = { effort: agent.config.effort };
+          }
+      } else {
+          thinkingConfig = {
+              type: "enabled",
+              budget_tokens: agent.config.reasoningBudget || 2048
+          };
+          if (maxTokensConfig <= (thinkingConfig.budget_tokens || 0)) {
+              maxTokensConfig = (thinkingConfig.budget_tokens || 2048) + 1024;
+          }
       }
   }
 
@@ -536,10 +542,11 @@ ${entertainmentConfig?.enablePM ? `
 
         if (thinkingConfig) {
             body.thinking = thinkingConfig;
-            // Do not send temperature if thinking is enabled, or send 1.0
-            // body.temperature = 1.0; 
         } else {
             body.temperature = temperatureConfig;
+        }
+        if (outputConfig) {
+            body.output_config = outputConfig;
         }
 
         response = await fetch(`${baseUrl}/messages`, {

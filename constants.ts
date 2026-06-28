@@ -98,7 +98,8 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
     apiKey: '',
     models: [
       { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30 },
-      { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', inputPricePer1M: 1.25, outputPricePer1M: 5.00 }
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', inputPricePer1M: 1.25, outputPricePer1M: 10.00 },
+      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', inputPricePer1M: 0.10, outputPricePer1M: 0.40 },
     ]
   },
   {
@@ -108,19 +109,21 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o', inputPricePer1M: 5.00, outputPricePer1M: 15.00 },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', inputPricePer1M: 0.15, outputPricePer1M: 0.60 }
+      { id: 'gpt-4o', name: 'GPT-4o', inputPricePer1M: 2.50, outputPricePer1M: 10.00 },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', inputPricePer1M: 0.15, outputPricePer1M: 0.60 },
+      { id: 'o4-mini', name: 'o4-mini', inputPricePer1M: 1.10, outputPricePer1M: 4.40 },
     ]
   },
   {
     id: 'anthropic-official',
     name: 'Anthropic Official',
     type: AgentType.ANTHROPIC,
-    baseUrl: 'https://api.anthropic.com/v1', 
+    baseUrl: 'https://api.anthropic.com/v1',
     apiKey: '',
     models: [
-      { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', inputPricePer1M: 3.00, outputPricePer1M: 15.00 },
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', inputPricePer1M: 3.00, outputPricePer1M: 15.00 }
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', inputPricePer1M: 3.00, outputPricePer1M: 15.00 },
+      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', inputPricePer1M: 0.80, outputPricePer1M: 4.00 },
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', inputPricePer1M: 15.00, outputPricePer1M: 75.00 },
     ]
   },
   {
@@ -130,8 +133,9 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKey: '',
     models: [
-      { id: 'anthropic/claude-3.5-sonnet', name: 'OR-Claude 3.5', inputPricePer1M: 3, outputPricePer1M: 15 },
-      { id: 'deepseek/deepseek-r1', name: 'OR-DeepSeek R1', inputPricePer1M: 0.55, outputPricePer1M: 2.19 }
+      { id: 'anthropic/claude-sonnet-4-6', name: 'OR-Claude Sonnet 4.6', inputPricePer1M: 3, outputPricePer1M: 15 },
+      { id: 'deepseek/deepseek-r1', name: 'OR-DeepSeek R1', inputPricePer1M: 0.55, outputPricePer1M: 2.19 },
+      { id: 'google/gemini-2.5-flash', name: 'OR-Gemini 2.5 Flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30 },
     ]
   },
   {
@@ -139,7 +143,7 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
     name: 'DeepSeek Official',
     type: AgentType.OPENAI_COMPATIBLE,
     baseUrl: 'https://api.deepseek.com',
-    apiKey: '', 
+    apiKey: '',
     models: [
       { id: 'deepseek-chat', name: 'DeepSeek V3', inputPricePer1M: 0.14, outputPricePer1M: 0.28 },
       { id: 'deepseek-reasoner', name: 'DeepSeek R1', inputPricePer1M: 0.55, outputPricePer1M: 2.19 }

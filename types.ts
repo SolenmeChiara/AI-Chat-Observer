@@ -36,11 +36,16 @@ export interface ModelConfig {
   outputPricePer1M: number;
 }
 
+export type ReasoningMode = 'manual' | 'adaptive';
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface AgentConfig {
   temperature: number;      // 0.0 - 2.0
   maxTokens: number;        // e.g. 100 - 8192
-  enableReasoning: boolean; // For DeepSeek R1 or Claude 3.7 Thinking
-  reasoningBudget: number;  // Token budget for thinking (1024 - 32000)
+  enableReasoning: boolean; // For DeepSeek R1 or Claude Thinking
+  reasoningBudget: number;  // Token budget for thinking (1024 - 32000), used in manual mode
+  reasoningMode?: ReasoningMode; // 'manual' = budget_tokens, 'adaptive' = let model decide
+  effort?: EffortLevel;     // Effort level for Anthropic adaptive thinking / OpenAI reasoning
 
   // Vision Proxy: Let text-only models "see" images via a vision model
   visionProxyEnabled?: boolean;

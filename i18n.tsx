@@ -354,6 +354,9 @@ const en: Record<string, string> = {
   '由于网络问题输出被截断。它的未完成输出已显示在上方。请其他成员继续当前话题。': "'s output was truncated due to network issues. The incomplete output is shown above. Other members please continue the current topic.",
   '这是一个轻松的聊天室。': 'This is a casual chat room.',
   '你是一个乐于助人的群聊参与者。': 'You are a helpful group chat participant.',
+  '推理模式': 'Reasoning Mode',
+  '手动预算': 'Manual Budget',
+  '自适应': 'Adaptive',
 };
 
 let currentLocale: Locale = 'zh';

@@ -19,8 +19,8 @@ function formatMessageTime(timestamp: number): string {
 function useMaxCompletionTokens(modelId: string): boolean {
   const lowerModel = modelId.toLowerCase();
 
-  // o1/o3 series (reasoning models)
-  if (/^o[13](-|$)/.test(lowerModel)) return true;
+  // o-series reasoning models (o1, o3, o4-mini, etc.)
+  if (/^o[134](-|$)/.test(lowerModel)) return true;
 
   // gpt-4.5 and above
   if (lowerModel.includes('gpt-4.5') || lowerModel.includes('gpt-5')) return true;
@@ -462,7 +462,7 @@ ${entertainmentConfig?.enablePM ? `
     try {
       // Build request body with correct token parameter based on model
       const isNewModel = useMaxCompletionTokens(modelId);
-      const isOpenAIReasoningModel = /^o[13](-|$)/.test(modelId.toLowerCase());
+      const isOpenAIReasoningModel = /^o[134](-|$)/.test(modelId.toLowerCase());
       const isDeepSeek = isDeepSeekModel(modelId, baseUrl);
       const isDeepSeekThinking = isDeepSeek && agent.config.enableReasoning;
 
@@ -485,9 +485,14 @@ ${entertainmentConfig?.enablePM ? `
         requestBody.max_tokens = agent.config.maxTokens;
       }
 
-      // Add reasoning_effort for o1/o3 models when reasoning is enabled
+      // Add reasoning_effort for o-series reasoning models
       if (isOpenAIReasoningModel && agent.config.enableReasoning) {
-        requestBody.reasoning_effort = mapBudgetToEffort(agent.config.reasoningBudget || 8000);
+        const effort = agent.config.effort;
+        if (effort === 'low' || effort === 'medium' || effort === 'high') {
+          requestBody.reasoning_effort = effort;
+        } else {
+          requestBody.reasoning_effort = mapBudgetToEffort(agent.config.reasoningBudget || 8000);
+        }
       }
 
       // Add thinking/reasoning parameter for DeepSeek models when reasoning is enabled
