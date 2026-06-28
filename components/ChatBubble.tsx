@@ -316,4 +316,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   );
 };
 
-export default ChatBubble;
+export default React.memo(ChatBubble, (prev, next) => {
+  if (prev.message !== next.message) return false;
+  if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.currentPlayingMessageId !== next.currentPlayingMessageId) return false;
+  if (prev.sender?.name !== next.sender?.name) return false;
+  if (prev.sender?.avatar !== next.sender?.avatar) return false;
+  return true;
+});

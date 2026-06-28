@@ -435,9 +435,17 @@ const App: React.FC = () => {
     setProcessingAgents(new Set());
   };
 
-  const handleDeleteMessage = (messageId: string) => {
+  const handleDeleteMessage = useCallback((messageId: string) => {
     updateActiveSessionMessages(prev => prev.filter(m => m.id !== messageId));
-  };
+  }, []);
+
+  const handleReplyTo = useCallback((targetMsg: Message) => {
+    setReplyToId(targetMsg.id);
+  }, []);
+
+  const handleMentionInsert = useCallback((name: string) => {
+    setInputText(prev => `${prev}@${name} `);
+  }, []);
 
   const handleClearMessages = () => {
     updateActiveSession(s => ({
@@ -2761,8 +2769,8 @@ const App: React.FC = () => {
                   allAgents={sessionMembers}
                   userProfile={settings}
                   replyToMessage={msg.replyToId ? messages.find(m => m.id === msg.replyToId) : undefined}
-                  onReply={(targetMsg) => setReplyToId(targetMsg.id)}
-                  onMention={(name) => setInputText(prev => `${prev}@${name} `)}
+                  onReply={handleReplyTo}
+                  onMention={handleMentionInsert}
                   onDelete={handleDeleteMessage}
                   isStreaming={processingAgents.has(msg.senderId)}
                   onPlayTTS={settings.ttsSettings?.enabled ? handlePlayTTS : undefined}
