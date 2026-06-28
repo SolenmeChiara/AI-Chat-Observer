@@ -358,6 +358,9 @@ const en: Record<string, string> = {
   '手动预算': 'Manual Budget',
   '自适应': 'Adaptive',
   '使用默认': 'Default',
+  '逆位': 'Reversed',
+  '正位': 'Upright',
+  '抽取塔罗牌': 'Tarot draw',
 };
 
 let currentLocale: Locale = 'zh';

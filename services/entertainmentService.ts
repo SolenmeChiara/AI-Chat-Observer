@@ -1,4 +1,6 @@
 
+import { t } from '../i18n';
+
 // Entertainment Service: Dice Rolling and Tarot Cards
 
 // ============ DICE SYSTEM ============
@@ -166,18 +168,17 @@ export const drawTarot = (count: number): TarotResult | null => {
     });
   }
 
-  // Build summary with suit indicator for minor arcana
   const cardStrings = cards.map(c => {
-    const position = c.isReversed ? '逆位' : '正位';
-    const isMajor = c.suit === 'major';
-    return isMajor ? `【${c.name}】${position}` : `【${c.name}】${position}`;
+    const position = c.isReversed ? t('逆位') : t('正位');
+    const name = t('正位') === 'Upright' ? c.nameEn : c.name;
+    return `【${name}】${position}`;
   });
 
   let summary: string;
   if (count === 1) {
-    summary = `🃏 抽取塔罗牌: ${cardStrings[0]}`;
+    summary = `🃏 ${t('抽取塔罗牌')}: ${cardStrings[0]}`;
   } else {
-    summary = `🃏 抽取 ${count} 张塔罗牌:\n` + cardStrings.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
+    summary = `🃏 ${t('抽取塔罗牌')} ×${count}:\n` + cardStrings.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
   }
 
   return { cards, summary };
