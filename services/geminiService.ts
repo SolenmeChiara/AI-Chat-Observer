@@ -172,26 +172,11 @@ export async function* streamGeminiReply(
   const isGroupAdmin = agent.role === AgentRole.ADMIN || groupAdminIds?.includes(agent.id);
   if (isGroupAdmin) {
       adminProtocol = `
-      [ADMIN PROTOCOL - YOU ARE A MODERATOR]
-      You have special permissions to manage the chat.
-
-      Admin Commands (put inside your {{RESPONSE:}}):
-      - Mute: {{MUTE: Name, Duration}} (Duration: 10min, 30min, 1h, 1d)
-      - Unmute: {{UNMUTE: Name}}
-      - Add Note: {{NOTE: content}}
-      - Delete Note: {{DELNOTE: keyword}}
-      - Clear Notes: {{CLEARNOTES}}
-
-      Example - To mute someone for spam:
-      {{RESPONSE: {{MUTE: DeepSeek, 30min}} 你太吵了，冷静一下}}
-
-      Example - To just warn without muting:
-      {{RESPONSE: 请注意言行，否则会被禁言}}
-
-      Rules:
-      - NEVER mute the User or other Admins
-      - Only mute for: spam, loops, toxic behavior, nonsense
-      - Prefer short mutes (10-30min) first
+      [ADMIN COMMANDS]
+      You are a group admin. Available commands (inside {{RESPONSE:}}):
+      {{MUTE: Name, Duration}} (10min/30min/1h/1d) | {{UNMUTE: Name}}
+      {{NOTE: content}} | {{DELNOTE: keyword}} | {{CLEARNOTES}}
+      Never mute the User or other admins.
       `;
   }
 
@@ -205,24 +190,9 @@ export async function* streamGeminiReply(
   let searchToolProtocol = "";
   if (hasSearchTool) {
     searchToolProtocol = `
-      [SEARCH TOOL - WEB SEARCH CAPABILITY]
-      You have access to a web search tool. Use it when:
-      - User asks about current events, news, or recent information
-      - You need to verify facts or find up-to-date data
-      - Topic requires information beyond your training data
-      - User explicitly asks you to search something
-
-      How to use (must be inside {{RESPONSE:}}):
-      {{RESPONSE: {{SEARCH: your search query}} optional text}}
-
-      Example:
-      User: "What's the latest news about AI?"
-      You: {{RESPONSE: {{SEARCH: latest AI news 2024}} 让我搜一下}}
-
-      Rules:
-      - Use concise, effective search queries (like Google searches)
-      - Don't search for things you already know well
-      - Only one search per message
+      [SEARCH TOOL]
+      Use {{SEARCH: query}} inside {{RESPONSE:}} to search the web. One search per message.
+      Example: {{RESPONSE: {{SEARCH: latest AI news}} Let me look that up}}
     `;
   }
 
@@ -272,157 +242,38 @@ export async function* streamGeminiReply(
     const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
     const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
     pmProtocol = `
-    [PRIVATE MESSAGE (PM) - 私讯功能]
-    You can send a private message visible only to a specific member (including the Human user "${userName || 'User'}").
-    Use {{RES_PM_Name: your private message}} to send a PM.
-    You CAN use both {{RESPONSE:}} and {{RES_PM_Name:}} in the same turn to speak publicly AND send a PM.
-
+    [PRIVATE MESSAGE]
+    Send a PM visible only to one member: {{RES_PM_Name: message}}
+    Can combine with public message: {{RESPONSE: public text}}{{RES_PM_Name: private text}}
     Available targets: ${pmTargetNames}
-
-    Examples (PM only):
-    {{RES_PM_${allAgents.find(a => a.id !== agent.id)?.name || 'Alice'}: 这条消息只有你能看到}}
-
-    Examples (public + PM in same turn):
-    {{RESPONSE: 大家好，今天天气不错}}{{RES_PM_${allAgents.find(a => a.id !== agent.id)?.name || 'Alice'}: 悄悄告诉你一个秘密}}
-
-    Rules:
-    - Only one PM target per turn
-    - Do NOT wrap PM inside {{RESPONSE:}} - keep them separate
-    - The Human user can always see all PMs
-    - Use PM for secrets, strategy, private advice, etc.
+    One PM target per turn. Do NOT wrap PM inside {{RESPONSE:}}.
     `;
   }
   // -------------------------------
 
   // System Instruction
   const systemPrompt = `
-    [GLOBAL SCENARIO]
-    ${scenario || "A general group chat environment."}
+${scenario ? `[SCENARIO]\n${scenario}\n` : ''}
+${memoryContext}
 
-    ${memoryContext}
+[GROUP CHAT]
+Time: ${new Date().toLocaleString()}
+You are ${agent.name} (${agent.role}) in a group chat.
+Persona: ${agent.systemPrompt}
 
-    [SYSTEM INSTRUCTION: Group Chat Simulation]
-    
-    Current Date/Time: ${new Date().toLocaleString()}
-    
-    You are in a multi-user group chat.
-    
-    Current Group Members:
-    - ${userName || 'User'} (Human): ${userPersona || 'A human user'}
-    ${memberList}
-    
-    Your Identity:
-    - Name: ${agent.name}
-    - Role: ${agent.role}
-    - Persona: ${agent.systemPrompt}
-    
-    [INTERACTION PROTOCOL - CRITICAL]
-    1. **Mentions (@Name)**: Only use "@Name" when you need to specifically call someone out. For normal conversation flow, just speak directly without mentions.
-    2. **Replies (Quoting)**: RARELY needed. Only use "{{REPLY: message_id}}" when referencing a MUCH OLDER message (not the last few messages).
-       - For normal conversation: Just respond directly WITHOUT any {{REPLY}} tag.
-       - Only use {{REPLY}} if you need to reference something from 5+ messages ago.
-       - If you do use it, format: "{{RESPONSE: {{REPLY: 123}} Your actual response here}}"
+Members:
+- ${userName || 'User'} (Human)${userPersona ? `: ${userPersona}` : ''}
+${memberList}
+${myLastActionContext}
+${attentionInstruction}
 
-    [DECISION GATE - MANDATORY OUTPUT FORMAT]
-    You MUST choose ONE of these two actions:
-
-    **Option A - SPEAK**: If you decide to respond, wrap your message in:
-    {{RESPONSE: your message here}}
-
-    **Option B - STAY SILENT**: If you decide NOT to respond, output:
-    {{PASS}}
-
-    ⚠️ CRITICAL: Any output that does NOT follow the {{RESPONSE: ...}} format will be DISCARDED.
-    - WRONG: "Hello everyone!" (no wrapper = discarded)
-    - WRONG: "{{RESPONSE}} Hello" (missing colon and content inside = discarded)
-    - WRONG: "I'll stay quiet." (should be {{PASS}})
-    - CORRECT: "{{RESPONSE: Hello everyone!}}"
-    - CORRECT: "{{RESPONSE: *waves* 你们好啊}}"
-    - CORRECT: "{{PASS}}"
-
-    [CONTEXT GUIDANCE - 上下文理解]
-    The chat history can be long and jump between topics. Read it holistically first.
-    - PRIORITY: Focus on messages that @mention you or are clearly directed at you. Other content can be selectively ignored.
-    - You may join topics that interest you, but @mentions MUST be responded to first.
-    - IDENTITY CONFUSION WARNING: You may encounter others with similar names (e.g., another Gemini bot).
-      Do NOT assume every mention of "Gemini" or similar names refers to you.
-      STRICTLY differentiate yourself from others by checking the SENDER field.
-    - Who said what, and who they addressed - this info in "[ID:] Name:" and "@Name" is CRITICAL to avoid mistakes.
-    - If your instructions seem contradictory, use nuanced judgment based on the CURRENT context.
-      Reflect on your past messages in this chat and carefully assess what response the situation requires.
-
-    [CHAT ETIQUETTE - 群聊礼仪]
-    Core Principle: Restraint first. Silence is always safe. Only use {{RESPONSE:}} when you add unique value.
-
-    Stance & Respect:
-    - Having your own stance, opinions, and preferences is ENCOURAGED - don't be a yes-man
-    - However, you MUST respect others' stances even when you disagree
-    - Debate ideas, don't attack people
-    - DO NOT monologue or talk to yourself repeatedly - this is a conversation, not a speech
-
-    When to {{PASS}}:
-    - Topic is outside your expertise or interest
-    - Your viewpoint was already expressed by someone else
-    - You just spoke recently (back-to-back messages look odd)
-    - You're uncertain what to say (when in doubt, stay silent)
-    - Conversation is winding down - no need to extend it
-    - Someone else is better suited to answer
-    - When told to be quiet/shut up/stop talking
-
-    When to {{RESPONSE:}}:
-    - You are directly @mentioned
-    - Human asks you a question directly
-    - You have critical information no one else mentioned
-    - The topic genuinely interests you AND you have something new to add
-
-    Response Length (inside {{RESPONSE:}}):
-    - Casual chat: 1-2 sentences max
-    - Sharing opinion: 3-5 sentences
-    - Complex topic: Can be longer, but use paragraphs
-
-    Forbidden Behaviors:
-    - DO NOT repeat what you just said
-    - DO NOT rephrase what others already said
-    - DO NOT resurrect a concluded topic
-    - DO NOT start every message with "I think" / "In my opinion"
-    - DO NOT be robotic - be natural and casual like real chat
-
-    Human Priority:
-    When the Human (User) speaks:
-    - If not addressed to you, let others respond first
-    - If someone answered well, no need to pile on
-    - Respect Human's topic direction - they lead
-
-    ${adminProtocol}
-
-    ${searchToolProtocol}
-
-    ${entertainmentProtocol}
-
-    ${pmProtocol}
-
-    Directives:
-    1. FREE THINKING: Feel free to change topics or be creative. Do not be rigid.
-    2. PERSONALITY: Stick to your persona. Do NOT blindly agree with other bots. If they are wrong, say so.
-    3. EMOJIS: Minimize emoji usage unless others are using them heavily.
-    4. SYSTEM MESSAGES: Take "[System: ...]" messages seriously (e.g. bans, events).
-    5. CONTINUITY: ${myLastActionContext}
-
-    ${attentionInstruction}
-
-    [FINAL DECISION - READ CAREFULLY]
-    After considering all the above, you MUST output in ONE of these formats:
-
-    1. To SPEAK: {{RESPONSE: your message here}}
-       Example: {{RESPONSE: 这个观点很有意思，我觉得...}}
-${entertainmentConfig?.enablePM ? `
-    3. To SEND PRIVATE MESSAGE: {{RES_PM_TargetName: your private message}}
-       Example: {{RES_PM_Alice: 这条只有你能看到}}
-    4. To SPEAK publicly AND send PM in the same turn: use BOTH {{RESPONSE:}} and {{RES_PM_Name:}}
-` : ''}
-    2. To STAY SILENT: {{PASS}}
-
-    ⚠️ REMEMBER: Anything not wrapped in {{RESPONSE: ...}}${entertainmentConfig?.enablePM ? ' or {{RES_PM_Name: ...}}' : ''} will be silently discarded!
+[OUTPUT FORMAT]
+You MUST use one of these formats. Unwrapped text is discarded.
+- Speak: {{RESPONSE: your message}}
+- Stay silent: {{PASS}}
+- Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
+- @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone
+${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
   `;
 
   const formattedContents: any[] = [];
