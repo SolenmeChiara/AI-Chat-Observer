@@ -261,11 +261,22 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
       continue;
     }
 
+    // Search results should appear as system context, not as the agent's own speech
+    if (m.isSearchResult) {
+      const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+      const block = [{ type: "text", text: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` }];
+      if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
+        (formattedMessages[formattedMessages.length - 1].content as any[]).push(...block);
+      } else {
+        formattedMessages.push({ role: 'user', content: block });
+      }
+      continue;
+    }
+
     const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
 
-    // INJECT ID AND TIMESTAMP INTO CONTENT
     const timeStr = formatMessageTime(m.timestamp);
-    const pmLabel = m.pmTargetId ? ' [私讯/PM]' : '';
+    const pmLabel = m.pmTargetId ? ' [PM]' : '';
     let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${m.text}`;
 
     // Handle Reply Reference

@@ -293,6 +293,19 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
   );
 
   for (const m of visibleMessages) {
+    // Search results: inject as labeled user context
+    if (m.isSearchResult) {
+      const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+      const lastEntry = formattedContents[formattedContents.length - 1];
+      const searchPart = { text: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
+      if (lastEntry?.role === 'user') {
+        lastEntry.parts.push(searchPart);
+      } else {
+        formattedContents.push({ role: 'user', parts: [searchPart] });
+      }
+      continue;
+    }
+
     const isSelf = m.senderId === agent.id;
     const role = isSelf ? 'model' : 'user';
     const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");

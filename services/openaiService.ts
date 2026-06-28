@@ -271,11 +271,16 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
   const formattedMessages = [
     { role: 'system', content: systemInstruction },
     ...visibleMessages.map(m => {
+       // Search results: inject as labeled context, not as a chat message
+       if (m.isSearchResult) {
+         const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+         return { role: 'user' as const, content: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
+       }
+
        const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
-       
-       // INJECT ID AND TIMESTAMP INTO CONTENT
+
        const timeStr = formatMessageTime(m.timestamp);
-       const pmLabel = m.pmTargetId ? ' [私讯/PM]' : '';
+       const pmLabel = m.pmTargetId ? ' [PM]' : '';
        let textContent = `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${m.text}`;
        
        // Handle Quote/Reply
