@@ -323,8 +323,10 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
 
     // Text Part WITH ID AND TIMESTAMP INJECTION
     const timeStr = formatMessageTime(m.timestamp);
-    const pmLabel = m.pmTargetId ? ' [私讯/PM]' : '';
-    let textContent = isSelf ? m.text : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${m.text}`;
+    const pmLabel = m.pmTargetId ? ' [PM]' : '';
+    const isAI = !m.isSystem && m.senderId !== USER_ID && m.senderId !== 'SYSTEM' && m.senderId !== 'narrator';
+    const wrappedText = isAI ? `{{RESPONSE: ${m.text}}}` : m.text;
+    let textContent = isSelf ? wrappedText : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${wrappedText}`;
 
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);

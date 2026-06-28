@@ -281,7 +281,9 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
 
        const timeStr = formatMessageTime(m.timestamp);
        const pmLabel = m.pmTargetId ? ' [PM]' : '';
-       let textContent = `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${m.text}`;
+       const isAI = !m.isSystem && m.senderId !== USER_ID && m.senderId !== 'SYSTEM' && m.senderId !== 'narrator';
+       const displayText = isAI ? `{{RESPONSE: ${m.text}}}` : m.text;
+       let textContent = `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${displayText}`;
        
        // Handle Quote/Reply
        if (m.replyToId) {
