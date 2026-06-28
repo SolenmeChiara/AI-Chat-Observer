@@ -542,14 +542,14 @@ ${entertainmentConfig?.enablePM ? `
       break;
 
     } catch (error: any) {
-        // Handle Network Errors (Fetch failed)
-        if (attempt < MAX_RETRIES) {
+        const isHttpError = error.message?.startsWith('API ');
+        if (!isHttpError && attempt < MAX_RETRIES) {
             const delay = 1000 * Math.pow(2, attempt);
-            console.warn(`[OpenAI] ⚠️ Network/Retryable Error: ${error.message}. Retrying in ${delay}ms...`);
+            console.warn(`[OpenAI] ⚠️ Network Error: ${error.message}. Retrying in ${delay}ms...`);
             await wait(delay);
             continue;
         }
-        console.error("[OpenAI] ❌ Stream Error (max retries reached):", error.message);
+        console.error("[OpenAI] ❌ Error (max retries reached or non-retryable):", error.message);
         throw error;
     }
   }
@@ -558,8 +558,8 @@ ${entertainmentConfig?.enablePM ? `
     throw new Error("No response received from OpenAI API");
   }
 
+  const reader = response.body.getReader();
   try {
-    const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let capturedUsage = { input: 0, output: 0 };
@@ -677,5 +677,7 @@ ${entertainmentConfig?.enablePM ? `
   } catch (error: any) {
     console.error("[OpenAI] ❌ Stream Reading Error:", error.message);
     throw error;
+  } finally {
+    reader.releaseLock();
   }
 }

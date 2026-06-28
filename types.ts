@@ -207,6 +207,7 @@ export interface GlobalSettings {
   // Appearance
   darkMode: boolean;
   expandAllReasoning: boolean; // If true, all reasoning chains are expanded by default
+  language: 'zh' | 'en';
 
   // TTS (Text-to-Speech)
   ttsSettings: TTSSettings;

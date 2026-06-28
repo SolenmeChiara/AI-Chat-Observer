@@ -15,6 +15,7 @@ import { AgentType } from './types';
 import { parseFile } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings } from './services/db';
 import { describeImage } from './services/visionProxyService';
+import { I18nProvider, useT, t } from './i18n';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
@@ -73,6 +74,7 @@ const App: React.FC = () => {
 
   // DB Loaded Flag
   const [isDbLoaded, setIsDbLoaded] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   // Derived active session and group data
   const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
@@ -158,37 +160,42 @@ const App: React.FC = () => {
   // 1. Init & Load on Mount
   useEffect(() => {
     const bootstrap = async () => {
-      await initDB();
-      const data = await loadAllData();
+      try {
+        await initDB();
+        const data = await loadAllData();
 
-      setAgents(data.agents);
-      setProviders(data.providers);
-      // Ensure all groups have a valid memoryConfig (handle old data)
-      const groupsWithMemoryConfig = data.groups.map(g => ({
-        ...g,
-        memoryConfig: g.memoryConfig || {
-          enabled: false,
-          threshold: 20,
-          summaryModelId: '',
-          summaryProviderId: ''
+        setAgents(data.agents);
+        setProviders(data.providers);
+        // Ensure all groups have a valid memoryConfig (handle old data)
+        const groupsWithMemoryConfig = data.groups.map(g => ({
+          ...g,
+          memoryConfig: g.memoryConfig || {
+            enabled: false,
+            threshold: 20,
+            summaryModelId: '',
+            summaryProviderId: ''
+          }
+        }));
+        setGroups(groupsWithMemoryConfig);
+        setSessions(data.sessions);
+        // Merge with defaults to ensure new fields like enableConcurrency exist
+        setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
+
+        // Ensure activeGroupId and activeSessionId are valid
+        const firstGroup = data.groups[0];
+        if (!data.groups.find(g => g.id === activeGroupId) && firstGroup) {
+           setActiveGroupId(firstGroup.id);
         }
-      }));
-      setGroups(groupsWithMemoryConfig);
-      setSessions(data.sessions);
-      // Merge with defaults to ensure new fields like enableConcurrency exist
-      setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
+        const firstSession = data.sessions.find(s => s.groupId === (firstGroup?.id || activeGroupId)) || data.sessions[0];
+        if (!data.sessions.find(s => s.id === activeSessionId) && firstSession) {
+           setActiveSessionId(firstSession.id);
+        }
 
-      // Ensure activeGroupId and activeSessionId are valid
-      const firstGroup = data.groups[0];
-      if (!data.groups.find(g => g.id === activeGroupId) && firstGroup) {
-         setActiveGroupId(firstGroup.id);
+        setIsDbLoaded(true);
+      } catch (err: any) {
+        console.error('Database bootstrap failed:', err);
+        setDbError(err?.message || String(err));
       }
-      const firstSession = data.sessions.find(s => s.groupId === (firstGroup?.id || activeGroupId)) || data.sessions[0];
-      if (!data.sessions.find(s => s.id === activeSessionId) && firstSession) {
-         setActiveSessionId(firstSession.id);
-      }
-
-      setIsDbLoaded(true);
     };
     bootstrap();
   }, []);
@@ -295,9 +302,9 @@ const App: React.FC = () => {
 
     const newGroup: ChatGroup = {
       id: newGroupId,
-      name: `群组 ${groups.length + 1}`,
+      name: `${t('群组')} ${groups.length + 1}`,
       memberIds: agents.filter(a => a.isActive !== false && a.providerId && a.modelId).map(a => a.id),
-      scenario: '这是一个轻松的聊天室。',
+      scenario: t('这是一个轻松的聊天室。'),
       memoryConfig: {
         enabled: false,
         threshold: 20,
@@ -310,7 +317,7 @@ const App: React.FC = () => {
     const newSession: ChatSession = {
       id: newSessionId,
       groupId: newGroupId,
-      name: '对话 1',
+      name: `${t('对话')} 1`,
       messages: [],
       lastUpdated: Date.now(),
       isAutoRenamed: false,
@@ -380,7 +387,7 @@ const App: React.FC = () => {
     const newSession: ChatSession = {
       id: Date.now().toString(),
       groupId: groupId,
-      name: `对话 ${groupSessions.length + 1}`,
+      name: `${t('对话')} ${groupSessions.length + 1}`,
       messages: [],
       lastUpdated: Date.now(),
       isAutoRenamed: false,
@@ -453,12 +460,12 @@ const App: React.FC = () => {
   // --- TTS FUNCTIONS ---
 
   // Initialize TTS callback
+  const processNextInTTSQueueRef = useRef<() => void>(() => {});
   useEffect(() => {
     setPlaybackStateCallback((playing) => {
       setIsTTSPlaying(playing);
       if (!playing) {
-        // Playback ended, process queue if in auto-play mode
-        processNextInTTSQueue();
+        processNextInTTSQueueRef.current();
       }
     });
   }, []);
@@ -597,6 +604,8 @@ const App: React.FC = () => {
     }
   };
 
+  processNextInTTSQueueRef.current = processNextInTTSQueue;
+
   // Start continuous playback from a specific message
   const handleStartTTSFromMessage = (startMessageId: string) => {
     const ttsSettings = settings.ttsSettings;
@@ -663,14 +672,14 @@ const App: React.FC = () => {
     const provider = providers.find(p => p.id === providerId);
     const model = provider?.models.find(m => m.id === modelId);
 
-    const newAgentName = model?.name || modelId || '新角色';
+    const newAgentName = model?.name || modelId || 'New Agent';
     const newAgent: Agent = {
       id: Date.now().toString(),
       name: newAgentName,
       avatar: getAvatarForModel(modelId, provider?.name || ''),
       providerId: providerId,
       modelId: modelId,
-      systemPrompt: '你是一个乐于助人的群聊参与者。',
+      systemPrompt: t('你是一个乐于助人的群聊参与者。'),
       color: 'bg-gray-600',
       config: { temperature: 0.7, maxTokens: 2000, enableReasoning: false, reasoningBudget: 0 },
       role: AgentRole.MEMBER
@@ -681,7 +690,7 @@ const App: React.FC = () => {
     const joinMessage: Message = {
       id: `join-${Date.now()}`,
       senderId: 'system',
-      text: `${newAgentName} 加入了群聊`,
+      text: `${newAgentName} ${t('加入了群聊')}`,
       timestamp: Date.now(),
       isSystem: true
     };
@@ -730,7 +739,7 @@ const App: React.FC = () => {
     const joinMessage: Message = {
       id: `join-${Date.now()}`,
       senderId: 'system',
-      text: `${agent.name || '新成员'} 加入了群组`,
+      text: `${agent.name || t('新成员')} ${t('加入了群组')}`,
       timestamp: Date.now(),
       isSystem: true
     };
@@ -761,8 +770,8 @@ const App: React.FC = () => {
       id: `admin-${Date.now()}`,
       senderId: 'system',
       text: isNowAdmin
-        ? `${agent.name} 被设为群管理员`
-        : `${agent.name} 的管理员权限已撤销`,
+        ? `${agent.name} ${t('被设为群管理员')}`
+        : `${agent.name} ${t('的管理员权限已撤销')}`,
       timestamp: Date.now(),
       isSystem: true
     };
@@ -771,10 +780,10 @@ const App: React.FC = () => {
 
   // Format duration for display
   const formatDuration = (minutes: number): string => {
-    if (minutes === 0) return '永久';
-    if (minutes < 60) return `${minutes}分钟`;
-    if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}小时`;
-    return `${Math.floor(minutes / (60 * 24))}天`;
+    if (minutes === 0) return t('永久');
+    if (minutes < 60) return `${minutes}${t('分钟')}`;
+    if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}${t('小时')}`;
+    return `${Math.floor(minutes / (60 * 24))}${t('天')}`;
   };
 
   const handleMuteAgent = (agentId: string, durationMinutes: number, mutedBy: string) => {
@@ -789,25 +798,25 @@ const App: React.FC = () => {
         if (durationMinutes === 0) {
             // Permanent mute
             muteUntil = 0;
-            messageText = `${mutedBy} 永久禁言了 ${agentName}`;
+            messageText = `${mutedBy} ${t('永久禁言了')} ${agentName}`;
         } else if (existingMute && (existingMute.muteUntil === 0 || existingMute.muteUntil > now)) {
             // Already muted - add time instead of replacing
             const addMs = durationMinutes * 60 * 1000;
             if (existingMute.muteUntil === 0) {
                 // Already permanent, can't add more
                 muteUntil = 0;
-                messageText = `${agentName} 已被永久禁言`;
+                messageText = `${agentName} ${t('已被永久禁言')}`;
             } else {
                 // Add time to existing mute
                 muteUntil = existingMute.muteUntil + addMs;
                 const remainingMs = muteUntil - now;
                 const remainingMins = Math.ceil(remainingMs / 60000);
-                messageText = `${mutedBy} 追加了 ${agentName} 的禁言时间 +${formatDuration(durationMinutes)}（剩余 ${formatDuration(remainingMins)}）`;
+                messageText = `${mutedBy} ${t('追加了')} ${agentName} ${t('的禁言时间')} +${formatDuration(durationMinutes)}${t('（剩余')} ${formatDuration(remainingMins)}${t('）')}`;
             }
         } else {
             // New mute
             muteUntil = now + durationMinutes * 60 * 1000;
-            messageText = `${mutedBy} 禁言了 ${agentName}（${formatDuration(durationMinutes)}）`;
+            messageText = `${mutedBy} ${t('禁言了')} ${agentName}${t('（')}${formatDuration(durationMinutes)}${t('）')}`;
         }
 
         const newMutedAgents = [...(s.mutedAgents || []).filter(m => m.agentId !== agentId), {
@@ -843,7 +852,7 @@ const App: React.FC = () => {
         const sysMsg: Message = {
             id: Date.now().toString(),
             senderId: 'SYSTEM',
-            text: `${settings.userName || 'User'} 解除了 ${agentName} 的禁言`,
+            text: `${settings.userName || 'User'} ${t('解除了')} ${agentName} ${t('的禁言')}`,
             timestamp: Date.now(),
             isSystem: true
         };
@@ -860,53 +869,54 @@ const App: React.FC = () => {
 
   // Check for expired mutes every minute
   useEffect(() => {
+    const sessionId = activeSessionId;
     const checkExpiredMutes = () => {
-      const now = Date.now();
-      const mutedAgents = activeSession.mutedAgents || [];
-      const expiredMutes = mutedAgents.filter(m => m.muteUntil !== 0 && m.muteUntil <= now);
+      setSessions(prev => prev.map(s => {
+        if (s.id !== sessionId) return s;
+        const now = Date.now();
+        const mutedAgents = s.mutedAgents || [];
+        const expiredMutes = mutedAgents.filter(m => m.muteUntil !== 0 && m.muteUntil <= now);
+        if (expiredMutes.length === 0) return s;
 
-      if (expiredMutes.length > 0) {
-        updateActiveSession(s => {
-          const expiredIds = expiredMutes.map(m => m.agentId);
-          const expiredNames = expiredMutes.map(m => agents.find(a => a.id === m.agentId)?.name || 'Unknown');
-
-          const sysMsg: Message = {
-            id: Date.now().toString(),
-            senderId: 'SYSTEM',
-            text: `${expiredNames.join('、')} 的禁言已到期，已自动解除`,
-            timestamp: Date.now(),
-            isSystem: true
-          };
-
-          return {
-            ...s,
-            mutedAgentIds: (s.mutedAgentIds || []).filter(id => !expiredIds.includes(id)),
-            mutedAgents: (s.mutedAgents || []).filter(m => !expiredIds.includes(m.agentId)),
-            messages: [...s.messages, sysMsg]
-          };
-        });
-      }
+        const expiredIds = expiredMutes.map(m => m.agentId);
+        const expiredNames = expiredMutes.map(m => agents.find(a => a.id === m.agentId)?.name || 'Unknown');
+        const sysMsg: Message = {
+          id: Date.now().toString(),
+          senderId: 'SYSTEM',
+          text: `${expiredNames.join(t('、'))} ${t('的禁言已到期，已自动解除')}`,
+          timestamp: Date.now(),
+          isSystem: true
+        };
+        return {
+          ...s,
+          mutedAgentIds: (s.mutedAgentIds || []).filter(id => !expiredIds.includes(id)),
+          mutedAgents: mutedAgents.filter(m => !expiredIds.includes(m.agentId)),
+          messages: [...s.messages, sysMsg]
+        };
+      }));
     };
 
-    const interval = setInterval(checkExpiredMutes, 60000); // Check every minute
-    checkExpiredMutes(); // Also check immediately
+    const interval = setInterval(checkExpiredMutes, 60000);
+    checkExpiredMutes();
 
     return () => clearInterval(interval);
-  }, [activeSession.mutedAgents, agents]);
+  }, [activeSessionId, agents]);
 
   // --- AUTO-NAMING LOGIC ---
+  const autoRenameAttempts = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     const checkAndRename = async () => {
       const chatMsgs = activeSession.messages.filter(m => !m.isSystem);
-      if (chatMsgs.length >= 2 && !activeSession.isAutoRenamed && providers.length > 0) {
-        console.log("[Auto-Rename] Triggering for session:", activeSessionId, "with", chatMsgs.length, "messages");
+      const attempts = autoRenameAttempts.current.get(activeSessionId) || 0;
+      if (chatMsgs.length >= 2 && !activeSession.isAutoRenamed && providers.length > 0 && attempts < 3) {
+        autoRenameAttempts.current.set(activeSessionId, attempts + 1);
+        console.log("[Auto-Rename] Triggering for session:", activeSessionId, `(attempt ${attempts + 1}/3)`);
         const newName = await generateSessionName(chatMsgs, providers, agents);
         console.log("[Auto-Rename] Generated name:", newName);
         if (newName) {
-          // Only mark as auto-renamed if we actually got a valid name
           setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, name: newName, isAutoRenamed: true } : s));
+          autoRenameAttempts.current.delete(activeSessionId);
         }
-        // If newName is null (no provider with credentials), don't mark as renamed so it can retry later
       }
     };
     checkAndRename();
@@ -979,7 +989,9 @@ const App: React.FC = () => {
             // Take recent messages (from last summary point)
             let recent = activeSession.messages.slice(lastCount);
             if (conf.excludePM) {
+              const beforeCount = recent.length;
               recent = recent.filter(m => !m.pmTargetId);
+              console.log(`[Summary] excludePM: filtered ${beforeCount - recent.length} PM messages (${beforeCount} → ${recent.length})`);
             }
             const notes = activeSession.adminNotes;
 
@@ -992,7 +1004,8 @@ const App: React.FC = () => {
                     recent,
                     provider,
                     conf.summaryModelId,
-                    agents
+                    agents,
+                    conf.excludePM
                 );
 
                 if (newSummary) {
@@ -1068,7 +1081,7 @@ const App: React.FC = () => {
       console.log(`[${agentName}] ❌ Error: provider not found`);
       pendingTriggerRef.current.delete(agentId); // Clear pending on error
       updateActiveSessionMessages(prev => [...prev, {
-        id: Date.now().toString(), senderId: agent.id, text: `[${formatErrorTimestamp()}] [系统错误] 找不到供应商配置。`, timestamp: Date.now(), isError: true
+        id: Date.now().toString(), senderId: agent.id, text: `[${formatErrorTimestamp()}] [${t('系统错误')}] ${t('找不到供应商配置。')}`, timestamp: Date.now(), isError: true
       }]);
       return;
     }
@@ -1136,8 +1149,8 @@ const App: React.FC = () => {
                     messages: s.messages.map(m => m.id === newMessageId ? {
                         ...m, isError: true, isStreaming: false,
                         text: partialOutputText
-                            ? `${partialOutputText}\n\n[${formatErrorTimestamp()}] [系统: 响应超时，输出被截断]`
-                            : `[${formatErrorTimestamp()}] [系统: 响应超时 (${settings.timeoutDuration/1000}s)]`
+                            ? `${partialOutputText}\n\n[${formatErrorTimestamp()}] [${t('系统: 响应超时，输出被截断')}]`
+                            : `[${formatErrorTimestamp()}] [${t('系统: 响应超时')} (${settings.timeoutDuration/1000}s)]`
                     } : m)
                 }));
 
@@ -1146,8 +1159,8 @@ const App: React.FC = () => {
                     id: `recovery-${Date.now()}`,
                     senderId: 'system',
                     text: partialOutputText
-                        ? `[系统提示] ${agent.name} 由于网络问题输出被截断。它的未完成输出已显示在上方。请其他成员继续当前话题。`
-                        : `[系统提示] 一个未知错误打断了对话。请继续当下的讨论。`,
+                        ? `[${t('系统提示')}] ${agent.name} ${t('由于网络问题输出被截断。它的未完成输出已显示在上方。请其他成员继续当前话题。')}`
+                        : `[${t('系统提示')}] ${t('一个未知错误打断了对话。请继续当下的讨论。')}`,
                     timestamp: Date.now(),
                     isSystem: true
                 };
@@ -1173,7 +1186,7 @@ const App: React.FC = () => {
       if (debateCfg?.turnMode === 'debate' && debateCfg.assignments.length > 0) {
         const myAssignment = debateCfg.assignments.find(a => a.agentId === agentId);
         if (myAssignment) {
-          const sideLabel = myAssignment.side === 'pro' ? '正方' : '反方';
+          const sideLabel = myAssignment.side === 'pro' ? t('正方') : t('反方');
           const proMembers = debateCfg.assignments
             .filter(a => a.side === 'pro').sort((a, b) => a.order - b.order)
             .map(a => { const ag = agents.find(x => x.id === a.agentId); return ag ? `${a.order}. ${ag.name}` : null; })
@@ -1182,7 +1195,7 @@ const App: React.FC = () => {
             .filter(a => a.side === 'con').sort((a, b) => a.order - b.order)
             .map(a => { const ag = agents.find(x => x.id === a.agentId); return ag ? `${a.order}. ${ag.name}` : null; })
             .filter(Boolean).join(', ');
-          scenario += `\n\n[辩论模式]\n当前为辩论模式，你被分配为【${sideLabel}第${myAssignment.order}号辩手】。\n正方成员: ${proMembers}\n反方成员: ${conMembers}\n请站在${sideLabel}的立场进行论述，与对方阵营展开辩论。发言顺序为正反方交替。`;
+          scenario += `\n\n[${t('辩论模式')}]\n${t('当前为辩论模式，你被分配为')}【${sideLabel}${t('第')}${myAssignment.order}${t('号辩手')}】。\n${t('正方成员')}: ${proMembers}\n${t('反方成员')}: ${conMembers}\n${t('请站在')}${sideLabel}${t('的立场进行论述，与对方阵营展开辩论。发言顺序为正反方交替。')}`;
         }
       }
 
@@ -1239,8 +1252,8 @@ const App: React.FC = () => {
               } catch (err) {
                 console.error(`[VisionProxy] Failed to describe image ${msgId}-${idx}:`, err);
                 const key = `${msgId}-${idx}`;
-                imageDescriptions.set(key, '[图片描述失败]');
-                newDescriptions.set(key, '[图片描述失败]');
+                imageDescriptions.set(key, `[${t('图片描述失败')}]`);
+                newDescriptions.set(key, `[${t('图片描述失败')}]`);
               }
             }
 
@@ -1277,7 +1290,7 @@ const App: React.FC = () => {
                   return {
                     ...att,
                     type: 'document' as const,
-                    textContent: `[图片${idx + 1}内容描述]\n${imageDescriptions.get(key)}\n[描述结束]`
+                    textContent: `[${t('图片')}${idx + 1}${t('内容描述')}]\n${imageDescriptions.get(key)}\n[${t('描述结束')}]`
                   };
                 }
                 return att;
@@ -1737,7 +1750,7 @@ const App: React.FC = () => {
             const errorMsg: Message = {
               id: `search-error-${Date.now()}`,
               senderId: 'SYSTEM',
-              text: `[${formatErrorTimestamp()}] 搜索失败: ${searchError.message || '网络请求错误'}`,
+              text: `[${formatErrorTimestamp()}] ${t('搜索失败')}: ${searchError.message || t('网络请求错误')}`,
               timestamp: Date.now(),
               isSystem: true
             };
@@ -1797,13 +1810,13 @@ const App: React.FC = () => {
       }
       else {
           // All other errors - show in chat and keep the message
-          const errorMsg = error.message || '未知错误';
+          const errorMsg = error.message || t('未知错误');
           console.error(`[${agent.name}] 💬 Showing error in chat:`, errorMsg);
           updateThisSession(s => ({
               ...s,
               messages: s.messages.map(m => m.id === newMessageId ? {
                   ...m,
-                  text: m.text ? `${m.text}\n\n[${formatErrorTimestamp()}] [错误: ${errorMsg}]` : `[${formatErrorTimestamp()}] [错误: ${errorMsg}]`,
+                  text: m.text ? `${m.text}\n\n[${formatErrorTimestamp()}] [${t('错误')}: ${errorMsg}]` : `[${formatErrorTimestamp()}] [${t('错误')}: ${errorMsg}]`,
                   isError: true,
                   isStreaming: false
               } : m)
@@ -1905,7 +1918,7 @@ const App: React.FC = () => {
         const errorMsg: Message = {
           id: Date.now().toString(),
           senderId: 'SYSTEM',
-          text: `[${formatErrorTimestamp()}] 无法执行搜索：没有配置搜索工具的角色。请在侧边栏的角色设置中启用搜索功能。`,
+          text: `[${formatErrorTimestamp()}] ${t('无法执行搜索：没有配置搜索工具的角色。请在侧边栏的角色设置中启用搜索功能。')}`,
           timestamp: Date.now(),
           isSystem: true
         };
@@ -1922,7 +1935,7 @@ const App: React.FC = () => {
       const searchingMsg: Message = {
         id: `search-${Date.now()}`,
         senderId: 'SYSTEM',
-        text: `🔍 ${searchAgent.name} 正在搜索: "${query}"...`,
+        text: `🔍 ${searchAgent.name} ${t('正在搜索')}: "${query}"...`,
         timestamp: Date.now(),
         isSystem: true
       };
@@ -1933,30 +1946,44 @@ const App: React.FC = () => {
       }));
 
       // 执行搜索
-      const searchResponse = await performSearch(query, searchAgent.searchConfig);
+      try {
+        const searchResponse = await performSearch(query, searchAgent.searchConfig);
 
-      // 移除"搜索中"的消息，添加搜索结果
-      const resultText = formatSearchResultsForDisplay(searchResponse);
-      const contextText = formatSearchResultsForContext(searchResponse);
+        const resultText = formatSearchResultsForDisplay(searchResponse);
 
-      const searchResultMsg: Message = {
-        id: `search-result-${Date.now()}`,
-        senderId: searchAgent.id,
-        text: resultText,
-        timestamp: Date.now(),
-        isSearchResult: true,
-        searchQuery: query
-      };
+        const searchResultMsg: Message = {
+          id: `search-result-${Date.now()}`,
+          senderId: searchAgent.id,
+          text: resultText,
+          timestamp: Date.now(),
+          isSearchResult: true,
+          searchQuery: query
+        };
 
-      updateActiveSession(s => ({
-        ...s,
-        messages: s.messages
-          .filter(m => m.id !== searchingMsg.id)
-          .concat([searchResultMsg]),
-        lastUpdated: Date.now(),
-        yieldedAgentIds: [],
-        yieldedAtCount: undefined
-      }));
+        updateActiveSession(s => ({
+          ...s,
+          messages: s.messages
+            .filter(m => m.id !== searchingMsg.id)
+            .concat([searchResultMsg]),
+          lastUpdated: Date.now(),
+          yieldedAgentIds: [],
+          yieldedAtCount: undefined
+        }));
+      } catch (searchErr: any) {
+        const errMsg: Message = {
+          id: `search-err-${Date.now()}`,
+          senderId: 'SYSTEM',
+          text: `[${formatErrorTimestamp()}] ${t('搜索失败')}: ${searchErr.message || searchErr}`,
+          timestamp: Date.now(),
+          isSystem: true,
+          isError: true
+        };
+        updateActiveSession(s => ({
+          ...s,
+          messages: s.messages.filter(m => m.id !== searchingMsg.id).concat([errMsg]),
+          lastUpdated: Date.now()
+        }));
+      }
 
       setInputText('');
       setShowMentionPopup(false);
@@ -2060,7 +2087,7 @@ const App: React.FC = () => {
         setAttachments(prev => [...prev, ...newAttachments]);
     } catch (err) {
         console.error("Failed to parse file", err);
-        alert("文件解析失败");
+        alert(t("文件解析失败"));
     } finally {
         setIsParsingFile(false);
     }
@@ -2109,7 +2136,7 @@ const App: React.FC = () => {
       setAttachments(prev => [...prev, ...newAttachments]);
     } catch (err) {
       console.error("Failed to parse file", err);
-      alert("文件解析失败");
+      alert(t("文件解析失败"));
     } finally {
       setIsParsingFile(false);
     }
@@ -2457,9 +2484,45 @@ const App: React.FC = () => {
   }, [isAutoPlay, messages, agents, processingAgents, triggerAgentReply, settings.breathingTime, settings.enableConcurrency, activeSession.mutedAgentIds, activeSession.yieldedAgentIds, activeSession.yieldedAtCount]);
 
 
+  const tt = useT();
+
   if (!isDbLoaded) {
       return <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-gray-400">
-          <RefreshCw className="animate-spin mr-2"/> 正在从本地数据库恢复数据...
+          <div className="flex flex-col items-center gap-4 max-w-md text-center">
+            {dbError ? (
+              <>
+                <X className="w-8 h-8 text-red-400" />
+                <p className="text-red-400 font-medium">{tt('数据库加载失败')}</p>
+                <p className="text-sm text-gray-400">{dbError}</p>
+                <div className="flex gap-3 mt-2">
+                  <button
+                    onClick={() => { setDbError(null); location.reload(); }}
+                    className="px-4 py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-gray-200 text-sm"
+                  >
+                    {tt('重试')}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (confirm(t('确定要清空所有数据吗？聊天记录、Agent 配置等都会被删除。'))) {
+                        const { Dexie } = await import('dexie');
+                        await Dexie.delete('AIObserverDB');
+                        location.reload();
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-gray-200 text-sm"
+                  >
+                    {tt('重置数据库')}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">{tt('如果是其它标签页阻塞了数据库升级，关掉所有本站标签页后重试即可')}</p>
+              </>
+            ) : (
+              <>
+                <RefreshCw className="animate-spin" />
+                <span>{tt('正在从本地数据库恢复数据...')}</span>
+              </>
+            )}
+          </div>
       </div>;
   }
 
@@ -2469,6 +2532,7 @@ const App: React.FC = () => {
     : [];
 
   return (
+    <I18nProvider locale={settings.language || 'zh'}>
     <div className="flex h-screen bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-gray-100 font-sans selection:bg-gray-200 dark:selection:bg-zinc-700">
       
       {/* Backdrop for mobile sidebars */}
@@ -2575,7 +2639,7 @@ const App: React.FC = () => {
           <div className="absolute inset-0 z-50 bg-blue-500/10 border-2 border-dashed border-blue-500 rounded-lg flex items-center justify-center backdrop-blur-sm pointer-events-none">
             <div className="bg-white px-6 py-4 rounded-xl shadow-lg border border-blue-200 flex items-center gap-3">
               <Paperclip size={24} className="text-blue-500" />
-              <span className="text-blue-600 font-medium">松开以上传文件</span>
+              <span className="text-blue-600 font-medium">{tt('松开以上传文件')}</span>
             </div>
           </div>
         )}
@@ -2590,8 +2654,8 @@ const App: React.FC = () => {
              <div className="flex items-center gap-1.5 sm:gap-2">
                  <img src="/logo.png" alt="Logo" className="w-6 h-6 sm:w-8 sm:h-8 object-contain" onError={(e) => e.currentTarget.style.display = 'none'} />
                  <h1 className="font-bold text-sm sm:text-base text-gray-900 dark:text-white flex items-center gap-1 sm:gap-2">
-                    <span className="hidden sm:inline">AI群聊观察会</span>
-                    <span className="sm:hidden">群聊</span>
+                    <span className="hidden sm:inline">{tt('AI群聊观察会')}</span>
+                    <span className="sm:hidden">{tt('群聊')}</span>
                     <span className="hidden min-[400px]:inline text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-zinc-700 rounded text-gray-500 dark:text-gray-400 font-medium">V5</span>
                  </h1>
              </div>
@@ -2609,7 +2673,7 @@ const App: React.FC = () => {
             <button
                onClick={() => setSettings(s => ({ ...s, expandAllReasoning: !s.expandAllReasoning }))}
                className={`p-1.5 rounded-lg transition-colors ${settings.expandAllReasoning ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
-               title={settings.expandAllReasoning ? "折叠所有思考链" : "展开所有思考链"}
+               title={settings.expandAllReasoning ? tt("折叠所有思考链") : tt("展开所有思考链")}
             >
               <BrainCircuit size={18} />
             </button>
@@ -2619,7 +2683,7 @@ const App: React.FC = () => {
               <button
                 onClick={handleToggleTTSAutoPlay}
                 className={`p-1.5 rounded-lg transition-colors ${ttsAutoPlayMode ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-white'}`}
-                title={ttsAutoPlayMode ? "停止自动朗读" : "自动朗读新消息"}
+                title={ttsAutoPlayMode ? tt("停止自动朗读") : tt("自动朗读新消息")}
               >
                 {ttsAutoPlayMode ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
@@ -2628,7 +2692,7 @@ const App: React.FC = () => {
             <button
                onClick={() => setIsStatsOpen(true)}
                className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-               title="会话统计"
+               title={tt("会话统计")}
             >
               <BarChart3 size={18} />
             </button>
@@ -2636,7 +2700,7 @@ const App: React.FC = () => {
             <button
                onClick={handleClearMessages}
                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-               title="清空记录"
+               title={tt("清空记录")}
             >
               <Trash size={18} />
             </button>
@@ -2651,7 +2715,7 @@ const App: React.FC = () => {
                 }
               `}
             >
-              {isAutoPlay ? <><Pause size={16}/> <span className="hidden sm:inline">暂停</span></> : <><Play size={16}/> <span className="hidden sm:inline">开始</span></>}
+              {isAutoPlay ? <><Pause size={16}/> <span className="hidden sm:inline">{tt('暂停')}</span></> : <><Play size={16}/> <span className="hidden sm:inline">{tt('开始')}</span></>}
             </button>
 
             <div className="hidden sm:block h-4 w-px bg-gray-200 dark:bg-zinc-700 mx-1"></div>
@@ -2660,7 +2724,7 @@ const App: React.FC = () => {
             <button
                onClick={() => handleCreateSession(activeGroupId)}
                className="hidden sm:flex p-2 items-center justify-center bg-transparent dark:bg-white text-gray-600 dark:text-zinc-900 hover:bg-gray-100 dark:hover:bg-gray-100 rounded-lg transition-colors"
-               title="新建对话"
+               title={tt("新建对话")}
             >
               <Plus size={20} />
             </button>
@@ -2668,7 +2732,7 @@ const App: React.FC = () => {
             <button
                onClick={() => setIsRightSidebarOpen(true)}
                className="p-2.5 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-lg transition-colors relative"
-               title="成员管理"
+               title={tt("成员管理")}
             >
               <Users size={22} />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-white dark:ring-zinc-800"></span>
@@ -2683,8 +2747,8 @@ const App: React.FC = () => {
                 <div className="w-16 h-16 bg-white dark:bg-zinc-800 rounded-2xl border border-gray-200 dark:border-zinc-700 flex items-center justify-center mb-4 shadow-sm">
                   <MessageSquare size={32} className="text-gray-300 dark:text-gray-600" />
                 </div>
-                <p className="text-gray-500 dark:text-gray-400 font-medium">{activeSession.name} 暂无消息</p>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">请在左侧侧边栏配置模型和剧本，或直接开始聊天。</p>
+                <p className="text-gray-500 dark:text-gray-400 font-medium">{activeSession.name} {tt('暂无消息')}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{tt('请在左侧侧边栏配置模型和剧本，或直接开始聊天。')}</p>
              </div>
            )}
            
@@ -2720,7 +2784,7 @@ const App: React.FC = () => {
               setIsNearBottom(true);
             }}
             className="absolute bottom-28 right-6 bg-zinc-900 dark:bg-zinc-700 text-white p-3 rounded-full shadow-lg hover:bg-black dark:hover:bg-zinc-600 transition-all hover:scale-105 z-30 animate-in fade-in slide-in-from-bottom-2 duration-200"
-            title="回到底部"
+            title={tt("回到底部")}
           >
             <ArrowDown size={20} />
           </button>
@@ -2759,7 +2823,7 @@ const App: React.FC = () => {
                         `}
                       >
                         <img src={agent.avatar} className="w-3.5 h-3.5 rounded-full object-contain bg-white border border-gray-100 dark:border-zinc-600"/>
-                        {agent.name} {isYielded && '(放弃)'}
+                        {agent.name} {isYielded && tt('(放弃)')}
                       </button>
                     );
                   })}
@@ -2770,7 +2834,7 @@ const App: React.FC = () => {
             {replyToId && (
               <div className="flex items-center justify-between bg-gray-50 dark:bg-zinc-700 px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-600 text-xs text-gray-600 dark:text-gray-300">
                  <div className="flex items-center gap-2 truncate">
-                    <div className="font-bold text-zinc-800 dark:text-white">回复</div>
+                    <div className="font-bold text-zinc-800 dark:text-white">{tt('回复')}</div>
                     <div className="truncate max-w-[300px]">{messages.find(m => m.id === replyToId)?.text}</div>
                  </div>
                  <button onClick={() => setReplyToId(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={14} /></button>
@@ -2781,9 +2845,9 @@ const App: React.FC = () => {
             {pmTargetId && (
               <div className="flex items-center justify-between bg-purple-50 dark:bg-purple-900/30 px-3 py-2 rounded-lg border border-purple-200 dark:border-purple-700 text-xs text-purple-600 dark:text-purple-300">
                  <div className="flex items-center gap-2">
-                    <div className="font-bold">私讯</div>
-                    <div>→ {sessionMembers.find(a => a.id === pmTargetId)?.name || '未知'}</div>
-                    <div className="text-purple-400 text-[10px]">仅该成员可见</div>
+                    <div className="font-bold">{tt('私讯')}</div>
+                    <div>→ {sessionMembers.find(a => a.id === pmTargetId)?.name || tt('未知')}</div>
+                    <div className="text-purple-400 text-[10px]">{tt('仅该成员可见')}</div>
                  </div>
                  <button onClick={() => setPmTargetId(null)} className="text-purple-400 hover:text-purple-600 dark:hover:text-purple-200"><X size={14} /></button>
               </div>
@@ -2796,19 +2860,19 @@ const App: React.FC = () => {
                   <div key={idx} className="flex items-center gap-2 bg-gray-50 dark:bg-zinc-700 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-zinc-600 text-xs text-gray-600 dark:text-gray-300">
                     {att.type === 'image' ? <ImageIcon size={12} className="text-blue-500" /> : <FileText size={12} className="text-orange-500" />}
                     <span className="text-zinc-800 dark:text-white max-w-[100px] truncate">
-                      {att.type === 'image' ? `图片${idx + 1}` : att.fileName}
+                      {att.type === 'image' ? `${tt('图片')}${idx + 1}` : att.fileName}
                     </span>
                     <button onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500"><X size={12} /></button>
                   </div>
                 ))}
-                <button onClick={() => setAttachments([])} className="text-xs text-gray-400 hover:text-red-500 px-2">清空全部</button>
+                <button onClick={() => setAttachments([])} className="text-xs text-gray-400 hover:text-red-500 px-2">{tt('清空全部')}</button>
               </div>
             )}
 
             {/* Loading Indicator for File Parsing */}
             {isParsingFile && (
                <div className="text-xs text-blue-500 flex items-center gap-1">
-                 <RefreshCw size={10} className="animate-spin" /> 解析文件中...
+                 <RefreshCw size={10} className="animate-spin" /> {tt('解析文件中...')}
                </div>
             )}
 
@@ -2816,7 +2880,7 @@ const App: React.FC = () => {
             {showMentionPopup && (mentionFilteredAgents.length > 0 || mentionQuery === '' || '全体成员'.includes(mentionQuery)) && (
                 <div className="absolute bottom-full left-4 mb-2 bg-white dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-64 max-h-48 overflow-y-auto z-50">
                    <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-800">
-                       提及成员 (@)
+                       {tt('提及成员 (@)')}
                    </div>
                    {/* @全体成员 option */}
                    {(mentionQuery === '' || '全体成员'.includes(mentionQuery) || 'all'.includes(mentionQuery.toLowerCase())) && (
@@ -2827,8 +2891,8 @@ const App: React.FC = () => {
                            `}
                        >
                            <Users size={16} className="text-blue-500" />
-                           <span className="font-medium">全体成员</span>
-                           <span className="text-xs text-gray-400 ml-auto">随机顺序</span>
+                           <span className="font-medium">{tt('全体成员')}</span>
+                           <span className="text-xs text-gray-400 ml-auto">{tt('随机顺序')}</span>
                        </button>
                    )}
                    {mentionFilteredAgents.map((agent, index) => (
@@ -2850,7 +2914,7 @@ const App: React.FC = () => {
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf,.doc,.docx,.txt,.md,.js,.ts,.py,.json" onChange={handleFileSelect} multiple />
 
               {/* File Upload Button */}
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors z-10" title="上传文件 (图片/文档)">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors z-10" title={tt("上传文件 (图片/文档)")}>
                 <Paperclip size={18} />
               </button>
 
@@ -2861,21 +2925,21 @@ const App: React.FC = () => {
                     type="button"
                     onClick={() => setShowPmPopup(!showPmPopup)}
                     className={`transition-colors ${pmTargetId ? 'text-purple-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
-                    title="发送私讯"
+                    title={tt("发送私讯")}
                   >
                     <MessageSquare size={16} />
                   </button>
                   {showPmPopup && (
                     <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-52 max-h-48 overflow-y-auto z-50">
                       <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-800">
-                        选择私讯目标
+                        {tt('选择私讯目标')}
                       </div>
                       {pmTargetId && (
                         <button
                           onClick={() => { setPmTargetId(null); setShowPmPopup(false); }}
                           className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors border-b border-gray-50 dark:border-zinc-700"
                         >
-                          取消私讯
+                          {tt('取消私讯')}
                         </button>
                       )}
                       {sessionMembers.map(agent => (
@@ -2888,7 +2952,7 @@ const App: React.FC = () => {
                         >
                           <img src={agent.avatar} className="w-5 h-5 rounded-full border border-gray-100 dark:border-zinc-600 object-contain"/>
                           <span>{agent.name}</span>
-                          {pmTargetId === agent.id && <span className="ml-auto text-[9px] bg-purple-500 text-white px-1 rounded">当前</span>}
+                          {pmTargetId === agent.id && <span className="ml-auto text-[9px] bg-purple-500 text-white px-1 rounded">{tt('当前')}</span>}
                         </button>
                       ))}
                     </div>
@@ -2903,12 +2967,12 @@ const App: React.FC = () => {
                 onKeyDown={handleInputKeyDown}
                 placeholder={
                   pmTargetId
-                    ? `私讯给 ${sessionMembers.find(a => a.id === pmTargetId)?.name || ''}...`
+                    ? `${tt('私讯给')} ${sessionMembers.find(a => a.id === pmTargetId)?.name || ''}...`
                     : settings.activeProfileId === 'narrator'
-                    ? '以旁白身份发言... (系统消息样式)'
+                    ? tt('以旁白身份发言... (系统消息样式)')
                     : processingAgents.size > 0
-                      ? "AI正在输入中..."
-                      : `在 "${activeSession.name}" 发言... (Enter发送, Shift+Enter换行)`
+                      ? tt("AI正在输入中...")
+                      : `${tt('在')} "${activeSession.name}" ${tt('发言... (Enter发送, Shift+Enter换行)')}`
                 }
                 rows={1}
                 className={`w-full bg-gray-50 dark:bg-zinc-700 border rounded-xl px-4 py-3.5 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-y-auto ${
@@ -2924,6 +2988,7 @@ const App: React.FC = () => {
         </div>
       </div>
     </div>
+    </I18nProvider>
   );
 };
 

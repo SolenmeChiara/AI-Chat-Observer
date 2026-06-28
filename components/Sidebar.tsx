@@ -1,10 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider, UserProfile } from '../types';
-import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles } from 'lucide-react';
+import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles, Download } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
+import { useT } from '../i18n';
 
 // TTS Settings Panel Component
 const TTSSettingsPanel: React.FC<{
@@ -15,6 +16,7 @@ const TTSSettingsPanel: React.FC<{
   ttsProviders: TTSProvider[];
   setTTSProviders: React.Dispatch<React.SetStateAction<TTSProvider[]>>;
 }> = ({ settings, setSettings, agents, setAgents, ttsProviders, setTTSProviders }) => {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(true);
   const [browserVoices, setBrowserVoices] = useState<TTSVoice[]>([]);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
@@ -127,12 +129,12 @@ const TTSSettingsPanel: React.FC<{
       const voices = await fetchProviderVoices(activeProvider);
       if (voices && voices.length > 0) {
         updateProvider(activeProvider.id, { voices });
-        alert(`成功获取 ${voices.length} 个音色`);
+        alert(`${t('成功获取')} ${voices.length} ${t('个音色')}`);
       } else {
-        alert('此服务商不支持自动获取音色，请手动添加');
+        alert(t('此服务商不支持自动获取音色，请手动添加'));
       }
     } catch (err: any) {
-      alert(`获取音色失败: ${err.message}`);
+      alert(`${t('获取音色失败')}: ${err.message}`);
     } finally {
       setFetchingVoices(false);
     }
@@ -148,7 +150,7 @@ const TTSSettingsPanel: React.FC<{
         onClick={() => setCollapsed(!collapsed)}
       >
         <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
-          <Volume2 size={16}/> 语音朗读 (TTS)
+          <Volume2 size={16}/> {t('语音朗读 (TTS)')}
         </h3>
         <div className="flex items-center gap-2">
           <input
@@ -166,7 +168,7 @@ const TTSSettingsPanel: React.FC<{
           <>
             {/* Provider Selection */}
             <div>
-              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">TTS 服务商</label>
+              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">{t('TTS 服务商')}</label>
               <div className="flex gap-1">
                 <select
                   className="flex-1 text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
@@ -175,14 +177,14 @@ const TTSSettingsPanel: React.FC<{
                 >
                   {ttsProviders.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} {p.pricePer1MChars ? `($${p.pricePer1MChars}/1M)` : '(免费)'}
+                      {p.name} {p.pricePer1MChars ? `($${p.pricePer1MChars}/1M)` : `(${t('免费')})`}
                     </option>
                   ))}
                 </select>
                 <button
                   onClick={() => setShowAddProvider(!showAddProvider)}
                   className="px-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-xs"
-                  title="添加自定义服务商"
+                  title={t('添加自定义服务商')}
                 >
                   <Plus size={14} />
                 </button>
@@ -190,7 +192,7 @@ const TTSSettingsPanel: React.FC<{
                   <button
                     onClick={() => handleRemoveProvider(activeProvider.id)}
                     className="px-2 bg-red-500 text-white rounded-lg text-xs"
-                    title="删除此服务商"
+                    title={t('删除此服务商')}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -204,11 +206,11 @@ const TTSSettingsPanel: React.FC<{
             {/* Add Custom Provider */}
             {showAddProvider && (
               <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg space-y-2 border border-blue-200 dark:border-blue-800">
-                <div className="text-xs font-medium text-blue-700 dark:text-blue-300">添加自定义 TTS 服务商</div>
+                <div className="text-xs font-medium text-blue-700 dark:text-blue-300">{t('添加自定义 TTS 服务商')}</div>
                 <input
                   type="text"
                   className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
-                  placeholder="服务商名称"
+                  placeholder={t('服务商名称')}
                   value={newProviderName}
                   onChange={(e) => setNewProviderName(e.target.value)}
                 />
@@ -217,7 +219,7 @@ const TTSSettingsPanel: React.FC<{
                   value={newProviderType}
                   onChange={(e) => setNewProviderType(e.target.value as TTSEngineType)}
                 >
-                  <option value="custom">OpenAI 兼容 (通用)</option>
+                  <option value="custom">{t('OpenAI 兼容 (通用)')}</option>
                   <option value="openai">OpenAI</option>
                   <option value="elevenlabs">ElevenLabs</option>
                   <option value="cartesia">Cartesia</option>
@@ -232,13 +234,13 @@ const TTSSettingsPanel: React.FC<{
                     onClick={handleAddProvider}
                     className="flex-1 text-xs py-1.5 bg-blue-500 text-white rounded"
                   >
-                    添加
+                    {t('添加')}
                   </button>
                   <button
                     onClick={() => setShowAddProvider(false)}
                     className="flex-1 text-xs py-1.5 bg-gray-200 dark:bg-zinc-600 text-gray-700 dark:text-gray-300 rounded"
                   >
-                    取消
+                    {t('取消')}
                   </button>
                 </div>
               </div>
@@ -248,9 +250,9 @@ const TTSSettingsPanel: React.FC<{
             {activeProvider && activeProvider.type !== 'browser' && (
               <div className="bg-gray-50 dark:bg-zinc-700/50 p-3 rounded-lg space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{activeProvider.name} 配置</span>
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{activeProvider.name} {t('配置')}</span>
                   {activeProvider.freeQuota && (
-                    <span className="text-[10px] text-green-600 dark:text-green-400">免费额度: {activeProvider.freeQuota}</span>
+                    <span className="text-[10px] text-green-600 dark:text-green-400">{t('免费额度')}: {activeProvider.freeQuota}</span>
                   )}
                 </div>
 
@@ -268,7 +270,7 @@ const TTSSettingsPanel: React.FC<{
 
                 {/* Base URL (optional) */}
                 <div>
-                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">API 地址 (可选)</label>
+                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">{t('API 地址 (可选)')}</label>
                   <input
                     type="text"
                     className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
@@ -280,7 +282,7 @@ const TTSSettingsPanel: React.FC<{
 
                 {/* Price */}
                 <div>
-                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">价格 ($/百万字符)</label>
+                  <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">{t('价格 ($/百万字符)')}</label>
                   <input
                     type="number"
                     className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
@@ -297,7 +299,7 @@ const TTSSettingsPanel: React.FC<{
                       onClick={() => setExpandedProvider(expandedProvider === activeProvider.id ? null : activeProvider.id)}
                     >
                       <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                        音色管理 ({activeProvider.voices.length} 个)
+                        {t('音色管理')} ({activeProvider.voices.length} {t('个')})
                       </span>
                       {expandedProvider === activeProvider.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     </div>
@@ -306,10 +308,10 @@ const TTSSettingsPanel: React.FC<{
                         onClick={handleFetchVoices}
                         disabled={fetchingVoices}
                         className="text-[10px] px-2 py-0.5 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white rounded flex items-center gap-1"
-                        title="从API获取可用音色"
+                        title={t('从API获取可用音色')}
                       >
                         <RefreshCw size={10} className={fetchingVoices ? 'animate-spin' : ''} />
-                        {fetchingVoices ? '获取中...' : '获取音色'}
+                        {fetchingVoices ? t('获取中...') : t('获取音色')}
                       </button>
                     )}
                   </div>
@@ -339,7 +341,7 @@ const TTSSettingsPanel: React.FC<{
                         <input
                           type="text"
                           className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
-                          placeholder="音色名称"
+                          placeholder={t('音色名称')}
                           value={newVoiceName}
                           onChange={(e) => setNewVoiceName(e.target.value)}
                         />
@@ -366,7 +368,7 @@ const TTSSettingsPanel: React.FC<{
             {/* Speech Rate */}
             <div>
               <div className="flex justify-between text-xs mb-1">
-                <span className="text-gray-600 dark:text-gray-300">语速</span>
+                <span className="text-gray-600 dark:text-gray-300">{t('语速')}</span>
                 <span className="font-mono text-gray-500 dark:text-gray-400">{ttsSettings.rate.toFixed(1)}x</span>
               </div>
               <input
@@ -380,7 +382,7 @@ const TTSSettingsPanel: React.FC<{
             {/* Volume */}
             <div>
               <div className="flex justify-between text-xs mb-1">
-                <span className="text-gray-600 dark:text-gray-300">音量</span>
+                <span className="text-gray-600 dark:text-gray-300">{t('音量')}</span>
                 <span className="font-mono text-gray-500 dark:text-gray-400">{Math.round(ttsSettings.volume * 100)}%</span>
               </div>
               <input
@@ -398,16 +400,16 @@ const TTSSettingsPanel: React.FC<{
                 disabled={availableVoices.length === 0}
                 className="w-full text-xs py-2 px-3 bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-lg transition-colors disabled:opacity-50"
               >
-                🎲 自动为 {agents.length} 个角色分配不同音色
+                🎲 {t('自动为')} {agents.length} {t('个角色分配不同音色')}
               </button>
               <p className="text-[10px] text-gray-400 mt-1">
-                {availableVoices.length} 种音色可用
+                {availableVoices.length} {t('种音色可用')}
               </p>
             </div>
 
             {/* Agent Voice Assignment */}
             <div className="border-t border-gray-200 dark:border-zinc-600 pt-3">
-              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-2">角色音色设置</label>
+              <label className="text-xs text-gray-600 dark:text-gray-300 block mb-2">{t('角色音色设置')}</label>
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {agents.map(agent => (
                   <div key={agent.id} className="flex items-center gap-2">
@@ -424,7 +426,7 @@ const TTSSettingsPanel: React.FC<{
                         ));
                       }}
                     >
-                      <option value="">自动分配</option>
+                      <option value="">{t('自动分配')}</option>
                       {availableVoices.map(v => (
                         <option key={v.id} value={v.id}>{v.name}</option>
                       ))}
@@ -486,6 +488,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onUpdateSummary,
   isOpen, onClose
 }) => {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<'agents' | 'providers' | 'settings' | 'sessions'>('sessions');
   const [isFetching, setIsFetching] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -525,7 +528,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       const oldModelDef = oldProvider?.models.find(m => m.id === currentData.modelId);
 
       const isDefaultName =
-        currentData.name === '新角色' ||
+        currentData.name === 'New Agent' ||
         currentData.name === '' ||
         currentData.name === currentData.modelId ||
         (oldModelDef && currentData.name === oldModelDef.name);
@@ -547,6 +550,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       const targetModelId = updates.modelId || currentData.modelId;
       const p = providers.find(p => p.id === targetProviderId);
       if (p) updatedAgent.avatar = getAvatarForModel(targetModelId, p.name);
+    }
+
+    // Auto-fill system prompt when model is selected and prompt is still empty/default
+    if (updates.modelId && !currentData.systemPrompt) {
+      const targetProviderId = updates.providerId || currentData.providerId;
+      const targetProvider = providers.find(p => p.id === targetProviderId);
+      const modelDef = targetProvider?.models.find(m => m.id === updates.modelId);
+      const modelName = modelDef?.name || updates.modelId;
+      const agentName = updatedAgent.name || modelName;
+      updatedAgent.systemPrompt = `You are ${modelName}. Your name in this group chat is ${agentName}.`;
     }
 
     setDraftAgents(prev => ({ ...prev, [id]: updatedAgent }));
@@ -637,7 +650,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       avatar: AVATAR_MAP.default,
       providerId: '',
       modelId: '',
-      systemPrompt: '你是一个有用的助手。',
+      systemPrompt: '',
       color: 'bg-gray-600',
       config: {
         temperature: 0.7,
@@ -667,9 +680,10 @@ const Sidebar: React.FC<SidebarProps> = ({
              const oldProvider = providers.find(p => p.id === a.providerId);
              const oldModelDef = oldProvider?.models.find(m => m.id === a.modelId);
              
-             const isDefaultName = 
-                a.name === '新角色' || 
-                a.name === a.modelId || 
+             const isDefaultName =
+                a.name === 'New Agent' ||
+                a.name === '' ||
+                a.name === a.modelId ||
                 (oldModelDef && a.name === oldModelDef.name);
 
              if (isDefaultName) {
@@ -691,6 +705,17 @@ const Sidebar: React.FC<SidebarProps> = ({
              const p = providers.find(p => p.id === targetProviderId);
              if (p) updatedAgent.avatar = getAvatarForModel(targetModelId, p.name);
         }
+
+        // Auto-fill system prompt when model is selected and prompt is still empty
+        if (updates.modelId && !a.systemPrompt) {
+             const targetProviderId = updates.providerId || a.providerId;
+             const targetProvider = providers.find(p => p.id === targetProviderId);
+             const modelDef = targetProvider?.models.find(m => m.id === updates.modelId);
+             const modelName = modelDef?.name || updates.modelId;
+             const agentName = updatedAgent.name || modelName;
+             updatedAgent.systemPrompt = `You are ${modelName}. Your name in this group chat is ${agentName}.`;
+        }
+
         return updatedAgent;
     }));
   };
@@ -710,28 +735,28 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleAddProvider = () => {
     const newProvider: ApiProvider = {
       id: Date.now().toString(),
-      name: '新供应商',
+      name: t('新供应商'),
       type: AgentType.OPENAI_COMPATIBLE,
       baseUrl: '',
       apiKey: '',
-      models: [{ id: 'my-model', name: '默认模型', inputPricePer1M: 0, outputPricePer1M: 0 }]
+      models: [{ id: 'my-model', name: t('默认模型'), inputPricePer1M: 0, outputPricePer1M: 0 }]
     };
     setProviders([...providers, newProvider]);
   };
   const updateProvider = (id: string, updates: Partial<ApiProvider>) => setProviders(providers.map(p => p.id === id ? { ...p, ...updates } : p));
   const removeProvider = (id: string) => setProviders(providers.filter(p => p.id !== id));
-  const addModelToProvider = (providerId: string) => setProviders(providers.map(p => p.id !== providerId ? p : { ...p, models: [...p.models, { id: '', name: '新模型', inputPricePer1M: 0, outputPricePer1M: 0 }] }));
+  const addModelToProvider = (providerId: string) => setProviders(providers.map(p => p.id !== providerId ? p : { ...p, models: [...p.models, { id: '', name: t('新模型'), inputPricePer1M: 0, outputPricePer1M: 0 }] }));
   const updateModelInProvider = (providerId: string, modelIdx: number, field: string, value: any) => setProviders(providers.map(p => { if (p.id !== providerId) return p; const m = [...p.models]; m[modelIdx] = { ...m[modelIdx], [field]: value }; return { ...p, models: m }; }));
   const removeModelFromProvider = (providerId: string, modelIdx: number) => setProviders(providers.map(p => p.id !== providerId ? p : { ...p, models: p.models.filter((_, i) => i !== modelIdx) }));
   
   const handleFetchModels = async (provider: ApiProvider) => {
-    if (!provider.apiKey) { alert("请先填写 API Key"); return; }
+    if (!provider.apiKey) { alert(t("请先填写 API Key")); return; }
     setIsFetching(provider.id);
     try {
       const models = await fetchRemoteModels(provider);
-      if (models.length > 0) { updateProvider(provider.id, { models }); alert(`成功获取 ${models.length} 个模型！`); }
-      else { alert("未获取到任何模型。"); }
-    } catch (e: any) { alert(`获取失败: ${e.message}`); } finally { setIsFetching(null); }
+      if (models.length > 0) { updateProvider(provider.id, { models }); alert(`${t('成功获取')} ${models.length} ${t('个模型！')}`); }
+      else { alert(t("未获取到任何模型。")); }
+    } catch (e: any) { alert(`${t('获取失败')}: ${e.message}`); } finally { setIsFetching(null); }
   };
 
   // User Avatar Upload (for profile)
@@ -778,7 +803,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const newId = `user-${Date.now()}`;
     const newProfile: UserProfile = {
       id: newId,
-      name: '新身份',
+      name: t('新身份'),
       avatar: settings.userAvatar || '',
       persona: ''
     };
@@ -861,16 +886,16 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Header */}
       <div className="p-4 border-b border-gray-100 dark:border-zinc-700 flex justify-between items-center bg-white dark:bg-zinc-800">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">控制面板</h2>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t('控制面板')}</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white"><X size={20} /></button>
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-gray-100 dark:border-zinc-700">
-        <button onClick={() => setActiveTab('sessions')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'sessions' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>会话</button>
-        <button onClick={() => setActiveTab('agents')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'agents' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>角色</button>
-        <button onClick={() => setActiveTab('providers')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'providers' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>供应商</button>
-        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'settings' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>设置</button>
+        <button onClick={() => setActiveTab('sessions')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'sessions' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>{t('会话')}</button>
+        <button onClick={() => setActiveTab('agents')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'agents' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>{t('角色')}</button>
+        <button onClick={() => setActiveTab('providers')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'providers' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>{t('供应商')}</button>
+        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 text-xs font-medium ${activeTab === 'settings' ? 'text-zinc-900 dark:text-white border-b-2 border-zinc-900 dark:border-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>{t('设置')}</button>
       </div>
 
       {/* Content */}
@@ -935,11 +960,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                          onChange={(e) => onRenameGroup(group.id, e.target.value)}
                          onBlur={(e) => (e.target as HTMLInputElement).classList.add('pointer-events-none')}
                        />
-                       <div className="text-[10px] text-gray-400">{groupSessions.length} 个对话 • {group.memberIds.length} 位成员</div>
+                       <div className="text-[10px] text-gray-400">{groupSessions.length} {t('个对话')} • {group.memberIds.length} {t('位成员')}</div>
                      </div>
                      {groups.length > 1 && (
                        <button
-                         onClick={(e) => { e.stopPropagation(); if (window.confirm(`确定要删除群组「${group.name}」吗？该群组下的所有对话都会被删除。`)) onDeleteGroup(group.id); }}
+                         onClick={(e) => { e.stopPropagation(); if (window.confirm(`${t('确定要删除群组')}「${group.name}」${t('吗？该群组下的所有对话都会被删除。')}`)) onDeleteGroup(group.id); }}
                          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg opacity-0 group-hover:opacity-100"
                        >
                          <Trash2 size={14} />
@@ -979,7 +1004,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                onBlur={(e) => (e.target as HTMLInputElement).classList.add('pointer-events-none')}
                              />
                            </div>
-                           <span className="text-[10px] text-gray-400">{session.messages.length}条</span>
+                           <span className="text-[10px] text-gray-400">{session.messages.length}{t('条')}</span>
                            {groupSessions.length > 1 && (
                              <button
                                onClick={(e) => { e.stopPropagation(); onDeleteSession(session.id); }}
@@ -995,7 +1020,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                          onClick={(e) => { e.stopPropagation(); onCreateSession(group.id); }}
                          className="w-full px-3 py-2 pl-10 text-left text-xs text-gray-400 hover:text-zinc-900 dark:hover:text-white hover:bg-white dark:hover:bg-zinc-700/50 transition-colors flex items-center gap-2"
                        >
-                         <Plus size={12} /> 新建对话
+                         <Plus size={12} /> {t('新建对话')}
                        </button>
                      </div>
                    )}
@@ -1005,22 +1030,22 @@ const Sidebar: React.FC<SidebarProps> = ({
 
              {/* 新建群组按钮 */}
              <button onClick={onCreateGroup} className="w-full py-3 border border-dashed border-gray-300 dark:border-zinc-600 rounded-xl text-gray-500 dark:text-gray-400 text-sm font-medium hover:bg-white dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center justify-center gap-2">
-              <Plus size={16} /> 新建群组
+              <Plus size={16} /> {t('新建群组')}
             </button>
 
              {/* 当前群组配置 */}
              {activeGroup && (
                <div className="mt-4 space-y-4 pt-4 border-t border-gray-200 dark:border-zinc-700">
-                 <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">当前群组配置</div>
+                 <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t('当前群组配置')}</div>
 
                  {/* 群组场景设定 */}
                  <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                     <div className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-2 uppercase flex items-center gap-1">
-                      <Server size={12}/> 群组剧本 / 世界观
+                      <Server size={12}/> {t('群组剧本 / 世界观')}
                     </div>
                     <textarea
                       className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-24 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
-                      placeholder="例如：现在你们都在一艘即将沉没的泰坦尼克号上..."
+                      placeholder={t('例如：现在你们都在一艘即将沉没的泰坦尼克号上...')}
                       value={activeGroup.scenario || ''}
                       onChange={(e) => onUpdateGroupScenario(activeGroup.id, e.target.value)}
                     />
@@ -1030,10 +1055,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                     <div className="flex justify-between items-center mb-2">
                         <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
-                          <BookOpen size={12}/> 长期记忆系统
+                          <BookOpen size={12}/> {t('长期记忆系统')}
                         </div>
                         <div className="flex items-center gap-2">
-                           <span className="text-[10px] text-gray-400">{activeGroup.memoryConfig?.enabled ? '已开启' : '已关闭'}</span>
+                           <span className="text-[10px] text-gray-400">{activeGroup.memoryConfig?.enabled ? t('已开启') : t('已关闭')}</span>
                            <input
                               type="checkbox"
                               className="accent-zinc-900"
@@ -1047,7 +1072,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
                          <div className="grid grid-cols-2 gap-2">
                             <div>
-                               <label className="text-[10px] text-gray-400 block mb-1">总结阈值 (条)</label>
+                               <label className="text-[10px] text-gray-400 block mb-1">{t('总结阈值 (条)')}</label>
                                <input
                                   type="number" min="5" max="500"
                                   className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
@@ -1056,7 +1081,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                />
                             </div>
                             <div>
-                               <label className="text-[10px] text-gray-400 block mb-1">总结供应商</label>
+                               <label className="text-[10px] text-gray-400 block mb-1">{t('总结供应商')}</label>
                                <select
                                   className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                   value={activeGroup.memoryConfig?.summaryProviderId || ''}
@@ -1068,7 +1093,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                       });
                                   }}
                                >
-                                  <option value="">选择供应商</option>
+                                  <option value="">{t('选择供应商')}</option>
                                   {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                </select>
                             </div>
@@ -1080,17 +1105,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                                checked={activeGroup.memoryConfig?.excludePM || false}
                                onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { excludePM: e.target.checked })}
                             />
-                            <span className="text-[10px] text-gray-400">排除私讯</span>
+                            <span className="text-[10px] text-gray-400">{t('排除私讯')}</span>
                          </div>
                          {activeGroup.memoryConfig?.summaryProviderId && (
                             <div>
-                               <label className="text-[10px] text-gray-400 block mb-1">总结模型</label>
+                               <label className="text-[10px] text-gray-400 block mb-1">{t('总结模型')}</label>
                                <select
                                   className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                   value={activeGroup.memoryConfig?.summaryModelId || ''}
                                   onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { summaryModelId: e.target.value })}
                                >
-                                  <option value="">选择模型</option>
+                                  <option value="">{t('选择模型')}</option>
                                   {providers.find(p => p.id === activeGroup.memoryConfig?.summaryProviderId)?.models.map(m => (
                                      <option key={m.id} value={m.id}>{m.name}</option>
                                   ))}
@@ -1105,7 +1130,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                     <div className="flex justify-between items-center mb-3">
                         <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
-                          <Sparkles size={12}/> 娱乐功能
+                          <Sparkles size={12}/> {t('娱乐功能')}
                         </label>
                     </div>
                     <div className="space-y-2">
@@ -1113,7 +1138,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                              <Dices size={14} className="text-gray-400" />
-                             <span className="text-xs text-gray-600 dark:text-gray-300">骰子</span>
+                             <span className="text-xs text-gray-600 dark:text-gray-300">{t('骰子')}</span>
                              <span className="text-[10px] text-gray-400 font-mono">{'{{ROLL: 2d6+3}}'}</span>
                           </div>
                           <input
@@ -1127,7 +1152,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                              <Sparkles size={14} className="text-gray-400" />
-                             <span className="text-xs text-gray-600 dark:text-gray-300">塔罗牌</span>
+                             <span className="text-xs text-gray-600 dark:text-gray-300">{t('塔罗牌')}</span>
                              <span className="text-[10px] text-gray-400 font-mono">{'{{TAROT: 3}}'}</span>
                           </div>
                           <input
@@ -1141,7 +1166,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                              <MessageSquare size={14} className="text-gray-400" />
-                             <span className="text-xs text-gray-600 dark:text-gray-300">私讯</span>
+                             <span className="text-xs text-gray-600 dark:text-gray-300">{t('私讯')}</span>
                              <span className="text-[10px] text-gray-400 font-mono">{'{{RES_PM_Name: msg}}'}</span>
                           </div>
                           <input
@@ -1159,19 +1184,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                    <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                       <div className="flex justify-between items-center mb-2">
                          <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
-                           <Edit3 size={12}/> 当前对话摘要
+                           <Edit3 size={12}/> {t('当前对话摘要')}
                          </label>
                       </div>
                       <textarea
                         className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-20 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
-                        placeholder="暂无对话摘要..."
+                        placeholder={t('暂无对话摘要...')}
                         value={activeSession.summary || ''}
                         onChange={(e) => onUpdateSummary(activeSession.id, e.target.value)}
                       />
                       {/* Admin Notes Display */}
                       {activeSession.adminNotes && activeSession.adminNotes.length > 0 && (
                          <div className="bg-amber-50 dark:bg-amber-900/30 p-2 rounded border border-amber-100 dark:border-amber-800 mt-2">
-                            <label className="text-[10px] text-amber-500 font-bold block mb-1">管理员便签</label>
+                            <label className="text-[10px] text-amber-500 font-bold block mb-1">{t('管理员便签')}</label>
                             <ul className="text-[10px] text-amber-700 dark:text-amber-400 list-disc list-inside space-y-1">
                                {activeSession.adminNotes.map((note, i) => <li key={i}>{note}</li>)}
                             </ul>
@@ -1189,11 +1214,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-4">
             {/* Header with Add Button */}
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">角色列表 ({agents.length})</span>
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t('角色列表')} ({agents.length})</span>
               <button
                 onClick={handleAddAgent}
                 className="p-1.5 bg-zinc-900 dark:bg-zinc-600 text-white rounded-lg hover:bg-black dark:hover:bg-zinc-500 transition-colors"
-                title="添加新角色"
+                title={t('添加新角色')}
               >
                 <Plus size={14} />
               </button>
@@ -1216,12 +1241,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                   {/* Badges */}
                   {hasDraft && (
                     <div className="absolute -top-2 left-3 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-full border border-blue-200 dark:border-blue-800">
-                      编辑中
+                      {t('编辑中')}
                     </div>
                   )}
                   {!isActive && !hasDraft && (
                     <div className="absolute -top-2 left-3 px-2 py-0.5 bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 text-[10px] font-bold rounded-full border border-orange-200 dark:border-orange-800">
-                      未启用
+                      {t('未启用')}
                     </div>
                   )}
                   {/* Collapsed Header */}
@@ -1243,9 +1268,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       {isActive && <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white dark:border-zinc-800"></div>}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm text-gray-800 dark:text-white truncate">{editData.name || '未命名角色'}</div>
+                      <div className="font-semibold text-sm text-gray-800 dark:text-white truncate">{editData.name || t('未命名角色')}</div>
                       <div className="text-[10px] text-gray-400 truncate">
-                        {currentProvider ? `${currentProvider.name} • ${editData.modelId || '未选择'}` : <span className="text-orange-400">未配置供应商</span>}
+                        {currentProvider ? `${currentProvider.name} • ${editData.modelId || t('未选择')}` : <span className="text-orange-400">{t('未配置供应商')}</span>}
                       </div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); removeAgent(agent.id); discardDraftAgent(agent.id); }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
@@ -1264,7 +1289,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                               setEditingAgentAvatar(agent.id);
                               agentAvatarInputRef.current?.click();
                             }}
-                            title="点击上传自定义头像"
+                            title={t('点击上传自定义头像')}
                           />
                           <div className="absolute -bottom-1 -right-1 bg-zinc-900 text-white rounded-full p-1 pointer-events-none">
                             <Upload size={8} />
@@ -1273,7 +1298,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <button
                               onClick={(e) => { e.stopPropagation(); resetAgentAvatar(agent.id); }}
                               className="absolute -top-1 -left-1 bg-gray-500 text-white rounded-full p-0.5 hover:bg-gray-700 opacity-0 group-hover/avatar:opacity-100 transition-opacity"
-                              title="重置为模型默认头像"
+                              title={t('重置为模型默认头像')}
                             >
                               <RefreshCw size={8} />
                             </button>
@@ -1284,17 +1309,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                             className="font-bold text-gray-800 dark:text-white w-full bg-transparent focus:bg-gray-50 dark:focus:bg-zinc-700 rounded px-1 -ml-1 border-transparent focus:border-gray-200 dark:focus:border-zinc-600 border"
                             value={editData.name}
                             onChange={(e) => updateDraftAgent(agent.id, { name: e.target.value })}
-                            placeholder="角色名称"
+                            placeholder={t('角色名称')}
                           />
                           <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                             {currentProvider ? (
                               <>
                                 <span className="truncate max-w-[100px]">{currentProvider.name}</span>
                                 <span>•</span>
-                                <span className="truncate max-w-[100px]">{editData.modelId || '未选择模型'}</span>
+                                <span className="truncate max-w-[100px]">{editData.modelId || t('未选择模型')}</span>
                               </>
                             ) : (
-                              <span className="text-orange-400">未配置供应商</span>
+                              <span className="text-orange-400">{t('未配置供应商')}</span>
                             )}
                           </div>
                         </div>
@@ -1305,7 +1330,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                      <textarea
                         className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500"
-                        placeholder="人设 Prompt..."
+                        placeholder={t('人设 Prompt...')}
                         value={editData.systemPrompt}
                         onChange={(e) => updateDraftAgent(agent.id, { systemPrompt: e.target.value })}
                      />
@@ -1316,7 +1341,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           value={editData.providerId}
                           onChange={(e) => updateDraftAgent(agent.id, { providerId: e.target.value, modelId: providers.find(p => p.id === e.target.value)?.models[0]?.id || '' })}
                        >
-                          <option value="">选择供应商</option>
+                          <option value="">{t('选择供应商')}</option>
                           {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                        </select>
                        <select
@@ -1325,7 +1350,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           onChange={(e) => updateDraftAgent(agent.id, { modelId: e.target.value })}
                           disabled={!editData.providerId}
                        >
-                          <option value="">选择模型</option>
+                          <option value="">{t('选择模型')}</option>
                           {currentProvider?.models.map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
                        </select>
                      </div>
@@ -1333,11 +1358,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                      {/* Advanced Params */}
                      <div className="border-t border-gray-100 dark:border-zinc-700 pt-3 mt-1">
                         <div className="flex items-center gap-2 text-xs font-bold text-gray-500 dark:text-gray-400 mb-2">
-                            <Sliders size={12} /> 高级参数
+                            <Sliders size={12} /> {t('高级参数')}
                         </div>
                         <div className="space-y-2">
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">温度: {editData.config.temperature}</span>
+                                <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('温度')}: {editData.config.temperature}</span>
                                 <input
                                     type="range" min="0" max="2" step="0.1"
                                     className="flex-1 h-1 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none accent-zinc-800"
@@ -1356,7 +1381,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                    <BrainCircuit size={10} /> 推理链模式 (R1/Claude/Gemini)
+                                    <BrainCircuit size={10} /> {t('推理链模式 (R1/Claude/Gemini)')}
                                 </span>
                                 <input
                                     type="checkbox"
@@ -1367,11 +1392,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             {editData.config.enableReasoning && (
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">推理预算</span>
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('推理预算')}</span>
                                     <input
                                         type="number"
                                         className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
-                                        placeholder="如 2048 (仅 Claude 有效)"
+                                        placeholder={t('如 2048 (仅 Claude 有效)')}
                                         value={editData.config.reasoningBudget}
                                         onChange={(e) => updateDraftAgentConfig(agent.id, { reasoningBudget: parseInt(e.target.value) })}
                                     />
@@ -1382,7 +1407,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                        <ScanEye size={10} /> 视觉代理 (借眼睛)
+                                        <ScanEye size={10} /> {t('视觉代理 (借眼睛)')}
                                     </span>
                                     <input
                                         type="checkbox"
@@ -1392,14 +1417,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     />
                                 </div>
                                 <p className="text-[9px] text-gray-400 mt-0.5">
-                                    让不支持图片的模型借用其他视觉模型来"看"图
+                                    {t('让不支持图片的模型借用其他视觉模型来"看"图')}
                                 </p>
                             </div>
 
                             {editData.config.visionProxyEnabled && (
                                 <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
                                     <div>
-                                        <label className="text-[10px] text-gray-400 block mb-1">视觉供应商</label>
+                                        <label className="text-[10px] text-gray-400 block mb-1">{t('视觉供应商')}</label>
                                         <select
                                             className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                             value={editData.config.visionProxyProviderId || ''}
@@ -1411,19 +1436,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 });
                                             }}
                                         >
-                                            <option value="">选择供应商</option>
+                                            <option value="">{t('选择供应商')}</option>
                                             {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                         </select>
                                     </div>
                                     {editData.config.visionProxyProviderId && (
                                         <div>
-                                            <label className="text-[10px] text-gray-400 block mb-1">视觉模型</label>
+                                            <label className="text-[10px] text-gray-400 block mb-1">{t('视觉模型')}</label>
                                             <select
                                                 className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                                 value={editData.config.visionProxyModelId || ''}
                                                 onChange={(e) => updateDraftAgentConfig(agent.id, { visionProxyModelId: e.target.value })}
                                             >
-                                                <option value="">选择模型</option>
+                                                <option value="">{t('选择模型')}</option>
                                                 {providers.find(p => p.id === editData.config.visionProxyProviderId)?.models.map(m => (
                                                     <option key={m.id} value={m.id}>{m.name}</option>
                                                 ))}
@@ -1437,7 +1462,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                        <Search size={10} /> 搜索工具
+                                        <Search size={10} /> {t('搜索工具')}
                                     </span>
                                     <input
                                         type="checkbox"
@@ -1454,14 +1479,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     />
                                 </div>
                                 <p className="text-[9px] text-gray-400 mt-0.5">
-                                    用户发送 /search 时，此角色可执行网络搜索
+                                    {t('用户发送 /search 时，此角色可执行网络搜索')}
                                 </p>
                             </div>
 
                             {editData.searchConfig?.enabled && (
                                 <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
                                     <div>
-                                        <label className="text-[10px] text-gray-400 block mb-1">搜索引擎</label>
+                                        <label className="text-[10px] text-gray-400 block mb-1">{t('搜索引擎')}</label>
                                         <select
                                             className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                             value={editData.searchConfig?.engine || 'serper'}
@@ -1475,14 +1500,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             <option value="serper">Serper (Google)</option>
                                             <option value="brave">Brave Search</option>
                                             <option value="tavily">Tavily</option>
-                                            <option value="metaso">Metaso (秘塔)</option>
+                                            <option value="metaso">{`Metaso (${t('秘塔')})`}</option>
                                         </select>
                                     </div>
                                     <div>
                                         <label className="text-[10px] text-gray-400 block mb-1">API Key</label>
                                         <input
                                             type="password"
-                                            placeholder="搜索引擎 API Key"
+                                            placeholder={t('搜索引擎 API Key')}
                                             className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                             value={editData.searchConfig?.apiKey || ''}
                                             onChange={(e) => updateDraftAgent(agent.id, {
@@ -1500,7 +1525,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                        <MessageSquare size={10} /> 允许私讯 (PM)
+                                        <MessageSquare size={10} /> {t('允许私讯 (PM)')}
                                     </span>
                                     <input
                                         type="checkbox"
@@ -1510,7 +1535,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     />
                                 </div>
                                 <p className="text-[9px] text-gray-400 mt-0.5">
-                                    允许该角色发送私讯，需群组娱乐功能中的私讯总开关也开启
+                                    {t('允许该角色发送私讯，需群组娱乐功能中的私讯总开关也开启')}
                                 </p>
                             </div>
 
@@ -1519,7 +1544,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
                                     <div className="flex items-center justify-between">
                                         <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                            <Search size={10} /> Google 搜索 (原生)
+                                            <Search size={10} /> {t('Google 搜索 (原生)')}
                                         </span>
                                         <input
                                             type="checkbox"
@@ -1529,7 +1554,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         />
                                     </div>
                                     <p className="text-[9px] text-gray-400 mt-0.5">
-                                        Gemini 内置搜索，无需额外 API Key
+                                        {t('Gemini 内置搜索，无需额外 API Key')}
                                     </p>
                                 </div>
                             )}
@@ -1543,14 +1568,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                             onClick={() => discardDraftAgent(agent.id)}
                             className="flex-1 py-2 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-zinc-700 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center justify-center gap-1"
                           >
-                            <RotateCcw size={12} /> 放弃更改
+                            <RotateCcw size={12} /> {t('放弃更改')}
                           </button>
                           <button
                             onClick={() => saveDraftAgent(agent.id)}
                             disabled={!configured}
                             className="flex-1 py-2 text-xs font-bold text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1 shadow-sm"
                           >
-                            <Save size={12} /> 保存配置
+                            <Save size={12} /> {t('保存配置')}
                           </button>
                         </div>
                       )}
@@ -1559,21 +1584,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div className="border-t border-gray-100 dark:border-zinc-700 pt-3 mt-3">
                         {!configured ? (
                           <div className="text-center text-xs text-orange-500 py-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                            请先选择供应商和模型
+                            {t('请先选择供应商和模型')}
                           </div>
                         ) : isActive ? (
                           <button
                             onClick={() => { saveDraftAgent(agent.id); updateAgent(agent.id, { isActive: false }); }}
                             className="w-full py-2 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-zinc-700 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center justify-center gap-2"
                           >
-                            <PowerOff size={14} /> 停用角色
+                            <PowerOff size={14} /> {t('停用角色')}
                           </button>
                         ) : (
                           <button
                             onClick={() => { saveDraftAgent(agent.id); updateAgent(agent.id, { isActive: true }); }}
                             className="w-full py-2 text-xs font-bold text-white bg-green-500 rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-2 shadow-sm"
                           >
-                            <Power size={14} /> 启用角色
+                            <Power size={14} /> {t('启用角色')}
                           </button>
                         )}
                       </div>
@@ -1585,7 +1610,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             })}
             {agents.length === 0 && (
               <div className="text-center py-8 text-gray-400 text-sm">
-                点击右上角 <Plus size={14} className="inline" /> 添加新角色
+                {t('点击右上角')} <Plus size={14} className="inline" /> {t('添加新角色')}
               </div>
             )}
           </div>
@@ -1603,7 +1628,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         className="bg-transparent font-semibold text-sm text-gray-800 dark:text-white focus:outline-none"
                         value={provider.name}
                         onChange={(e) => updateProvider(provider.id, { name: e.target.value })}
-                        placeholder="供应商名称"
+                        placeholder={t('供应商名称')}
                       />
                     </div>
                     <button onClick={() => removeProvider(provider.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14}/></button>
@@ -1617,7 +1642,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           value={provider.type}
                           onChange={(e) => updateProvider(provider.id, { type: e.target.value as AgentType })}
                        >
-                          <option value={AgentType.OPENAI_COMPATIBLE}>OpenAI 兼容 (OpenRouter/DeepSeek/OneAPI)</option>
+                          <option value={AgentType.OPENAI_COMPATIBLE}>{t('OpenAI 兼容 (OpenRouter/DeepSeek/OneAPI)')}</option>
                           <option value={AgentType.GEMINI}>Google Gemini</option>
                           <option value={AgentType.ANTHROPIC}>Anthropic Official (Claude)</option>
                        </select>
@@ -1642,7 +1667,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 onClick={() => handleFetchModels(provider)}
                                 disabled={isFetching === provider.id}
                                 className="p-2 bg-zinc-100 dark:bg-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-500 transition-colors"
-                                title="从服务器获取/刷新模型列表"
+                                title={t('从服务器获取/刷新模型列表')}
                              >
                                 <RefreshCw size={14} className={isFetching === provider.id ? 'animate-spin' : ''} />
                              </button>
@@ -1672,7 +1697,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                              <div className="flex gap-2">
                                <input
                                  type="password"
-                                 placeholder="Gemini API Key (从 aistudio.google.com 获取)"
+                                 placeholder={t('Gemini API Key (从 aistudio.google.com 获取)')}
                                  className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded flex-1 text-gray-700 dark:text-gray-200"
                                  value={provider.apiKey || ''}
                                  onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
@@ -1681,7 +1706,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                  onClick={() => handleFetchModels(provider)}
                                  disabled={isFetching === provider.id}
                                  className="p-2 bg-zinc-100 dark:bg-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-500 transition-colors"
-                                 title="从服务器获取/刷新模型列表"
+                                 title={t('从服务器获取/刷新模型列表')}
                                >
                                  <RefreshCw size={14} className={isFetching === provider.id ? 'animate-spin' : ''} />
                                </button>
@@ -1699,7 +1724,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                    onChange={(e) => updateProvider(provider.id, { vertexProject: e.target.value })}
                                  />
                                  <input
-                                   placeholder="Location (如 us-central1)"
+                                   placeholder={t('Location (如 us-central1)')}
                                    className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
                                    value={provider.vertexLocation || ''}
                                    onChange={(e) => updateProvider(provider.id, { vertexLocation: e.target.value })}
@@ -1708,7 +1733,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                <div className="flex gap-2">
                                  <input
                                    type="password"
-                                   placeholder="API Key (可选，用于 Express Mode)"
+                                   placeholder={t('API Key (可选，用于 Express Mode)')}
                                    className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded flex-1 text-gray-700 dark:text-gray-200"
                                    value={provider.apiKey || ''}
                                    onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
@@ -1717,13 +1742,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                    onClick={() => handleFetchModels(provider)}
                                    disabled={isFetching === provider.id}
                                    className="p-2 bg-zinc-100 dark:bg-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-500 transition-colors"
-                                   title="从服务器获取/刷新模型列表"
+                                   title={t('从服务器获取/刷新模型列表')}
                                  >
                                    <RefreshCw size={14} className={isFetching === provider.id ? 'animate-spin' : ''} />
                                  </button>
                                </div>
                                <div className="text-[10px] text-gray-400">
-                                 Vertex AI 需要 Google Cloud 认证。可使用 API Key (Express Mode) 或配置应用默认凭据 (ADC)。
+                                 {t('Vertex AI 需要 Google Cloud 认证。可使用 API Key (Express Mode) 或配置应用默认凭据 (ADC)。')}
                                </div>
                              </>
                            )}
@@ -1733,20 +1758,20 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                     <div className="border-t border-gray-100 dark:border-zinc-600 pt-3">
                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block flex justify-between">
-                         <span>可用模型列表 ({provider.models.length})</span>
+                         <span>{t('可用模型列表')} ({provider.models.length})</span>
                        </label>
                        <div className="space-y-3 max-h-64 overflow-y-auto p-2 rounded-lg bg-gray-100 dark:bg-zinc-900/50">
                          {provider.models.map((model, idx) => (
                            <div key={idx} className="space-y-1.5 p-2 bg-white dark:bg-zinc-800 rounded-lg border border-gray-200 dark:border-zinc-600">
                               <div className="grid grid-cols-[1fr_1fr_24px] gap-2 items-center">
                                 <input
-                                  placeholder="模型ID"
+                                  placeholder={t('模型ID')}
                                   className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
                                   value={model.id}
                                   onChange={(e) => updateModelInProvider(provider.id, idx, 'id', e.target.value)}
                                 />
                                 <input
-                                  placeholder="显示名称"
+                                  placeholder={t('显示名称')}
                                   className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
                                   value={model.name}
                                   onChange={(e) => updateModelInProvider(provider.id, idx, 'name', e.target.value)}
@@ -1755,7 +1780,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">输入$/1M:</span>
+                                  <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">{t('输入$/1M')}:</span>
                                   <input
                                     type="number"
                                     step="0.01"
@@ -1766,7 +1791,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   />
                                 </div>
                                 <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">输出$/1M:</span>
+                                  <span className="text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">{t('输出$/1M')}:</span>
                                   <input
                                     type="number"
                                     step="0.01"
@@ -1779,13 +1804,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                               </div>
                            </div>
                          ))}
-                         <button onClick={() => addModelToProvider(provider.id)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">+ 添加模型定义</button>
+                         <button onClick={() => addModelToProvider(provider.id)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">+ {t('添加模型定义')}</button>
                        </div>
                     </div>
                  </div>
               </div>
             ))}
-            <button onClick={handleAddProvider} className="w-full py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-black dark:hover:bg-gray-100 transition-colors">添加 API 供应商</button>
+            <button onClick={handleAddProvider} className="w-full py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-black dark:hover:bg-gray-100 transition-colors">{t('添加 API 供应商')}</button>
           </div>
         )}
 
@@ -1795,7 +1820,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              
              {/* USER PROFILES SETTINGS */}
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><User size={16}/> 用户档案 (多身份)</h3>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><User size={16}/> {t('用户档案 (多身份)')}</h3>
 
                 {/* Hidden file inputs */}
                 <input
@@ -1830,10 +1855,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                         />
                         <div className="flex-1 min-w-0">
                           <div className="text-xs font-medium text-gray-900 dark:text-white truncate">{profile.name}</div>
-                          <div className="text-[10px] text-gray-400 truncate">{profile.persona?.slice(0, 30) || '无人设'}...</div>
+                          <div className="text-[10px] text-gray-400 truncate">{profile.persona?.slice(0, 30) || t('无人设')}...</div>
                         </div>
                         {settings.activeProfileId === profile.id && (
-                          <span className="text-[9px] px-1.5 py-0.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded">当前</span>
+                          <span className="text-[9px] px-1.5 py-0.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded">{t('当前')}</span>
                         )}
                         {expandedProfileId === profile.id ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
                       </div>
@@ -1850,7 +1875,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   setEditingProfileId(profile.id);
                                   avatarInputRef.current?.click();
                                 }}
-                                title="点击上传图片"
+                                title={t('点击上传图片')}
                               />
                               <div className="absolute -bottom-1 -right-1 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-full p-1 pointer-events-none">
                                 <Upload size={10} />
@@ -1859,23 +1884,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div className="flex-1 space-y-2">
                               <input
                                 className="w-full text-xs p-2 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
-                                placeholder="档案名称"
+                                placeholder={t('档案名称')}
                                 value={profile.name}
                                 onChange={(e) => updateUserProfile(profile.id, { name: e.target.value })}
                               />
                               <input
                                 className="w-full text-xs p-2 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded text-gray-400"
-                                placeholder="头像 URL (或点击头像上传)"
-                                value={profile.avatar.length > 50 ? '已上传图片' : profile.avatar}
+                                placeholder={t('头像 URL (或点击头像上传)')}
+                                value={profile.avatar.length > 50 ? t('已上传图片') : profile.avatar}
                                 onChange={(e) => updateUserProfile(profile.id, { avatar: e.target.value })}
                               />
                             </div>
                           </div>
                           <div>
-                            <label className="text-[10px] text-gray-400 font-bold block mb-1">人设 / 自我介绍 (AI可见)</label>
+                            <label className="text-[10px] text-gray-400 font-bold block mb-1">{t('人设 / 自我介绍 (AI可见)')}</label>
                             <textarea
                               className="w-full text-xs bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none"
-                              placeholder="例如：我是一个图灵测试主考官..."
+                              placeholder={t('例如：我是一个图灵测试主考官...')}
                               value={profile.persona || ''}
                               onChange={(e) => updateUserProfile(profile.id, { persona: e.target.value })}
                             />
@@ -1886,7 +1911,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 className="flex-1 text-xs py-1.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded hover:opacity-90"
                                 onClick={() => setSettings({ ...settings, activeProfileId: profile.id })}
                               >
-                                设为当前
+                                {t('设为当前')}
                               </button>
                             )}
                             {(settings.userProfiles || []).length > 1 && (
@@ -1908,18 +1933,18 @@ const Sidebar: React.FC<SidebarProps> = ({
                     className="w-full py-2 text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-zinc-600 rounded-lg hover:bg-gray-50 dark:hover:bg-zinc-700 flex items-center justify-center gap-1"
                     onClick={addNewUserProfile}
                   >
-                    <Plus size={14} /> 添加新档案
+                    <Plus size={14} /> {t('添加新档案')}
                   </button>
                 </div>
              </div>
 
              {/* STABILITY SETTINGS */}
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><ShieldAlert size={16}/> 稳定性与并发</h3>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><ShieldAlert size={16}/> {t('稳定性与并发')}</h3>
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
-                            <Zap size={12} /> 允许并发 (插嘴模式)
+                            <Zap size={12} /> {t('允许并发 (插嘴模式)')}
                         </span>
                         <input
                             type="checkbox"
@@ -1929,12 +1954,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                         />
                     </div>
                     <p className="text-[10px] text-gray-400 -mt-2">
-                        开启后，AI 不需要等待对方说完即可开始生成（真实吵架模式）。关闭则为礼貌排队模式。
+                        {t('开启后，AI 不需要等待对方说完即可开始生成（真实吵架模式）。关闭则为礼貌排队模式。')}
                     </p>
 
                     <div>
                         <div className="flex justify-between text-xs mb-1">
-                            <span className="text-gray-600 dark:text-gray-300">超时熔断 (Timeout)</span>
+                            <span className="text-gray-600 dark:text-gray-300">{t('超时熔断 (Timeout)')}</span>
                             <span className="font-mono text-gray-500 dark:text-gray-400">{(settings.timeoutDuration || 30000) / 1000}s</span>
                         </div>
                         <input
@@ -1950,11 +1975,11 @@ const Sidebar: React.FC<SidebarProps> = ({
              {/* IMAGE COMPRESSION */}
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                  <ImageIcon size={16}/> 图片压缩
+                  <ImageIcon size={16}/> {t('图片压缩')}
                 </h3>
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-600 dark:text-gray-300">自动压缩大图</span>
+                        <span className="text-xs text-gray-600 dark:text-gray-300">{t('自动压缩大图')}</span>
                         <input
                             type="checkbox"
                             className="accent-zinc-900"
@@ -1963,13 +1988,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                         />
                     </div>
                     <p className="text-[10px] text-gray-400 -mt-2">
-                        开启后，超过阈值的图片会自动压缩。Anthropic API 限制 5MB。
+                        {t('开启后，超过阈值的图片会自动压缩。Anthropic API 限制 5MB。')}
                     </p>
 
                     {settings.compressImages !== false && (
                       <div>
                           <div className="flex justify-between text-xs mb-1">
-                              <span className="text-gray-600 dark:text-gray-300">压缩阈值</span>
+                              <span className="text-gray-600 dark:text-gray-300">{t('压缩阈值')}</span>
                               <span className="font-mono text-gray-500 dark:text-gray-400">{settings.maxImageSizeMB ?? 4} MB</span>
                           </div>
                           <input
@@ -1979,7 +2004,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                               onChange={(e) => setSettings({...settings, maxImageSizeMB: parseInt(e.target.value)})}
                           />
                           <p className="text-[10px] text-gray-400 mt-1">
-                              建议设为 4MB 以留安全边际。
+                              {t('建议设为 4MB 以留安全边际。')}
                           </p>
                       </div>
                     )}
@@ -1989,11 +2014,11 @@ const Sidebar: React.FC<SidebarProps> = ({
              {/* APPEARANCE */}
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                  {settings.darkMode ? <Moon size={16}/> : <Sun size={16}/>} 外观
+                  {settings.darkMode ? <Moon size={16}/> : <Sun size={16}/>} {t('外观')}
                 </h3>
                 <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
-                        <Moon size={12} /> 深色模式
+                        <Moon size={12} /> {t('深色模式')}
                     </span>
                     <input
                         type="checkbox"
@@ -2003,12 +2028,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                     />
                 </div>
                 <p className="text-[10px] text-gray-400 mt-2">
-                    切换深色/浅色主题，深色模式更适合夜间使用。
+                    {t('切换深色/浅色主题，深色模式更适合夜间使用。')}
                 </p>
+                <div className="flex items-center justify-between mt-4">
+                    <span className="text-xs text-gray-600 dark:text-gray-300">Language / 语言</span>
+                    <select
+                        className="text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-1.5"
+                        value={settings.language || 'zh'}
+                        onChange={(e) => setSettings({...settings, language: e.target.value as 'zh' | 'en'})}
+                    >
+                        <option value="zh">中文</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
              </div>
 
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Clock size={16}/> 思考呼吸时间</h3>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Clock size={16}/> {t('思考呼吸时间')}</h3>
                 <div className="flex items-center gap-4">
                   <input
                     type="range" min="500" max="10000" step="500"
@@ -2020,10 +2056,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                     {(settings.breathingTime / 1000).toFixed(1)}s
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 mt-2">一位 AI 发言结束后，等待下一位 AI 开始思考的间隔时间。</p>
+                <p className="text-xs text-gray-400 mt-2">{t('一位 AI 发言结束后，等待下一位 AI 开始思考的间隔时间。')}</p>
              </div>
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><GripVertical size={16}/> 上下文历史限制</h3>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><GripVertical size={16}/> {t('上下文历史限制')}</h3>
                 <div className="flex items-center gap-4">
                   <input
                     type="range" min="2" max="521" step="1"
@@ -2032,32 +2068,126 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onChange={(e) => setSettings({...settings, contextLimit: parseInt(e.target.value)})}
                   />
                   <span className="text-xs font-mono font-medium text-gray-600 dark:text-gray-300 w-16 text-right">
-                    {settings.contextLimit || 20} 条
+                    {settings.contextLimit || 20} {t('条')}
                   </span>
                 </div>
              </div>
              <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                   {settings.visibilityMode === 'OPEN' ? <Eye size={16}/> : <EyeOff size={16}/>} 可见性模式
+                   {settings.visibilityMode === 'OPEN' ? <Eye size={16}/> : <EyeOff size={16}/>} {t('可见性模式')}
                 </h3>
                 <div className="flex gap-2">
                    <button
                      onClick={() => setSettings({...settings, visibilityMode: 'OPEN'})}
                      className={`flex-1 py-2 text-xs font-medium rounded-lg border ${settings.visibilityMode === 'OPEN' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'bg-white dark:bg-zinc-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-600'}`}
                    >
-                     公开 (标准)
+                     {t('公开 (标准)')}
                    </button>
                    <button
                      onClick={() => setSettings({...settings, visibilityMode: 'BLIND'})}
                      className={`flex-1 py-2 text-xs font-medium rounded-lg border ${settings.visibilityMode === 'BLIND' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'bg-white dark:bg-zinc-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-600'}`}
                    >
-                     盲盒 (仅见用户)
+                     {t('盲盒 (仅见用户)')}
                    </button>
                 </div>
              </div>
 
              {/* TTS (TEXT-TO-SPEECH) - collapsible */}
              <TTSSettingsPanel settings={settings} setSettings={setSettings} agents={agents} setAgents={setAgents} ttsProviders={ttsProviders} setTTSProviders={setTTSProviders} />
+
+             {/* 聊天记录导出 */}
+             {(() => {
+               const USER_ID = 'user';
+
+               const formatSession = (session: ChatSession, allAgents: Agent[], uName: string): string => {
+                 const lines: string[] = [];
+                 const date = new Date(session.lastUpdated).toLocaleDateString('zh-CN');
+                 lines.push(`=== ${session.name} === (${date})`);
+                 lines.push('');
+
+                 if (session.summary) {
+                   lines.push(`--- ${t('记忆摘要')} ---`);
+                   lines.push(session.summary);
+                   lines.push('---');
+                   lines.push('');
+                 }
+
+                 for (const msg of session.messages) {
+                   if (msg.isStreaming) continue;
+                   const time = new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
+                   let senderName: string;
+                   if (msg.isSystem) {
+                     senderName = `[${t('系统')}]`;
+                   } else if (msg.senderId === USER_ID) {
+                     senderName = uName || t('用户');
+                   } else {
+                     const agent = allAgents.find(a => a.id === msg.senderId);
+                     senderName = agent ? agent.name : msg.senderId;
+                   }
+                   let pmTag = '';
+                   if (msg.pmTargetId) {
+                     if (msg.pmTargetId === USER_ID) {
+                       pmTag = ` [${t('私讯')}→${uName || t('用户')}]`;
+                     } else {
+                       const target = allAgents.find(a => a.id === msg.pmTargetId);
+                       pmTag = ` [${t('私讯')}→${target ? target.name : msg.pmTargetId}]`;
+                     }
+                   }
+                   lines.push(`[${time}] ${senderName}${pmTag}: ${msg.text}`);
+                 }
+                 return lines.join('\n');
+               };
+
+               const downloadFile = (filename: string, content: string) => {
+                 const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                 const url = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = filename;
+                 a.click();
+                 URL.revokeObjectURL(url);
+               };
+
+               const activeSession = sessions.find(s => s.id === activeSessionId);
+               const activeGroup = groups.find(g => g.id === activeGroupId);
+
+               const handleExportCurrent = () => {
+                 if (!activeSession) return;
+                 const content = formatSession(activeSession, agents, settings.userName || '');
+                 downloadFile(`${activeSession.name}.txt`, content);
+               };
+
+               const handleExportAll = () => {
+                 if (!activeGroup) return;
+                 const groupSessions = sessions.filter(s => s.groupId === activeGroupId);
+                 const content = groupSessions.map(s => formatSession(s, agents, settings.userName || '')).join('\n\n\n');
+                 downloadFile(`${activeGroup.name}_${t('全部会话')}.txt`, content);
+               };
+
+               return (
+                 <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+                   <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                     <Download size={16}/> {t('聊天记录导出')}
+                   </h3>
+                   <div className="flex gap-2">
+                     <button
+                       onClick={handleExportCurrent}
+                       disabled={!activeSession}
+                       className="flex-1 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-xs font-medium hover:bg-black dark:hover:bg-gray-100 transition-colors disabled:opacity-40"
+                     >
+                       {t('导出当前会话')}
+                     </button>
+                     <button
+                       onClick={handleExportAll}
+                       disabled={!activeGroup}
+                       className="flex-1 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-xs font-medium hover:bg-black dark:hover:bg-gray-100 transition-colors disabled:opacity-40"
+                     >
+                       {t('导出全部会话')}
+                     </button>
+                   </div>
+                 </div>
+               );
+             })()}
            </div>
         )}
       </div>

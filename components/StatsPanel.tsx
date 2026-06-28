@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import { X, MessageSquare, Type, Hash, BarChart3 } from 'lucide-react';
 import { Message, Agent, GlobalSettings } from '../types';
 import { USER_ID } from '../constants';
+import { useT } from '../i18n';
 import { calculateSessionStats, SessionStats } from '../services/statsService';
 // @ts-ignore
 import WordCloud from 'wordcloud';
@@ -22,6 +23,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
   agents,
   userProfile
 }) => {
+  const t = useT();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Calculate stats
@@ -76,7 +78,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-zinc-700">
           <div className="flex items-center gap-2">
             <BarChart3 size={20} className="text-blue-500" />
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">会话统计</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t('会话统计')}</h2>
           </div>
           <button
             onClick={onClose}
@@ -93,21 +95,21 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
             <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4">
               <div className="flex items-center gap-2 text-blue-600 mb-1">
                 <MessageSquare size={16} />
-                <span className="text-xs font-medium">总消息数</span>
+                <span className="text-xs font-medium">{t('总消息数')}</span>
               </div>
               <div className="text-2xl font-bold text-blue-700">{stats.totalMessages}</div>
             </div>
             <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-4">
               <div className="flex items-center gap-2 text-green-600 mb-1">
                 <Type size={16} />
-                <span className="text-xs font-medium">总字符数</span>
+                <span className="text-xs font-medium">{t('总字符数')}</span>
               </div>
               <div className="text-2xl font-bold text-green-700">{stats.totalChars.toLocaleString()}</div>
             </div>
             <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4">
               <div className="flex items-center gap-2 text-purple-600 mb-1">
                 <Hash size={16} />
-                <span className="text-xs font-medium">参与者</span>
+                <span className="text-xs font-medium">{t('参与者')}</span>
               </div>
               <div className="text-2xl font-bold text-purple-700">{stats.agentStats.length}</div>
             </div>
@@ -115,16 +117,16 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
 
           {/* Agent Stats Table */}
           <div>
-            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">发言统计</h3>
+            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('发言统计')}</h3>
             <div className="bg-gray-50 dark:bg-zinc-700 rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    <th className="px-4 py-3 font-medium">成员</th>
-                    <th className="px-4 py-3 font-medium text-right">消息数</th>
-                    <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">总字数</th>
-                    <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">平均字数</th>
-                    <th className="px-4 py-3 font-medium text-right">占比</th>
+                    <th className="px-4 py-3 font-medium">{t('成员')}</th>
+                    <th className="px-4 py-3 font-medium text-right">{t('消息数')}</th>
+                    <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">{t('总字数')}</th>
+                    <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">{t('平均字数')}</th>
+                    <th className="px-4 py-3 font-medium text-right">{t('占比')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-zinc-600">
@@ -178,7 +180,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
               </table>
               {stats.agentStats.length === 0 && (
                 <div className="text-center py-8 text-gray-400">
-                  暂无发言数据
+                  {t('暂无发言数据')}
                 </div>
               )}
             </div>
@@ -186,7 +188,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
 
           {/* Word Cloud */}
           <div>
-            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">词云图</h3>
+            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('词云图')}</h3>
             <div className="bg-gray-50 dark:bg-zinc-700 rounded-xl p-4 flex items-center justify-center min-h-[250px]">
               {stats.wordFrequencies.length > 0 ? (
                 <canvas
@@ -197,7 +199,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                 />
               ) : (
                 <div className="text-gray-400 text-sm">
-                  消息不足，无法生成词云
+                  {t('消息不足，无法生成词云')}
                 </div>
               )}
             </div>
@@ -206,7 +208,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
           {/* Top Words List */}
           {stats.wordFrequencies.length > 0 && (
             <div>
-              <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">高频词汇 Top 20</h3>
+              <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('高频词汇 Top 20')}</h3>
               <div className="flex flex-wrap gap-2">
                 {stats.wordFrequencies.slice(0, 20).map((word, idx) => (
                   <span

@@ -274,7 +274,8 @@ export const updateSessionSummary = async (
   recentMessages: Message[],
   provider: ApiProvider,
   modelId: string,
-  allAgents: any[] // to resolve names
+  allAgents: any[], // to resolve names
+  excludePM?: boolean
 ): Promise<string | null> => {
 
   const transcript = recentMessages.map(m => {
@@ -314,7 +315,8 @@ export const updateSessionSummary = async (
     6. Format Guidelines:
        - Use clear temporal segments
        - Brief headings to summarize each phase are welcome
-       - Maintain narrative coherence and readability
+       - Maintain narrative coherence and readability${excludePM ? `
+    7. PRIVACY RULE: This summary is shared with ALL participants. You MUST completely remove any private message (PM/私讯) content from the archive. Strip all references to private conversations, whispered messages, or any content marked as PM/私讯. If the existing archive contains PM content, remove it during this merge. Only record publicly visible group conversation.` : ''}
 
     [OUTPUT]
     Output ONLY the updated complete archive with no additional commentary.

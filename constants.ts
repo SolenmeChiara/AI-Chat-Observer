@@ -11,7 +11,7 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
   id: 'user-default',
   name: 'User',
   avatar: DEFAULT_USER_AVATAR,
-  persona: '一位充满好奇心的人类观察者。',
+  persona: 'A curious human observer.',
   isDefault: true
 };
 
@@ -25,12 +25,13 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   // Legacy fields (for backward compatibility)
   userName: 'User',
   userAvatar: DEFAULT_USER_AVATAR,
-  userPersona: '一位充满好奇心的人类观察者。',
+  userPersona: 'A curious human observer.',
   enableConcurrency: false, // Default to sequential (polite)
   timeoutDuration: 30000,   // Default 30s timeout
   compressImages: true,     // Default ON (Anthropic has 5MB limit)
   maxImageSizeMB: 1,        // Default 1MB (better for OpenRouter/network stability)
   darkMode: false,          // Default to light mode
+  language: 'zh' as const,
   expandAllReasoning: false, // Default to collapsed reasoning chains
   ttsSettings: {
     enabled: false,
@@ -160,35 +161,20 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
 export const INITIAL_AGENTS: Agent[] = [
   {
     id: 'agent-1',
-    name: 'Gemini',
-    avatar: AVATAR_MAP.gemini,
-    providerId: 'google-gemini',
-    modelId: 'gemini-2.5-flash',
-    systemPrompt: '你代表 Google Gemini。你的回答通常信息量大、有条理且富有创造力。',
-    color: 'bg-blue-600',
+    name: '',
+    avatar: AVATAR_MAP.default,
+    providerId: '',
+    modelId: '',
+    systemPrompt: '',
+    color: 'bg-gray-600',
     config: {
       temperature: 0.7,
-      maxTokens: 1000,
+      maxTokens: 2000,
       enableReasoning: false,
       reasoningBudget: 0
     },
-    role: AgentRole.MEMBER
-  },
-  {
-    id: 'agent-2',
-    name: 'DeepSeek',
-    avatar: AVATAR_MAP.deepseek,
-    providerId: 'deepseek-official',
-    modelId: 'deepseek-reasoner',
-    systemPrompt: '你代表 DeepSeek R1。你非常擅长推理、编码和深入的逻辑分析。',
-    color: 'bg-indigo-600',
-    config: {
-      temperature: 0.6,
-      maxTokens: 4000,
-      enableReasoning: true,
-      reasoningBudget: 0 
-    },
-    role: AgentRole.MEMBER
+    role: AgentRole.MEMBER,
+    isActive: false
   }
 ];
 
@@ -217,9 +203,9 @@ export const DEFAULT_DEBATE_CONFIG: DebateConfig = {
 export const INITIAL_GROUPS: ChatGroup[] = [
   {
     id: 'group-1',
-    name: '默认群组',
-    memberIds: ['agent-1', 'agent-2'],
-    scenario: '这是一个轻松的聊天室。大家可以自由讨论科技、生活或任何感兴趣的话题。',
+    name: 'Group 1',
+    memberIds: ['agent-1'],
+    scenario: '',
     memoryConfig: DEFAULT_MEMORY_CONFIG,
     entertainmentConfig: DEFAULT_ENTERTAINMENT_CONFIG,
     createdAt: Date.now()
@@ -230,7 +216,7 @@ export const INITIAL_SESSIONS: ChatSession[] = [
   {
     id: 'session-1',
     groupId: 'group-1',
-    name: '默认对话',
+    name: 'Chat 1',
     messages: [],
     lastUpdated: Date.now(),
     isAutoRenamed: false,

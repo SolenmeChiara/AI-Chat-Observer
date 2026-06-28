@@ -11,6 +11,7 @@
   "dependencies": {
     "@google/genai": "^1.0.0",
     "dexie": "^3.2.4",
+    "dompurify": "^3.4.11",
     "lucide-react": "^0.344.0",
     "mammoth": "^1.6.0",
     "marked": "^17.0.1",
@@ -23,6 +24,7 @@
     "wordcloud": "^1.2.3"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.0.5",
     "@types/marked": "^5.0.2",
     "@types/node": "^20.11.24",
     "@types/react": "^18.2.66",

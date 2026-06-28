@@ -2,8 +2,12 @@
 import React, { useState, useMemo } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
+import { useT } from '../i18n';
 import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square, Trash2 } from 'lucide-react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+marked.setOptions({ breaks: true, gfm: true, async: false });
 
 interface ChatBubbleProps {
   message: Message;
@@ -22,6 +26,7 @@ interface ChatBubbleProps {
 }
 
 const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, onDelete, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId }) => {
+  const t = useT();
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
@@ -55,7 +60,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           <div className="flex items-center gap-2 mb-1 ml-1">
             <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1">
               <Search size={12} className="text-blue-500" />
-              {sender?.name || '搜索'} 的搜索结果
+              {sender?.name || t('搜索')} {t('的搜索结果')}
             </span>
             {message.searchQuery && (
               <span className="text-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
@@ -71,7 +76,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             >
               <span className="flex items-center gap-2">
                 <Search size={14} className="text-blue-500" />
-                {isSearchExpanded ? '收起搜索结果' : '展开搜索结果'}
+                {isSearchExpanded ? t('收起搜索结果') : t('展开搜索结果')}
               </span>
               {isSearchExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </button>
@@ -79,7 +84,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             {isSearchExpanded && (
               <div
                 className="px-4 pb-4 prose prose-sm dark:prose-invert max-w-full"
-                dangerouslySetInnerHTML={{ __html: marked.parse(message.text) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(message.text, { async: false }) as string) }}
               />
             )}
           </div>
@@ -104,12 +109,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
      ? (matchedProfile?.name || userProfile?.userName || 'User')
      : (sender?.name || 'Unknown');
   
-  // Configure marked for security and style
-  marked.setOptions({
-    breaks: true,  // Convert \n to <br>
-    gfm: true,     // GitHub Flavored Markdown
-  });
-
   // Lightweight markdown renderer using marked + useMemo for caching
   const renderedMarkdown = useMemo(() => {
     if (isStreaming) return null; // Don't render during streaming
@@ -147,7 +146,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
       );
     }
 
-    return marked.parse(processedText);
+    return marked.parse(processedText) as string;
   }, [message.text, isStreaming, allAgents, userProfile?.userName]);
 
   return (
@@ -178,7 +177,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
               )}
               {message.pmTargetId && (
                 <span className="text-[9px] bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded">
-                  私讯→{message.pmTargetId === USER_ID ? (userProfile?.userName || 'User') : (allAgents?.find(a => a.id === message.pmTargetId)?.name || '未知')}
+                  {t('私讯→')}{message.pmTargetId === USER_ID ? (userProfile?.userName || 'User') : (allAgents?.find(a => a.id === message.pmTargetId)?.name || t('未知'))}
                 </span>
               )}
             </span>
@@ -190,7 +189,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
              ${isUser ? 'bg-zinc-800 text-gray-300 border-gray-500' : 'bg-gray-100 dark:bg-zinc-700 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-zinc-500'}
            `}>
               <div className="font-bold mb-0.5 flex items-center gap-1">
-                <Reply size={10} /> 引用 {replyToMessage.senderId === USER_ID ? (userProfile?.userName || 'User') : (replyToMessage.senderId === 'SYSTEM' || replyToMessage.isSystem ? 'System' : allAgents?.find(a => a.id === replyToMessage.senderId)?.name || 'Unknown')}
+                <Reply size={10} /> {t('引用')} {replyToMessage.senderId === USER_ID ? (userProfile?.userName || 'User') : (replyToMessage.senderId === 'SYSTEM' || replyToMessage.isSystem ? 'System' : allAgents?.find(a => a.id === replyToMessage.senderId)?.name || 'Unknown')}
               </div>
               <div className="line-clamp-1 truncate max-w-[200px]">{replyToMessage.text}</div>
            </div>
@@ -201,7 +200,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           <details className="mb-2 max-w-full" open={userProfile?.expandAllReasoning}>
             <summary className="list-none cursor-pointer flex items-center gap-1.5 text-[10px] text-gray-400 font-medium bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors w-fit">
                <BrainCircuit size={12} />
-               思考过程
+               {t('思考过程')}
                {message.reasoningDuration && (
                  <span className="text-gray-400 dark:text-gray-500">
                    ({(message.reasoningDuration / 1000).toFixed(1)}s)
@@ -263,7 +262,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             // Markdown rendering after complete (using cached result)
             <div
               className="markdown-content"
-              dangerouslySetInnerHTML={{ __html: renderedMarkdown || '' }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderedMarkdown || '') }}
             />
           )}
         </div>
@@ -280,21 +279,21 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                 <button
                   onClick={() => isThisMessagePlaying ? onStopTTS?.() : onPlayTTS(message)}
                   className={`p-0.5 rounded transition-colors ${isThisMessagePlaying ? 'text-green-500 hover:text-red-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
-                  title={isThisMessagePlaying ? "停止朗读" : "朗读此消息"}
+                  title={isThisMessagePlaying ? t("停止朗读") : t("朗读此消息")}
                 >
                   {isThisMessagePlaying ? <Square size={12} /> : <Volume2 size={12} />}
                 </button>
               )}
-              <button onClick={() => onReply && onReply(message)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded" title="引用回复">
+              <button onClick={() => onReply && onReply(message)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded" title={t("引用回复")}>
                  <Reply size={12} />
               </button>
               {!isUser && sender && (
-                <button onClick={() => onMention && onMention(sender.name)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded" title="@Ta">
+                <button onClick={() => onMention && onMention(sender.name)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded" title={t("@Ta")}>
                    <AtSign size={12} />
                 </button>
               )}
               {onDelete && (
-                <button onClick={() => onDelete(message.id)} className="text-gray-400 hover:text-red-500 p-0.5 rounded" title="删除消息">
+                <button onClick={() => onDelete(message.id)} className="text-gray-400 hover:text-red-500 p-0.5 rounded" title={t("删除消息")}>
                    <Trash2 size={12} />
                 </button>
               )}

@@ -1,444 +1,444 @@
-# 🏗️ 项目架构文档 (Project Architecture)
+# Project Architecture
 
-本文档详细描述了 **AI 群聊观察会 (V5.5)** 的代码结构、数据流向及设计理念。旨在帮助开发者快速理解系统，并为后续引入 **向量数据库 (Vector DB)**、**长期记忆 (Long-term Memory)** 或 **后端服务** 提供指导。
+This document describes in detail the code structure, data flow, and design philosophy of **AI Chat Observer (V5.5)**. It is intended to help developers quickly understand the system and provide guidance for future integration of **Vector DB**, **Long-term Memory**, or **Backend Services**.
 
-**V5.5 新增功能：**
-- 私讯系统 (PM)：AI 和人类均可发送私讯，仅目标成员和人类用户可见
-- 双重输出：AI 可同时发公开消息 + 私讯（`{{RESPONSE:}}` + `{{RES_PM_Name:}}`）
-- 单向可见性屏蔽：会话级配置某 agent 看不到特定成员的消息
-- 人类伪装：将 agent 标记为"人类"以欺骗其他 agent
-- Per-agent PM 开关：群组总开关 + 每个 agent 单独启用/禁用私讯
-- PM 消息紫色文字渲染 + 徽章标记
-- Anthropic thinking mode 防中毒：历史消息缺少 thinking block 不再永久禁用思维链
+**V5.5 New Features:**
+- Private Message (PM) system: Both AI and humans can send PMs, visible only to the target member and the human user
+- Dual output: AI can send a public message + PM simultaneously (`{{RESPONSE:}}` + `{{RES_PM_Name:}}`)
+- One-way visibility blocking: Session-level configuration to hide specific members' messages from a given agent
+- Human disguise: Mark an agent as "Human" to deceive other agents
+- Per-agent PM toggle: Group-level master switch + individual enable/disable per agent
+- PM messages rendered in purple text + badge indicator
+- Anthropic thinking mode poison prevention: Missing thinking blocks in historical messages no longer permanently disable chain-of-thought
 
-**V5.4 功能：**
-- 辩论/发言顺序模式：会话级正反方分组 + 交替发言 turn sequence
-- @mention 概率衰减：防止随机模式下两个 AI 互 @ 形成二人转
-- 辩论模式下 AI 的 @mention 不劫持 turn sequence
-- 辩论角色自动注入 system prompt（告知 AI 自己是正方/反方第几号）
-- 单条消息删除按钮
-- TTS 设置面板可折叠
+**V5.4 Features:**
+- Debate/turn order mode: Session-level pro/con side assignment + alternating turn sequence
+- @mention probability decay: Prevents two AIs from monopolizing the conversation by repeatedly @mentioning each other in random mode
+- AI @mentions in debate mode do not hijack the turn sequence
+- Debate role auto-injection into system prompt (informing the AI of its side and speaker number)
+- Single message delete button
+- TTS settings panel collapsible
 
-**V5.3 功能：**
-- 娱乐工具：骰子 `{{ROLL: XdY+Z}}` 和塔罗牌 `{{TAROT: N}}`
-- 群组级娱乐功能开关
-- 自动提示词注入 (AI 自动获知可用的娱乐工具)
+**V5.3 Features:**
+- Entertainment tools: Dice `{{ROLL: XdY+Z}}` and Tarot cards `{{TAROT: N}}`
+- Group-level entertainment feature toggle
+- Auto prompt injection (AI automatically learns about available entertainment tools)
 
-**V5.2 功能：**
-- 多服务商 TTS 语音合成 (Browser/OpenAI/ElevenLabs/MiniMax/Fish Audio/Azure)
-- 自定义音色管理与 Agent 音色分配
-- 全局展开/折叠思维链按钮
-- 超时时间滑块扩展至 5 分钟
-
----
-
-## 1. 核心设计理念
-
-本项目采用 **Local-First (本地优先)** 与 **Serverless (无后端)** 架构：
-
-*   **状态管理**：React `useState` + `useRef` 控制实时交互与流式响应。
-*   **持久化**：使用 **IndexedDB (Dexie.js)** 作为本地数据库，所有数据（API Key、配置、聊天记录）均存储在用户浏览器端。
-*   **逻辑分层**：UI 组件只负责渲染，复杂逻辑封装在 `services/` 目录中。
-*   **多态适配**：通过适配器模式统一处理 Google Gemini、OpenAI、Anthropic 等不同 API 的输入输出差异。
+**V5.2 Features:**
+- Multi-provider TTS voice synthesis (Browser/OpenAI/ElevenLabs/MiniMax/Fish Audio/Azure)
+- Custom voice management and agent voice assignment
+- Global expand/collapse thinking chain button
+- Timeout slider extended to 5 minutes
 
 ---
 
-## 2. 目录结构说明
+## 1. Core Design Philosophy
+
+This project adopts a **Local-First** and **Serverless** architecture:
+
+*   **State Management**: React `useState` + `useRef` for real-time interaction and streaming responses.
+*   **Persistence**: Uses **IndexedDB (Dexie.js)** as the local database; all data (API keys, configurations, chat history) is stored in the user's browser.
+*   **Logic Layering**: UI components handle rendering only; complex logic is encapsulated in the `services/` directory.
+*   **Polymorphic Adapters**: Uses the adapter pattern to unify input/output differences across Google Gemini, OpenAI, Anthropic, and other APIs.
+
+---
+
+## 2. Directory Structure
 
 ```text
 src/
-├── components/          # UI 组件层
-│   ├── ChatBubble.tsx   # 核心组件：负责渲染消息、Markdown、思维链、附件
-│   ├── Sidebar.tsx      # 左侧栏：全局配置、角色编辑、会话切换
-│   └── RightSidebar.tsx # 右侧栏：群成员管理、快捷操作
+├── components/          # UI component layer
+│   ├── ChatBubble.tsx   # Core component: renders messages, Markdown, thinking chain, attachments
+│   ├── Sidebar.tsx      # Left sidebar: global config, character editing, session switching
+│   └── RightSidebar.tsx # Right sidebar: group member management, quick actions
 │
-├── services/            # 业务逻辑与数据层 (Service Layer)
-│   ├── db.ts            # IndexedDB 数据库管理 (CRUD)
-│   ├── geminiService.ts # Gemini API 适配器 (含 Prompt 注入)
-│   ├── openaiService.ts # OpenAI 兼容接口适配器 (含 Prompt 注入)
-│   ├── anthropicService.ts # Claude 原生 API 适配器 (含 Prompt 注入)
-│   ├── searchService.ts # 联网搜索服务 (Serper/Tavily/Brave)
-│   ├── fileParser.ts    # 前端文件解析 (PDF/Docx -> Text) + 图片压缩
-│   ├── modelFetcher.ts  # 远程模型列表获取
-│   ├── visionProxyService.ts # 视觉代理 (让纯文本模型"看"图片)
-│   ├── summaryService.ts# 自动起名与记忆总结服务
-│   ├── ttsService.ts    # TTS 语音合成服务 (多服务商适配)
-│   └── entertainmentService.ts # 娱乐工具 (骰子/塔罗牌)
+├── services/            # Business logic and data layer (Service Layer)
+│   ├── db.ts            # IndexedDB database management (CRUD)
+│   ├── geminiService.ts # Gemini API adapter (with prompt injection)
+│   ├── openaiService.ts # OpenAI-compatible interface adapter (with prompt injection)
+│   ├── anthropicService.ts # Claude native API adapter (with prompt injection)
+│   ├── searchService.ts # Web search service (Serper/Tavily/Brave)
+│   ├── fileParser.ts    # Frontend file parsing (PDF/Docx -> Text) + image compression
+│   ├── modelFetcher.ts  # Remote model list fetching
+│   ├── visionProxyService.ts # Vision proxy (enables text-only models to "see" images)
+│   ├── summaryService.ts# Auto-naming and memory summarization service
+│   ├── ttsService.ts    # TTS voice synthesis service (multi-provider adapter)
+│   └── entertainmentService.ts # Entertainment tools (dice/tarot)
 │
-├── types.ts             # TypeScript 类型定义 (数据契约)
-├── constants.ts         # 常量、默认值、Logo 映射
-├── App.tsx              # 主控制器 (Controller)
-├── main.tsx             # 入口文件
-└── index.css            # Tailwind 样式引入
+├── types.ts             # TypeScript type definitions (data contracts)
+├── constants.ts         # Constants, defaults, logo mappings
+├── App.tsx              # Main controller (Controller)
+├── main.tsx             # Entry point
+└── index.css            # Tailwind style imports
 ```
 
 ---
 
-## 3. 核心数据模型 (`types.ts`)
+## 3. Core Data Models (`types.ts`)
 
-理解数据模型是扩展系统的关键。
+Understanding the data models is key to extending the system.
 
-### 3.1 `ChatGroup` (群组) - V5.1 新增
-群组是顶层容器，包含多个对话，共享成员和场景设定。
+### 3.1 `ChatGroup` (Group) - Added in V5.1
+A group is the top-level container, holding multiple conversations with shared members and scenario settings.
 ```typescript
 interface ChatGroup {
   id: string;
   name: string;
-  memberIds: string[];     // 共享的成员列表
-  scenario?: string;       // 共享的剧本 (World View)
-  memoryConfig: MemoryConfig; // 共享的记忆配置
-  entertainmentConfig?: EntertainmentConfig; // 娱乐工具配置 (V5.3)
+  memberIds: string[];     // Shared member list
+  scenario?: string;       // Shared scenario (World View)
+  memoryConfig: MemoryConfig; // Shared memory configuration
+  entertainmentConfig?: EntertainmentConfig; // Entertainment tool config (V5.3)
   createdAt: number;
 }
 
 interface EntertainmentConfig {
-  enableDice: boolean;     // 启用骰子 {{ROLL: XdY+Z}}
-  enableTarot: boolean;    // 启用塔罗牌 {{TAROT: N}}
-  enablePM?: boolean;      // 启用私讯功能 (V5.5)
+  enableDice: boolean;     // Enable dice {{ROLL: XdY+Z}}
+  enableTarot: boolean;    // Enable tarot {{TAROT: N}}
+  enablePM?: boolean;      // Enable private messaging (V5.5)
 }
 ```
 
-### 3.2 `ChatSession` (对话)
-存储一个对话的消息记录，归属于某个群组。
+### 3.2 `ChatSession` (Session)
+Stores the message history of a conversation, belonging to a group.
 ```typescript
 interface ChatSession {
   id: string;
-  groupId: string;         // 所属群组
+  groupId: string;         // Parent group
   name: string;
-  messages: Message[];     // 消息列表
+  messages: Message[];     // Message list
   lastUpdated: number;
-  mutedAgentIds: string[]; // 禁言名单
-  mutedAgents: MuteInfo[]; // 详细禁言信息 (含过期时间)
-  yieldedAgentIds: string[]; // PASS 豁免名单
+  mutedAgentIds: string[]; // Mute list
+  mutedAgents: MuteInfo[]; // Detailed mute info (with expiration time)
+  yieldedAgentIds: string[]; // PASS exemption list
 
-  // 独立记忆 (每个对话单独)
-  summary?: string;        // 长期记忆文本
-  adminNotes?: string[];   // 管理员临时便签
+  // Independent memory (per session)
+  summary?: string;        // Long-term memory text
+  adminNotes?: string[];   // Admin temporary notes
 
-  // 辩论/发言顺序模式 (V5.4)
-  debateConfig?: DebateConfig; // undefined = 随机模式
+  // Debate/turn order mode (V5.4)
+  debateConfig?: DebateConfig; // undefined = random mode
 
-  // 精细可见性控制 (V5.5)
-  agentVisibility?: Record<string, string[]>; // key=agentId, value=该agent看不到的agentId列表
-  humanDisguise?: string[];    // 被标记为"人类"的agentId列表
+  // Fine-grained visibility control (V5.5)
+  agentVisibility?: Record<string, string[]>; // key=agentId, value=list of agentIds this agent cannot see
+  humanDisguise?: string[];    // List of agentIds marked as "Human"
 }
 ```
 
-### 3.5 `DebateConfig` (辩论配置) - V5.4 新增
-会话级的发言顺序配置，支持随机和辩论两种模式。
+### 3.5 `DebateConfig` (Debate Configuration) - Added in V5.4
+Session-level turn order configuration, supporting both random and debate modes.
 ```typescript
 type TurnMode = 'random' | 'debate';
 type DebateSide = 'pro' | 'con';
 
 interface DebateAssignment {
   agentId: string;
-  side: DebateSide;        // 正方 or 反方
-  order: number;           // 1-based, side 内的发言序号
+  side: DebateSide;        // Pro or Con
+  order: number;           // 1-based, speaker order within the side
 }
 
 interface DebateConfig {
   turnMode: TurnMode;
   assignments: DebateAssignment[];
-  breathingTime?: number;  // 会话级发言间隔覆盖 (ms)，undefined 时用全局值
-  currentTurnIndex: number;// 当前轮到第几个 (展平序列中的索引)
+  breathingTime?: number;  // Session-level speaking interval override (ms), uses global value when undefined
+  currentTurnIndex: number;// Current turn position (index in the flattened sequence)
 }
 ```
-*   **无需 DB migration**：Dexie 存 JSON，新字段 `undefined` = 随机模式，向后兼容。
+*   **No DB migration needed**: Dexie stores JSON; new field `undefined` = random mode, backward compatible.
 
-### 3.3 `Agent` (智能体/角色)
-定义一个 AI 人格。
+### 3.3 `Agent` (AI Agent/Character)
+Defines an AI persona.
 ```typescript
 interface Agent {
   id: string;
   name: string;
-  providerId: string;      // 关联的供应商
-  modelId: string;         // 具体模型 (如 gpt-4o)
-  systemPrompt: string;    // 人设
-  config: AgentConfig;     // 独立参数 (Temperature, MaxTokens, Reasoning)
+  providerId: string;      // Associated provider
+  modelId: string;         // Specific model (e.g. gpt-4o)
+  systemPrompt: string;    // Character prompt
+  config: AgentConfig;     // Independent parameters (Temperature, MaxTokens, Reasoning)
   role: AgentRole;         // 'MEMBER' | 'ADMIN'
-  isActive?: boolean;      // 是否启用
-  enablePM?: boolean;      // 该 agent 是否可以使用私讯 (V5.5)
-  searchConfig?: SearchConfig; // 搜索工具配置
-  voiceId?: string;        // TTS 音色 ID
-  voiceProviderId?: string;// TTS 服务商 ID
+  isActive?: boolean;      // Whether enabled
+  enablePM?: boolean;      // Whether this agent can use private messaging (V5.5)
+  searchConfig?: SearchConfig; // Search tool configuration
+  voiceId?: string;        // TTS voice ID
+  voiceProviderId?: string;// TTS provider ID
 }
 ```
 
-### 3.4 `TTSProvider` (TTS 服务商) - V5.2 新增
-类似于 `ApiProvider`，用于管理多个 TTS 服务商。
+### 3.4 `TTSProvider` (TTS Provider) - Added in V5.2
+Similar to `ApiProvider`, used to manage multiple TTS providers.
 ```typescript
 interface TTSProvider {
   id: string;
-  name: string;            // 显示名称
+  name: string;            // Display name
   type: TTSEngineType;     // 'browser' | 'openai' | 'elevenlabs' | 'minimax' | 'fishaudio' | 'azure'
   apiKey?: string;
-  baseUrl?: string;        // 自定义端点
-  voices: TTSVoice[];      // 可用音色列表
-  pricePer1MChars?: number;// 每百万字符价格 (USD)
-  freeQuota?: string;      // 免费额度说明
+  baseUrl?: string;        // Custom endpoint
+  voices: TTSVoice[];      // Available voice list
+  pricePer1MChars?: number;// Price per million characters (USD)
+  freeQuota?: string;      // Free quota description
 }
 
 interface TTSVoice {
-  id: string;              // 音色标识符
-  name: string;            // 显示名称
-  lang?: string;           // 语言代码
+  id: string;              // Voice identifier
+  name: string;            // Display name
+  lang?: string;           // Language code
   gender?: 'male' | 'female' | 'neutral';
-  isCustom?: boolean;      // 用户自定义音色
+  isCustom?: boolean;      // User-defined custom voice
 }
 
 interface TTSSettings {
   enabled: boolean;
-  activeProviderId?: string;  // 当前选择的服务商
-  rate: number;               // 语速 (0.5 - 2.0)
-  volume: number;             // 音量 (0 - 1)
+  activeProviderId?: string;  // Currently selected provider
+  rate: number;               // Speech rate (0.5 - 2.0)
+  volume: number;             // Volume (0 - 1)
   autoPlayNewMessages: boolean;
 }
 ```
 
 ---
 
-## 4. 关键逻辑流 (Logic Flow)
+## 4. Key Logic Flows (Logic Flow)
 
-### 4.1 自动对战循环 (Auto-Play Loop)
-位于 `App.tsx` 的 `useEffect` 中：
-1.  **Check**: 检查并发锁 (`processingAgents`)、暂停状态 (`isAutoPlay`)。
-2.  **Filter**: 筛选符合条件的 AI（未禁言、未 Yield、非上一轮发言者）。
-    *   辩论模式下跳过 cooldown 和 lastSpeaker 限制（顺序由 turn sequence 保证）。
-3.  **@Mention Priority**: 处理 @mention 优先级（辩论模式下 AI 的 @mention 不劫持顺序）。
-4.  **@Mention Decay**: 随机模式下，同一对 agent 连续互 @ 时概率递减（100%→70%→40%→10%），防止二人转。
-5.  **Select**: 根据模式选择 agent：
-    *   **随机模式**: 随机选择。
-    *   **辩论模式**: 按展平序列 (pro1→con1→pro2→con2...) 选择下一个，使用 `debateTurnIndexRef` 跟踪进度。
-6.  **Trigger**: 调用 `triggerAgentReply`，使用会话级 `breathingTime` 覆盖（如有配置）。
+### 4.1 Auto-Play Loop (Auto-Play Loop)
+Located in `App.tsx`'s `useEffect`:
+1.  **Check**: Check concurrency lock (`processingAgents`), pause state (`isAutoPlay`).
+2.  **Filter**: Filter eligible AIs (not muted, not yielded, not the last speaker).
+    *   In debate mode, cooldown and lastSpeaker restrictions are skipped (order is guaranteed by the turn sequence).
+3.  **@Mention Priority**: Handle @mention priority (in debate mode, AI @mentions do not hijack the order).
+4.  **@Mention Decay**: In random mode, probability decreases when the same pair of agents repeatedly @mention each other (100%->70%->40%->10%), preventing a two-agent loop.
+5.  **Select**: Select agent based on mode:
+    *   **Random mode**: Random selection.
+    *   **Debate mode**: Select next agent according to the flattened sequence (pro1->con1->pro2->con2...), tracking progress with `debateTurnIndexRef`.
+6.  **Trigger**: Call `triggerAgentReply`, using session-level `breathingTime` override (if configured).
 
-### 4.2 触发回复 (`triggerAgentReply`)
-这是系统的核心调度函数：
-1.  **Lock**: 将 AI ID 加入 `processingAgents`。
-2.  **Signal**: 创建 `AbortController` 用于超时熔断或手动停止。
-3.  **Service Call**: 根据 `provider.type` 路由到对应的 Service (`streamGeminiReply` 等)。
+### 4.2 Trigger Reply (`triggerAgentReply`)
+This is the system's core dispatch function:
+1.  **Lock**: Add the AI's ID to `processingAgents`.
+2.  **Signal**: Create an `AbortController` for timeout circuit-breaking or manual stop.
+3.  **Service Call**: Route to the corresponding service (`streamGeminiReply`, etc.) based on `provider.type`.
 4.  **Stream & Parse**: 
-    *   接收流式数据。
-    *   **指令解析**：正则扫描 `{{PASS}}`, `{{REPLY:id}}`, `{{MUTE:name}}`, `{{NOTE:content}}`。
-5.  **Commit**: 生成完毕，执行管理指令（如禁言），计算 Token 花费，更新状态，释放 Lock。
+    *   Receive streaming data.
+    *   **Command parsing**: Regex scan for `{{PASS}}`, `{{REPLY:id}}`, `{{MUTE:name}}`, `{{NOTE:content}}`.
+5.  **Commit**: After generation completes, execute admin commands (e.g. mute), calculate token cost, update state, release lock.
 
-### 4.3 文本指令协议 (Text Command Protocol)
-为了让 AI 能够操作 UI 功能（如禁言、记笔记、搜索），我们定义了一套基于文本的协议，而不是使用复杂的 Function Calling。这保证了跨模型的最大兼容性。
+### 4.3 Text Command Protocol (Text Command Protocol)
+To allow AI to operate UI features (such as muting, note-taking, searching), we defined a text-based protocol instead of using complex Function Calling. This ensures maximum cross-model compatibility.
 
-**所有指令列表：**
-| 指令 | 权限 | 说明 |
-|------|------|------|
-| `{{PASS}}` | 所有 | 跳过本轮发言 |
-| `{{REPLY: id}}` | 所有 | 引用某条消息 |
-| `{{SEARCH: query}}` | 需配置 | AI 主动联网搜索 |
-| `{{ROLL: XdY+Z}}` | 需开启 | 投掷骰子 (如 2d6+3) |
-| `{{TAROT: N}}` | 需开启 | 抽取 N 张塔罗牌 (支持正逆位) |
-| `{{RES_PM_Name: content}}` | 需开启 | 发送私讯给指定成员 (V5.5) |
-| `{{MUTE: Name, Duration}}` | Admin | 禁言成员 (10min/1h/1d/永久) |
-| `{{UNMUTE: Name}}` | Admin | 解除禁言 |
-| `{{NOTE: content}}` | Admin | 添加记忆便签 |
-| `{{DELNOTE: keyword}}` | Admin | 删除含关键词的便签 |
-| `{{CLEARNOTES}}` | Admin | 清空所有便签 |
+**Complete Command List:**
+| Command | Permission | Description |
+|---------|------------|-------------|
+| `{{PASS}}` | All | Skip this turn |
+| `{{REPLY: id}}` | All | Quote a specific message |
+| `{{SEARCH: query}}` | Requires config | AI-initiated web search |
+| `{{ROLL: XdY+Z}}` | Requires enable | Roll dice (e.g. 2d6+3) |
+| `{{TAROT: N}}` | Requires enable | Draw N tarot cards (supports upright/reversed) |
+| `{{RES_PM_Name: content}}` | Requires enable | Send PM to specified member (V5.5) |
+| `{{MUTE: Name, Duration}}` | Admin | Mute a member (10min/1h/1d/permanent) |
+| `{{UNMUTE: Name}}` | Admin | Unmute a member |
+| `{{NOTE: content}}` | Admin | Add a memory note |
+| `{{DELNOTE: keyword}}` | Admin | Delete notes containing keyword |
+| `{{CLEARNOTES}}` | Admin | Clear all notes |
 
-**执行流程：**
-*   **Prompt 注入**: 在 `*Service.ts` 中，我们告知角色可用的指令。
-*   **指令拦截**: 在 `App.tsx` 的流式读取循环中，正则匹配到指令后：
-    *   UI 层**隐藏**该指令（用户不可见）。
-    *   代码层**执行**对应逻辑。
+**Execution Flow:**
+*   **Prompt injection**: In `*Service.ts`, we inform the character of available commands.
+*   **Command interception**: In `App.tsx`'s streaming read loop, when a command is matched by regex:
+    *   The UI layer **hides** the command (invisible to the user).
+    *   The code layer **executes** the corresponding logic.
 
-### 4.4 联网搜索流程 (Search Flow) - V5.1 新增
-1.  **触发方式**：
-    *   用户输入 `/search 关键词`
-    *   AI 输出 `{{SEARCH: 关键词}}`（需在角色设置中配置搜索服务）
-2.  **执行**: 调用 `searchService.performSearch`，支持 Serper/Tavily/Brave/Metaso。
-3.  **结果注入**: 搜索结果作为系统消息插入聊天，并再次触发 AI 回复。
-4.  **防循环**: 第二次触发时 `disableSearch=true`，AI 不会再看到搜索工具提示。
+### 4.4 Web Search Flow (Search Flow) - Added in V5.1
+1.  **Trigger methods**:
+    *   User inputs `/search keyword`
+    *   AI outputs `{{SEARCH: keyword}}` (requires search service configured in character settings)
+2.  **Execution**: Calls `searchService.performSearch`, supporting Serper/Tavily/Brave/Metaso.
+3.  **Result injection**: Search results are inserted as system messages into the chat, triggering another AI reply.
+4.  **Loop prevention**: On the second trigger, `disableSearch=true` prevents the AI from seeing the search tool prompt again.
 
-### 4.5 记忆与总结系统 (Memory System)
-1.  **触发器**: `App.tsx` 监听 `messages.length`。当 `count % threshold === 0` 时触发。
-2.  **执行**: 调用 `summaryService.updateSessionSummary`。
-3.  **合成**: `Prompt = Old Summary + Admin Notes + Recent Messages`。
-4.  **更新**: 生成新的 Summary，存入 DB，清空 Admin Notes。
-5.  **闭环**: 新的 Summary 会在下一次 API 调用时作为 System Prompt 注入，实现记忆闭环。
+### 4.5 Memory & Summarization System (Memory System)
+1.  **Trigger**: `App.tsx` watches `messages.length`. Fires when `count % threshold === 0`.
+2.  **Execution**: Calls `summaryService.updateSessionSummary`.
+3.  **Synthesis**: `Prompt = Old Summary + Admin Notes + Recent Messages`.
+4.  **Update**: Generates a new summary, saves to DB, clears admin notes.
+5.  **Closed loop**: The new summary is injected as System Prompt in the next API call, completing the memory loop.
 
-### 4.6 群组层级结构 (Group Hierarchy) - V5.1 新增
+### 4.6 Group Hierarchy (Group Hierarchy) - Added in V5.1
 ```
-群组 (Group)           → 共享：成员、场景、记忆配置
-├── 对话 1 (Session)   → 独立：消息、摘要、便签、禁言
-├── 对话 2 (Session)
-└── 对话 3 (Session)
+Group                    -> Shared: members, scenario, memory config
+├── Session 1            -> Independent: messages, summary, notes, mutes
+├── Session 2
+└── Session 3
 ```
-*   **UI**: 左侧边栏显示两级折叠列表。
-*   **成员管理**: 右侧边栏操作的是群组的 `memberIds`，对该群组下所有对话生效。
-*   **数据迁移**: Dexie v2 自动为旧 Session 创建同名 Group。
+*   **UI**: Left sidebar displays a two-level collapsible list.
+*   **Member management**: Right sidebar operates on the group's `memberIds`, affecting all sessions under that group.
+*   **Data migration**: Dexie v2 automatically creates a same-named group for legacy sessions.
 
-### 4.7 图片压缩 (Image Compression) - V5.1 新增
-Anthropic API 限制图片 5MB，因此在上传时自动压缩：
-1.  **检测**: `fileParser.ts` 计算 Base64 大小。
-2.  **压缩**: 使用 Canvas 降低质量 (0.9→0.3) 和尺寸 (1.0→0.25)，输出 JPEG。
-3.  **配置**: 用户可在设置中关闭或调整阈值 (默认 4MB)。
+### 4.7 Image Compression (Image Compression) - Added in V5.1
+Anthropic API limits images to 5MB, so auto-compression is applied on upload:
+1.  **Detection**: `fileParser.ts` calculates Base64 size.
+2.  **Compression**: Uses Canvas to reduce quality (0.9->0.3) and dimensions (1.0->0.25), outputting JPEG.
+3.  **Configuration**: Users can disable or adjust the threshold in settings (default 4MB).
 
-### 4.8 娱乐工具系统 (Entertainment Tools) - V5.3 新增
-为 TRPG、剧本杀等角色扮演场景提供骰子和塔罗牌功能。
+### 4.8 Entertainment Tools System (Entertainment Tools) - Added in V5.3
+Provides dice and tarot card features for TRPG, murder mystery, and other role-playing scenarios.
 
-**骰子系统 (Dice Rolling)：**
-*   **语法**: `{{ROLL: XdY+Z}}` - X 个 Y 面骰子 + 修正值 Z
-*   **示例**: `{{ROLL: 2d6+3}}` → `2d6+3 = 11 (4+5+2)`
-*   **实现**: `entertainmentService.rollDice()` 解析表达式并返回明细
+**Dice Rolling System:**
+*   **Syntax**: `{{ROLL: XdY+Z}}` - X dice with Y sides + modifier Z
+*   **Example**: `{{ROLL: 2d6+3}}` -> `2d6+3 = 11 (4+5+2)`
+*   **Implementation**: `entertainmentService.rollDice()` parses the expression and returns detailed breakdown
 
-**塔罗牌系统 (Tarot Cards)：**
-*   **语法**: `{{TAROT: N}}` - 抽取 N 张牌
-*   **牌库**: 22 张大阿卡纳牌 (Major Arcana)
-*   **正逆位**: 每张牌 50% 概率逆位，显示为 "🔮 The Fool (Reversed)"
-*   **三牌阵**: 当 N=3 时，自动标注 Past / Present / Future
+**Tarot Card System:**
+*   **Syntax**: `{{TAROT: N}}` - Draw N cards
+*   **Deck**: 22 Major Arcana cards
+*   **Upright/Reversed**: Each card has a 50% chance of being reversed, displayed as "The Fool (Reversed)"
+*   **Three-card spread**: When N=3, automatically labels Past / Present / Future
 
-**配置与提示词注入：**
-*   群组设置中可单独开关骰子/塔罗功能
-*   当功能开启时，自动在 System Prompt 中注入使用说明
-*   AI 完成输出后，`App.tsx` 解析指令并插入系统消息显示结果
+**Configuration & Prompt Injection:**
+*   Dice/tarot features can be individually toggled in group settings
+*   When enabled, usage instructions are automatically injected into the System Prompt
+*   After AI completes output, `App.tsx` parses commands and inserts system messages to display results
 
-### 4.9 TTS 语音合成系统 (Text-to-Speech) - V5.2 新增
-支持多种 TTS 服务商，实现消息朗读功能。
+### 4.9 TTS Voice Synthesis System (Text-to-Speech) - Added in V5.2
+Supports multiple TTS providers for message read-aloud functionality.
 
-**支持的服务商：**
-| 服务商 | 类型 | 价格 (每百万字符) | 特点 |
-|--------|------|------------------|------|
-| Browser | 浏览器原生 | 免费 | 无需 API，依赖系统语音 |
-| OpenAI | 云端 | $15 | 高质量，支持 6 种音色 |
-| ElevenLabs | 云端 | $30 | 最自然，支持自定义音色克隆 |
-| MiniMax | 云端 | $5 | 性价比高，中文优化 |
-| Fish Audio | 云端 | $10 | 开源友好，支持自训练 |
-| Azure | 云端 | $15 | 企业级，多语言支持 |
+**Supported Providers:**
+| Provider | Type | Price (per million chars) | Features |
+|----------|------|--------------------------|----------|
+| Browser | Browser native | Free | No API needed, depends on system voices |
+| OpenAI | Cloud | $15 | High quality, supports 6 voices |
+| ElevenLabs | Cloud | $30 | Most natural, supports custom voice cloning |
+| MiniMax | Cloud | $5 | Cost-effective, Chinese-optimized |
+| Fish Audio | Cloud | $10 | Open-source friendly, supports self-training |
+| Azure | Cloud | $15 | Enterprise-grade, multi-language support |
 
-**播放模式：**
-*   **单条播放**: 点击消息旁的播放按钮。
-*   **连续播放**: 从某条消息开始，自动播放后续所有消息。
-*   **自动播放**: 新消息生成后自动朗读。
+**Playback Modes:**
+*   **Single play**: Click the play button next to a message.
+*   **Continuous play**: Start from a specific message and auto-play all subsequent messages.
+*   **Auto play**: Automatically read aloud newly generated messages.
 
-**音色分配逻辑：**
-1.  优先使用 Agent 配置的 `voiceId` + `voiceProviderId`。
-2.  若未配置，则从当前服务商的音色列表中随机分配。
-3.  用户消息使用默认音色。
+**Voice Assignment Logic:**
+1.  Prioritize the agent's configured `voiceId` + `voiceProviderId`.
+2.  If not configured, randomly assign from the current provider's voice list.
+3.  User messages use the default voice.
 
-**执行流程：**
+**Execution Flow:**
 ```
-用户点击播放 → ttsService.speak(text, voiceId, provider)
-  → 根据 provider.type 路由到对应实现
-  → playOpenAITTS / playElevenLabsTTS / playMiniMaxTTS / ...
-  → 返回 { chars, cost } 用于费用统计
+User clicks play -> ttsService.speak(text, voiceId, provider)
+  -> Route to corresponding implementation based on provider.type
+  -> playOpenAITTS / playElevenLabsTTS / playMiniMaxTTS / ...
+  -> Returns { chars, cost } for expense tracking
 ```
 
-**自定义音色管理：**
-*   用户可手动添加服务商未自动获取的音色（输入名称 + ID）。
-*   支持为每个 Agent 单独指定音色。
+**Custom Voice Management:**
+*   Users can manually add voices not automatically fetched by the provider (input name + ID).
+*   Supports assigning a specific voice to each agent individually.
 
-### 4.10 辩论/发言顺序模式 (Debate Turn Mode) - V5.4 新增
-支持在会话级别配置 agent 的发言顺序，适用于正式辩论、角色对抗等场景。
+### 4.10 Debate/Turn Order Mode (Debate Turn Mode) - Added in V5.4
+Supports session-level configuration of agent speaking order, suitable for formal debates, character confrontations, and similar scenarios.
 
-**发言序列构建：**
+**Turn Sequence Construction:**
 ```
 assignments: [pro1, pro2, con1, con2, con3]
-  → buildDebateTurnSequence()
-  → [pro1, con1, pro2, con2, con3]  (交替插入)
+  -> buildDebateTurnSequence()
+  -> [pro1, con1, pro2, con2, con3]  (alternating insertion)
 ```
 
-**UI 配置 (RightSidebar)：**
-*   模式切换：随机 / 辩论
-*   切换到辩论时自动将成员交替分配正反方
-*   支持拖动排序 (上/下箭头) 和切换阵营
-*   可设置会话级发言间隔覆盖
-*   Agent 卡片上显示阵营徽章（正1、反2 等）
+**UI Configuration (RightSidebar):**
+*   Mode switch: Random / Debate
+*   Switching to debate mode automatically assigns members alternately to pro/con sides
+*   Supports drag-to-reorder (up/down arrows) and side switching
+*   Session-level speaking interval override can be set
+*   Agent cards display side badges (Pro1, Con2, etc.)
 
-**Prompt 注入：**
-辩论模式下，`triggerAgentReply` 自动在 `scenario` 末尾追加阵营信息：
+**Prompt Injection:**
+In debate mode, `triggerAgentReply` automatically appends side information to the end of `scenario`:
 ```
-[辩论模式]
-当前为辩论模式，你被分配为【正方第1号辩手】。
-正方成员: 1. Gemini, 2. GPT-4o
-反方成员: 1. DeepSeek, 2. Claude
-请站在正方的立场进行论述，与对方阵营展开辩论。
+[Debate Mode]
+This is debate mode. You have been assigned as [Pro Side Speaker #1].
+Pro side members: 1. Gemini, 2. GPT-4o
+Con side members: 1. DeepSeek, 2. Claude
+Argue from the pro side's position and debate against the opposing side.
 ```
-*   注入到 `scenario` 而非单独参数，三个 service 文件无需修改。
+*   Injected into `scenario` rather than a separate parameter, so the three service files require no modification.
 
-**防二人转机制 (@Mention Decay)：**
-*   随机模式下，`mentionPairRef` 跟踪同一对 agent 连续互 @ 次数。
-*   衰减曲线：`prob = max(0.1, 1 - count * 0.3)` → 第 4 次起仅 10%。
-*   概率不通过时 fall through 到随机选人。
-*   辩论模式下直接跳过 AI @mention 优先级，完全由 turn sequence 控制。
+**Anti-Loop Mechanism (@Mention Decay):**
+*   In random mode, `mentionPairRef` tracks the number of consecutive mutual @mentions between the same pair of agents.
+*   Decay curve: `prob = max(0.1, 1 - count * 0.3)` -> from the 4th time onward, only 10%.
+*   When probability check fails, falls through to random agent selection.
+*   In debate mode, AI @mention priority is skipped entirely; order is fully controlled by the turn sequence.
 
-**关键实现细节：**
-*   `currentTurnIndex` 使用 `useRef` 而非 session state，避免在 autoplay `useEffect` 中触发无限循环。
-*   切换会话时从 session 的 `debateConfig.currentTurnIndex` 同步到 ref。
-*   清空消息时重置 ref 和 session 中的 index。
-*   移除 agent 时自动清理对应 assignment。
+**Key Implementation Details:**
+*   `currentTurnIndex` uses `useRef` instead of session state to avoid triggering infinite loops in the autoplay `useEffect`.
+*   When switching sessions, syncs from `debateConfig.currentTurnIndex` in the session to the ref.
+*   Clearing messages resets both the ref and the session's index.
+*   Removing an agent automatically cleans up the corresponding assignment.
 
-### 4.11 私讯与精细可见性系统 (PM & Visibility) - V5.5 新增
-支持 AI 和人类之间的私密通信，以及会话级的可见性控制。
+### 4.11 Private Messaging & Fine-Grained Visibility System (PM & Visibility) - Added in V5.5
+Supports private communication between AI and humans, as well as session-level visibility control.
 
-**私讯 (Private Message) 系统：**
-*   **AI 发送 PM**: 使用 `{{RES_PM_Name: content}}`，可与 `{{RESPONSE:}}` 同时使用（双重输出）。
-*   **人类发送 PM**: 输入框旁的 PM 按钮选择目标，发送后仅目标和自己可见。
-*   **可见性规则**: PM 消息仅 sender + target + 人类用户 可见，优先级最高（高于 OPEN/BLIND 模式）。
-*   **双重输出**: AI 可同时发公开消息和私讯，保存为两条独立消息。
-*   **UI 表现**: PM 消息文字渲染为紫色，名字旁显示紫色徽章 `私讯→目标名`。
+**Private Message (PM) System:**
+*   **AI sends PM**: Uses `{{RES_PM_Name: content}}`, can be used simultaneously with `{{RESPONSE:}}` (dual output).
+*   **Human sends PM**: PM button next to the input box to select target; after sending, visible only to the target and sender.
+*   **Visibility rules**: PM messages are visible only to sender + target + human user, with highest priority (overrides OPEN/BLIND modes).
+*   **Dual output**: AI can send both a public message and a PM simultaneously, saved as two separate messages.
+*   **UI rendering**: PM message text is rendered in purple, with a purple badge next to the name showing `PM -> target name`.
 
-**可见性过滤优先级 (三个 service 统一)：**
+**Visibility Filtering Priority (unified across all three services):**
 ```
-1. 系统消息 → 始终可见
-2. PM 消息 → 仅 sender 和 target 可见
-3. 用户消息 → 始终可见
-4. 自己的消息 → 始终可见
-5. 单向屏蔽 → agentVisibility 配置
-6. 全局模式 → OPEN (全可见) / BLIND (仅看到自己)
+1. System messages -> Always visible
+2. PM messages -> Visible only to sender and target
+3. User messages -> Always visible
+4. Own messages -> Always visible
+5. One-way blocking -> agentVisibility configuration
+6. Global mode -> OPEN (all visible) / BLIND (only own messages visible)
 ```
 
-**单向可见性屏蔽：**
-*   会话级配置 `agentVisibility: Record<string, string[]>`
-*   RightSidebar 中每个 agent 可折叠配置"看不到谁的消息"
-*   PM 优先级高于屏蔽（被屏蔽的人发 PM 仍可送达）
+**One-Way Visibility Blocking:**
+*   Session-level config `agentVisibility: Record<string, string[]>`
+*   In the RightSidebar, each agent has a collapsible section to configure "whose messages are hidden"
+*   PM priority is higher than blocking (PMs from blocked agents are still delivered)
 
-**人类伪装 (Human Disguise)：**
-*   会话级 `humanDisguise: string[]`，被标记的 agent 在其他 AI 的成员列表中显示为 "(Human)"
-*   不影响自身视角（agent 自己仍知道自己是 AI）
+**Human Disguise:**
+*   Session-level `humanDisguise: string[]`; marked agents appear as "(Human)" in other AIs' member lists
+*   Does not affect self-perception (the agent itself still knows it is an AI)
 
-**Auto-Play 与 PM 交互：**
-*   PM 发给人类 → 不触发任何 agent
-*   PM 发给 AI → 仅触发目标 agent 回复
-*   双重输出 → 以公开消息为准触发 auto-play，PM 部分静默
+**Auto-Play & PM Interaction:**
+*   PM sent to a human -> Does not trigger any agent
+*   PM sent to an AI -> Only triggers the target agent to reply
+*   Dual output -> Auto-play is triggered based on the public message; the PM portion is silent
 
-**Anthropic Thinking Mode 兼容：**
-*   PM 消息和历史中缺少 thinking block 的 assistant 消息会被降级为 user 角色的回忆注释
-*   避免"中毒"：一旦 thinking 被意外禁用，不会因旧消息永久无法恢复
-*   `shouldEnableThinking` 只看 agent 配置，不再检查历史完整性
+**Anthropic Thinking Mode Compatibility:**
+*   PM messages and historical assistant messages missing thinking blocks are downgraded to user-role recall annotations
+*   Prevents "poisoning": once thinking is accidentally disabled, it won't be permanently unrecoverable due to old messages
+*   `shouldEnableThinking` only checks agent configuration, no longer inspecting historical completeness
 
 ---
 
-## 5. 扩展指南：构建记忆与后端 (Future Roadmap)
+## 5. Extension Guide: Building Memory & Backend (Future Roadmap)
 
-如果您计划引入**向量数据库 (Vector DB)** 或 **后端数据库**，请参考以下重构路径：
+If you plan to introduce a **Vector DB** or **Backend Database**, refer to the following refactoring path:
 
-### 阶段一：抽离状态逻辑 (Refactor)
-目前 `App.tsx` 承担了过多的 Controller 职责。
-*   **目标**：将聊天逻辑抽离为 Custom Hook，例如 `useChatEngine`。
-*   **好处**：`App.tsx` 只负责布局，逻辑层更清晰，方便接入不同的数据源。
+### Phase 1: Extract State Logic (Refactor)
+Currently `App.tsx` takes on too many Controller responsibilities.
+*   **Goal**: Extract chat logic into a Custom Hook, e.g. `useChatEngine`.
+*   **Benefit**: `App.tsx` handles layout only; the logic layer becomes clearer, making it easier to connect different data sources.
 
-### 阶段二：引入向量数据库 (RAG Integration)
-目前的上下文是基于**滑动窗口 (Sliding Window)**。要让 AI 记住 1000 条之前的细节：
-1.  **修改点**：`services/*Service.ts`。
-2.  **动作**：
-    *   在构建 `formattedMessages` 之前，截取用户的 Query。
-    *   将 Query 发送到向量数据库 (如 Pinecone, 或浏览器本地的 Transformers.js + Voy)。
-    *   检索相关历史记录 (Relevant Memories)。
-    *   将检索到的记录插入到 System Prompt 的 `[Relevant History]` 区块中。
+### Phase 2: Introduce Vector Database (RAG Integration)
+The current context is based on a **Sliding Window**. To let the AI recall details from 1000+ messages ago:
+1.  **Modification point**: `services/*Service.ts`.
+2.  **Actions**:
+    *   Before building `formattedMessages`, extract the user's query.
+    *   Send the query to a vector database (e.g. Pinecone, or browser-local Transformers.js + Voy).
+    *   Retrieve relevant historical records (Relevant Memories).
+    *   Insert the retrieved records into the `[Relevant History]` section of the System Prompt.
 
-### 阶段三：从 IndexedDB 迁移到 PostgreSQL/Supabase
-如果要把这是一个单机应用变成多人在线应用：
-1.  **替换 `services/db.ts`**：
-    *   保持方法名不变 (`loadAllData`, `saveCollection`)。
-    *   将内部实现从 `dexie` 替换为 `fetch('/api/...')` 或 `supabase-js` 客户端。
+### Phase 3: Migrate from IndexedDB to PostgreSQL/Supabase
+To transform this single-user application into a multi-user online application:
+1.  **Replace `services/db.ts`**:
+    *   Keep method names unchanged (`loadAllData`, `saveCollection`).
+    *   Replace the internal implementation from `dexie` to `fetch('/api/...')` or `supabase-js` client.
 
 ---
 
-## 6. 调试与构建
+## 6. Debugging & Building
 
-*   **本地运行**: `npm run dev`
-*   **构建生产包**: `npm run build`
+*   **Local development**: `npm run dev`
+*   **Production build**: `npm run build`

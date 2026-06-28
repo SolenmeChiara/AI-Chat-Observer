@@ -40,7 +40,7 @@ class AIObserverDB extends Dexie {
           // 创建群组
           await tx.table('groups').add({
             id: groupId,
-            name: session.name || '未命名群组',
+            name: session.name || 'Unnamed Group',
             memberIds: session.memberIds || activeAgentIds,
             scenario: session.scenario || '',
             memoryConfig: session.memoryConfig || {
@@ -64,36 +64,51 @@ class AIObserverDB extends Dexie {
 
 const db = new AIObserverDB();
 
+db.on('blocked', () => {
+  console.warn('Database upgrade blocked — another tab is holding an older connection. Close other tabs and retry.');
+});
+
 // Initialize DB with default data if empty
 export const initDB = async () => {
-  const agentCount = await db.agents.count();
-  if (agentCount === 0) {
-    await (db as any).transaction('rw', db.agents, db.providers, db.sessions, db.groups, db.settings, async () => {
-      await db.agents.bulkAdd(INITIAL_AGENTS);
-      await db.providers.bulkAdd(INITIAL_PROVIDERS);
-      await db.groups.bulkAdd(INITIAL_GROUPS);
-      await db.sessions.bulkAdd(INITIAL_SESSIONS);
-      await db.settings.put({ id: 'global', ...DEFAULT_SETTINGS });
-    });
-    console.log('Database initialized with default data');
+  try {
+    const agentCount = await db.agents.count();
+    if (agentCount === 0) {
+      await (db as any).transaction('rw', db.agents, db.providers, db.sessions, db.groups, db.settings, async () => {
+        await db.agents.bulkPut(INITIAL_AGENTS);
+        await db.providers.bulkPut(INITIAL_PROVIDERS);
+        await db.groups.bulkPut(INITIAL_GROUPS);
+        await db.sessions.bulkPut(INITIAL_SESSIONS);
+        await db.settings.put({ id: 'global', ...DEFAULT_SETTINGS });
+      });
+      console.log('Database initialized with default data');
+    }
+  } catch (err) {
+    console.warn('initDB failed (corrupt DB?), will try loading with defaults:', err);
   }
 };
 
 export const loadAllData = async () => {
-  const agents = await db.agents.toArray();
-  const providers = await db.providers.toArray();
-  const sessions = await db.sessions.toArray();
-  const groups = await db.groups.toArray();
-  const settingsRecord = await db.settings.get('global');
+  const safeLoad = async <T>(fn: () => Promise<T>, fallback: T, label: string): Promise<T> => {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(`Failed to load ${label}, using defaults:`, err);
+      return fallback;
+    }
+  };
+
+  const agents = await safeLoad(() => db.agents.toArray(), [], 'agents');
+  const providers = await safeLoad(() => db.providers.toArray(), [], 'providers');
+  const sessions = await safeLoad(() => db.sessions.toArray(), [], 'sessions');
+  const groups = await safeLoad(() => db.groups.toArray(), [], 'groups');
+  const settingsRecord = await safeLoad(() => db.settings.get('global'), null, 'settings');
 
   let loadedSettings = DEFAULT_SETTINGS;
   if (settingsRecord) {
-      // Destructure to remove 'id' cleanly, preventing it from being 'undefined' in the state
       const { id, ...rest } = settingsRecord;
       loadedSettings = rest as GlobalSettings;
   }
 
-  // Fallback to defaults if specific tables are empty (edge case)
   return {
     agents: agents.length ? agents : INITIAL_AGENTS,
     providers: providers.length ? providers : INITIAL_PROVIDERS,
@@ -106,6 +121,10 @@ export const loadAllData = async () => {
 // Generic helper to sync a collection (React State -> DB)
 // We use clear() + bulkPut() inside a transaction to ensure deleted items in state are removed from DB
 export const saveCollection = async <T extends { id: string }>(tableName: 'agents' | 'providers' | 'sessions' | 'groups', items: T[]) => {
+  if (items.length === 0) {
+    console.warn(`saveCollection('${tableName}'): refusing to save empty array (would delete all data)`);
+    return;
+  }
   try {
     const table = (db as any).table(tableName);
     await (db as any).transaction('rw', table, async () => {

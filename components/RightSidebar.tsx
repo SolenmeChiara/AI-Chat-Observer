@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Agent, MuteInfo, UserProfile, DebateConfig, DebateAssignment } from '../types';
 import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone, Swords, ArrowUp, ArrowDown, ArrowRightLeft, EyeOff } from 'lucide-react';
+import { useT } from '../i18n';
 
 // Mute duration options (in minutes)
 const MUTE_DURATIONS = [
@@ -13,7 +14,7 @@ const MUTE_DURATIONS = [
   { label: '30天', value: 60 * 24 * 30 },
   { label: '永久', value: 0 },
   { label: '自定义', value: -1 },
-];
+] as const;
 
 interface RightSidebarProps {
   isOpen: boolean;
@@ -50,6 +51,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   agentVisibility, onUpdateAgentVisibility,
   userProfiles, activeProfileId, onSwitchProfile
 }) => {
+  const t = useT();
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showMuteMenu, setShowMuteMenu] = useState<string | null>(null); // agentId being muted
@@ -114,11 +116,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     if (idx === -1) return;
     const newSide = assignments[idx].side === 'pro' ? 'con' as const : 'pro' as const;
     const maxOrder = assignments.filter(a => a.side === newSide).reduce((max, a) => Math.max(max, a.order), 0);
+    const originalSide = assignments[idx].side;
     assignments[idx] = { ...assignments[idx], side: newSide, order: maxOrder + 1 };
     // 重新排列原 side 的 order
-    const oldSide = assignments[idx].side === 'con' ? 'pro' as const : 'con' as const;
-    // Actually need to recompute based on original side before switch
-    const originalSide = newSide === 'con' ? 'pro' : 'con';
     let orderCounter = 1;
     assignments
       .filter(a => a.side === originalSide)
@@ -158,17 +158,17 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   };
 
   const getRemainingTime = (muteUntil: number): string => {
-    if (muteUntil === 0) return '永久';
+    if (muteUntil === 0) return t('永久');
     const remaining = muteUntil - Date.now();
-    if (remaining <= 0) return '已过期';
+    if (remaining <= 0) return t('已过期');
 
     const minutes = Math.floor(remaining / 60000);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
 
-    if (days > 0) return `${days}天${hours % 24}小时`;
-    if (hours > 0) return `${hours}小时${minutes % 60}分`;
-    return `${minutes}分钟`;
+    if (days > 0) return `${days}${t('天')}${hours % 24}${t('小时')}`;
+    if (hours > 0) return `${hours}${t('小时')}${minutes % 60}${t('分')}`;
+    return `${minutes}${t('分钟')}`;
   };
 
   const handleMute = (agentId: string, durationMinutes: number) => {
@@ -189,7 +189,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       {/* Header */}
       <div className="p-4 border-b border-gray-100 dark:border-zinc-700 flex justify-between items-center bg-white dark:bg-zinc-800">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-          群聊成员 <span className="bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-1 rounded-full">{agents.length}</span>
+          {t('群聊成员')} <span className="bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-1 rounded-full">{agents.length}</span>
         </h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white"><X size={20} /></button>
       </div>
@@ -220,24 +220,24 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <h4 className="font-semibold text-sm text-gray-900 dark:text-white truncate flex items-center gap-2">
-                  {isNarrator ? '旁白' : (currentProfile?.name || userName)}
+                  {isNarrator ? t('旁白') : (currentProfile?.name || userName)}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                     isNarrator
                       ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
                       : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
                   }`}>
-                    {isNarrator ? '系统消息' : '玩家'}
+                    {isNarrator ? t('系统消息') : t('玩家')}
                   </span>
                 </h4>
                 <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
-                  {isNarrator ? '发送的消息会显示为系统提示' : (currentProfile?.persona?.slice(0, 30) || '点击切换身份') + '...'}
+                  {isNarrator ? t('发送的消息会显示为系统提示') : (currentProfile?.persona?.slice(0, 30) || t('点击切换身份')) + '...'}
                 </p>
               </div>
               <button
                 onClick={() => setShowProfileMenu(!showProfileMenu)}
                 className="px-2 py-1 text-[10px] bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center gap-1"
               >
-                切换 <ChevronDown size={10} />
+                {t('切换')} <ChevronDown size={10} />
               </button>
             </div>
 
@@ -252,8 +252,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   }`}
                 >
                   <Megaphone size={14} className="text-amber-500" />
-                  <span>旁白模式</span>
-                  {isNarrator && <span className="ml-auto text-[9px] bg-amber-500 text-white px-1 rounded">当前</span>}
+                  <span>{t('旁白模式')}</span>
+                  {isNarrator && <span className="ml-auto text-[9px] bg-amber-500 text-white px-1 rounded">{t('当前')}</span>}
                 </button>
                 {/* User Profiles */}
                 {userProfiles.map(profile => (
@@ -266,7 +266,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   >
                     <img src={profile.avatar} className="w-4 h-4 rounded-full object-cover border border-gray-200 dark:border-zinc-600" />
                     <span className="truncate">{profile.name}</span>
-                    {activeProfileId === profile.id && <span className="ml-auto text-[9px] bg-blue-500 text-white px-1 rounded">当前</span>}
+                    {activeProfileId === profile.id && <span className="ml-auto text-[9px] bg-blue-500 text-white px-1 rounded">{t('当前')}</span>}
                   </button>
                 ))}
               </div>
@@ -283,13 +283,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Swords size={14} className={isDebateMode ? 'text-orange-500' : 'text-gray-400'} />
-                发言模式
+                {t('发言模式')}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                   isDebateMode
                     ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
                     : 'bg-gray-100 dark:bg-zinc-700 text-gray-500 dark:text-gray-400'
                 }`}>
-                  {isDebateMode ? '辩论' : '随机'}
+                  {isDebateMode ? t('辩论') : t('随机')}
                 </span>
               </span>
               <ChevronDown size={14} className={`text-gray-400 transition-transform ${showDebateConfig ? 'rotate-180' : ''}`} />
@@ -307,7 +307,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'
                     }`}
                   >
-                    随机
+                    {t('随机')}
                   </button>
                   <button
                     onClick={() => { if (!isDebateMode) handleToggleTurnMode(); }}
@@ -317,7 +317,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'
                     }`}
                   >
-                    辩论
+                    {t('辩论')}
                   </button>
                 </div>
 
@@ -326,14 +326,14 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   <>
                     {/* 发言间隔 */}
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">发言间隔</span>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">{t('发言间隔')}</span>
                       <input
                         type="number"
                         min="0"
                         step="500"
                         value={debateConfig.breathingTime ?? ''}
                         onChange={(e) => handleBreathingTimeChange(e.target.value)}
-                        placeholder="使用全局值"
+                        placeholder={t('使用全局值')}
                         className="flex-1 px-2 py-1 text-[10px] bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded focus:outline-none focus:border-orange-400 text-gray-700 dark:text-gray-200"
                       />
                       <span className="text-[10px] text-gray-400">ms</span>
@@ -343,7 +343,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     <div>
                       <div className="flex items-center gap-1 mb-1.5">
                         <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">正方</span>
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{t('正方')}</span>
                       </div>
                       <div className="space-y-1">
                         {debateConfig.assignments
@@ -359,7 +359,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                                 <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">{agent.name}</span>
                                 <button onClick={() => handleMoveOrder(assignment.agentId, 'up')} className="p-0.5 text-gray-400 hover:text-blue-500"><ArrowUp size={10} /></button>
                                 <button onClick={() => handleMoveOrder(assignment.agentId, 'down')} className="p-0.5 text-gray-400 hover:text-blue-500"><ArrowDown size={10} /></button>
-                                <button onClick={() => handleSwitchSide(assignment.agentId)} className="p-0.5 text-gray-400 hover:text-orange-500" title="移至反方"><ArrowRightLeft size={10} /></button>
+                                <button onClick={() => handleSwitchSide(assignment.agentId)} className="p-0.5 text-gray-400 hover:text-orange-500" title={t('移至反方')}><ArrowRightLeft size={10} /></button>
                               </div>
                             );
                           })}
@@ -370,7 +370,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     <div>
                       <div className="flex items-center gap-1 mb-1.5">
                         <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                        <span className="text-[10px] font-bold text-red-600 dark:text-red-400">反方</span>
+                        <span className="text-[10px] font-bold text-red-600 dark:text-red-400">{t('反方')}</span>
                       </div>
                       <div className="space-y-1">
                         {debateConfig.assignments
@@ -386,7 +386,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                                 <span className="text-xs text-gray-800 dark:text-gray-200 flex-1 truncate">{agent.name}</span>
                                 <button onClick={() => handleMoveOrder(assignment.agentId, 'up')} className="p-0.5 text-gray-400 hover:text-red-500"><ArrowUp size={10} /></button>
                                 <button onClick={() => handleMoveOrder(assignment.agentId, 'down')} className="p-0.5 text-gray-400 hover:text-red-500"><ArrowDown size={10} /></button>
-                                <button onClick={() => handleSwitchSide(assignment.agentId)} className="p-0.5 text-gray-400 hover:text-orange-500" title="移至正方"><ArrowRightLeft size={10} /></button>
+                                <button onClick={() => handleSwitchSide(assignment.agentId)} className="p-0.5 text-gray-400 hover:text-orange-500" title={t('移至正方')}><ArrowRightLeft size={10} /></button>
                               </div>
                             );
                           })}
@@ -402,7 +402,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         <div>
                           <div className="flex items-center gap-1 mb-1.5">
                             <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                            <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">未分配</span>
+                            <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">{t('未分配')}</span>
                           </div>
                           <div className="space-y-1">
                             {unassigned.map(agent => (
@@ -413,13 +413,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                                   onClick={() => handleAssignAgent(agent.id, 'pro')}
                                   className="px-1.5 py-0.5 text-[9px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50"
                                 >
-                                  +正方
+                                  {t('+正方')}
                                 </button>
                                 <button
                                   onClick={() => handleAssignAgent(agent.id, 'con')}
                                   className="px-1.5 py-0.5 text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50"
                                 >
-                                  +反方
+                                  {t('+反方')}
                                 </button>
                               </div>
                             ))}
@@ -438,7 +438,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         {userProfiles && onSwitchProfile && agents.length > 0 && (
           <div className="flex items-center gap-2 py-1">
             <div className="flex-1 h-px bg-gray-200 dark:bg-zinc-700"></div>
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">AI 成员</span>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">{t('AI 成员')}</span>
             <div className="flex-1 h-px bg-gray-200 dark:bg-zinc-700"></div>
           </div>
         )}
@@ -472,12 +472,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     {agent.name}
                     {isAdmin && (
                       <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                        <Shield size={10} /> 管理员
+                        <Shield size={10} /> {t('管理员')}
                       </span>
                     )}
                     {isMuted && (
                       <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                        <VolumeX size={10} /> 禁言中
+                        <VolumeX size={10} /> {t('禁言中')}
                       </span>
                     )}
                     {debateAssignment && (
@@ -486,7 +486,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                           ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
                           : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                       }`}>
-                        {debateAssignment.side === 'pro' ? '正' : '反'}{debateAssignment.order}
+                        {debateAssignment.side === 'pro' ? t('正') : t('反')}{debateAssignment.order}
                       </span>
                     )}
                   </h4>
@@ -494,8 +494,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                   {isMuted && muteInfo && (
                     <p className="text-[10px] text-orange-500 flex items-center gap-1 mt-0.5">
                       <Clock size={10} />
-                      剩余: {getRemainingTime(muteInfo.muteUntil)}
-                      <span className="text-gray-400">• 由 {muteInfo.mutedBy}</span>
+                      {t('剩余')}: {getRemainingTime(muteInfo.muteUntil)}
+                      <span className="text-gray-400">• {t('由')} {muteInfo.mutedBy}</span>
                     </p>
                   )}
                 </div>
@@ -506,21 +506,21 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       className={`px-2 py-1 text-[10px] rounded transition-colors flex items-center gap-1 ${isAdmin ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50' : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'}`}
                     >
                       {isAdmin ? <ShieldOff size={10} /> : <Shield size={10} />}
-                      {isAdmin ? '撤销' : '管理'}
+                      {isAdmin ? t('撤销') : t('管理')}
                     </button>
                     {isMuted ? (
                       <button
                         onClick={() => onUnmuteAgent(agent.id)}
                         className="px-2 py-1 text-[10px] bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
                       >
-                        解禁
+                        {t('解禁')}
                       </button>
                     ) : (
                       <button
                         onClick={() => setShowMuteMenu(showMuteMenu === agent.id ? null : agent.id)}
                         className="px-2 py-1 text-[10px] bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors"
                       >
-                        禁言
+                        {t('禁言')}
                       </button>
                     )}
                   </div>
@@ -530,7 +530,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
               {/* Mute Duration Menu */}
               {showMuteMenu === agent.id && (
                 <div className="mt-3 pt-3 border-t border-gray-100 dark:border-zinc-700">
-                  <div className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">选择禁言时长:</div>
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">{t('选择禁言时长')}:</div>
                   <div className="grid grid-cols-4 gap-1">
                     {MUTE_DURATIONS.filter(d => d.value !== -1).map(duration => (
                       <button
@@ -538,7 +538,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                         onClick={() => handleMute(agent.id, duration.value)}
                         className="px-2 py-1.5 text-[10px] bg-gray-50 dark:bg-zinc-700 text-gray-700 dark:text-gray-300 rounded hover:bg-zinc-900 hover:text-white transition-colors"
                       >
-                        {duration.label}
+                        {t(duration.label)}
                       </button>
                     ))}
                   </div>
@@ -549,14 +549,14 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       max="525600"
                       value={customDuration}
                       onChange={(e) => setCustomDuration(e.target.value)}
-                      placeholder="分钟"
+                      placeholder={t('分钟')}
                       className="flex-1 px-2 py-1.5 text-[10px] bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded focus:outline-none focus:border-zinc-400 text-gray-700 dark:text-gray-200"
                     />
                     <button
                       onClick={() => handleMute(agent.id, -1)}
                       className="px-3 py-1.5 text-[10px] bg-zinc-900 dark:bg-zinc-600 text-white rounded hover:bg-black dark:hover:bg-zinc-500 transition-colors"
                     >
-                      自定义
+                      {t('自定义')}
                     </button>
                   </div>
                 </div>
@@ -573,7 +573,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       onChange={() => onToggleHumanDisguise(agent.id)}
                     />
                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                      <User size={10} /> 向其他 Agent 标记为人类
+                      <User size={10} /> {t('向其他 Agent 标记为人类')}
                     </span>
                   </label>
                 </div>
@@ -587,12 +587,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                   >
                     <EyeOff size={10} />
-                    <span>可见性屏蔽 ({(agentVisibility?.[agent.id] || []).length})</span>
+                    <span>{t('可见性屏蔽')} ({(agentVisibility?.[agent.id] || []).length})</span>
                     <ChevronDown size={10} className={`transition-transform ${showVisibilityFor === agent.id ? 'rotate-180' : ''}`} />
                   </button>
                   {showVisibilityFor === agent.id && (
                     <div className="mt-2 pt-2 border-t border-gray-100 dark:border-zinc-700 space-y-1">
-                      <div className="text-[10px] text-gray-400 mb-1">勾选后该成员将看不到对方的消息：</div>
+                      <div className="text-[10px] text-gray-400 mb-1">{t('勾选后该成员将看不到对方的消息')}:</div>
                       {agents.filter(a => a.id !== agent.id).map(otherAgent => {
                         const blockedList = agentVisibility?.[agent.id] || [];
                         const isBlocked = blockedList.includes(otherAgent.id);
@@ -630,7 +630,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         {agents.length === 0 && (
           <div className="text-center py-10 text-gray-400">
             <User size={40} className="mx-auto mb-2 opacity-20" />
-            <p className="text-sm">暂无成员</p>
+            <p className="text-sm">{t('暂无成员')}</p>
           </div>
         )}
       </div>
@@ -642,7 +642,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         {showAddMenu && (
           <div className="absolute bottom-full left-0 w-full bg-white dark:bg-zinc-800 border-t border-gray-100 dark:border-zinc-700 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] rounded-t-2xl max-h-80 overflow-y-auto z-10 p-2">
             <div className="flex justify-between items-center px-2 py-2 sticky top-0 bg-white dark:bg-zinc-800 border-b border-gray-50 dark:border-zinc-700 mb-2">
-              <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">选择角色加入群聊</span>
+              <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('选择角色加入群聊')}</span>
               <button onClick={() => setShowAddMenu(false)}><X size={14} className="text-gray-400" /></button>
             </div>
             <div className="space-y-1 px-2">
@@ -654,16 +654,16 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                 >
                   <img src={agent.avatar} className="w-6 h-6 rounded-full bg-white object-contain border border-gray-200 dark:border-zinc-600" />
                   <div className="flex-1 min-w-0">
-                    <div className="truncate">{agent.name || '未命名角色'}</div>
-                    <div className="text-[10px] text-gray-400 group-hover:text-gray-300 truncate">{agent.modelId || '未配置模型'}</div>
+                    <div className="truncate">{agent.name || t('未命名角色')}</div>
+                    <div className="text-[10px] text-gray-400 group-hover:text-gray-300 truncate">{agent.modelId || t('未配置模型')}</div>
                   </div>
                 </button>
               ))}
             </div>
             {inactiveAgents.length === 0 && (
               <div className="text-xs text-center p-4 text-gray-400">
-                没有可添加的角色<br/>
-                <span className="text-[10px]">请在左侧"角色"标签页创建新角色</span>
+                {t('没有可添加的角色')}<br/>
+                <span className="text-[10px]">{t('请在左侧"角色"标签页创建新角色')}</span>
               </div>
             )}
           </div>
@@ -679,7 +679,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             }}
             className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-all ${showAddMenu ? 'bg-zinc-900 text-white' : 'bg-gray-50 dark:bg-zinc-700 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-zinc-600'}`}
           >
-            <Plus size={18} /> 添加
+            <Plus size={18} /> {t('添加')}
           </button>
 
           <button
@@ -690,7 +690,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             }}
             className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-all ${isDeleteMode ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800' : 'bg-gray-50 dark:bg-zinc-700 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-zinc-600'}`}
           >
-            {isDeleteMode ? '完成' : <><Minus size={18} /> 移除</>}
+            {isDeleteMode ? t('完成') : <><Minus size={18} /> {t('移除')}</>}
           </button>
         </div>
       </div>

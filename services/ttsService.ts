@@ -252,6 +252,8 @@ export const stopTTS = () => {
   }
   if (currentAudio) {
     currentAudio.pause();
+    const src = currentAudio.src;
+    if (src.startsWith('blob:')) URL.revokeObjectURL(src);
     currentAudio.src = '';
     currentAudio = null;
   }
