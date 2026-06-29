@@ -216,6 +216,10 @@ export async function* streamAnthropicReply(
   }
   // -------------------------------
 
+  const splitProtocol = entertainmentConfig?.enableSplit ? `
+- Paragraph break: use [SPLIT] anywhere in your message to create a visual paragraph break
+` : '';
+
   // 6. System Prompt Injection
   const systemInstruction = `
 ${scenario ? `[SCENARIO]\n${scenario}\n` : ''}
@@ -239,7 +243,7 @@ You MUST use one of these formats. Unwrapped text is discarded.
 - Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
 - Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
 - @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone
-${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
+${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${splitProtocol}
   `;
 
   // Anthropic Format Prep

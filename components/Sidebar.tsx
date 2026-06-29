@@ -1183,6 +1183,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                              onChange={(e) => onUpdateGroupEntertainmentConfig(activeGroup.id, { enablePM: e.target.checked })}
                           />
                        </div>
+                       {/* Split 段落分割 */}
+                       <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                             <MessageSquare size={14} className="text-gray-400" />
+                             <span className="text-xs text-gray-600 dark:text-gray-300">{t('段落分割')}</span>
+                             <span className="text-[10px] text-gray-400 font-mono">{'[SPLIT]'}</span>
+                          </div>
+                          <input
+                             type="checkbox"
+                             className="accent-zinc-900"
+                             checked={activeGroup.entertainmentConfig?.enableSplit || false}
+                             onChange={(e) => onUpdateGroupEntertainmentConfig(activeGroup.id, { enableSplit: e.target.checked })}
+                          />
+                       </div>
                     </div>
                  </div>
 

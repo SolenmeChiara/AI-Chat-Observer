@@ -1516,6 +1516,9 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
+          if (entertainmentConfig?.enableSplit) {
+            cleanText = cleanText.replace(/\[SPLIT\]/gi, '\n\n');
+          }
 
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
           if (replyMatch) detectedReplyId = replyMatch[1];
@@ -1706,6 +1709,9 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
+        if (currentGroup?.entertainmentConfig?.enableSplit) {
+          finalText = finalText.replace(/\[SPLIT\]/gi, '\n\n');
+        }
 
         console.log(`[${agent.name}] 💬 Final text (${finalText.length} chars):`, finalText.substring(0, 300) + (finalText.length > 300 ? '...' : ''));
         if (extractedPMContent) console.log(`[${agent.name}] 📨 PM text (${extractedPMContent.length} chars):`, extractedPMContent.substring(0, 200));

@@ -139,6 +139,7 @@ export interface EntertainmentConfig {
   enableDice: boolean;    // 启用骰子 {{ROLL: XdY+Z}}
   enableTarot: boolean;   // 启用塔罗牌 {{TAROT: N}}
   enablePM?: boolean;     // 启用私讯 {{RES_PM_Name: content}}
+  enableSplit?: boolean;  // 启用 [SPLIT] 段落分割标记
 }
 
 // 群组：包含多个对话，共享成员和场景
