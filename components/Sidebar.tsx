@@ -2112,13 +2112,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><GripVertical size={16}/> {t('上下文历史限制')}</h3>
                 <div className="flex items-center gap-4">
                   <input
-                    type="range" min="2" max="521" step="1"
+                    type="range" min="0" max="2000" step="10"
                     className="flex-1 accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
-                    value={settings.contextLimit || 20}
+                    value={settings.contextLimit || 0}
                     onChange={(e) => setSettings({...settings, contextLimit: parseInt(e.target.value)})}
                   />
                   <span className="text-xs font-mono font-medium text-gray-600 dark:text-gray-300 w-16 text-right">
-                    {settings.contextLimit || 20} {t('条')}
+                    {settings.contextLimit === 0 ? '∞' : `${settings.contextLimit} ${t('条')}`}
                   </span>
                 </div>
              </div>

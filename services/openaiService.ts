@@ -85,9 +85,8 @@ export async function* streamOpenAIReply(
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
   // 1. Context Limit Slicing (exclude streaming placeholders - they're invisible to other AIs)
-  const effectiveMessages = messages
-    .filter(m => !m.isStreaming)  // 过滤掉正在生成中的占位符消息
-    .slice(-Math.max(2, contextLimit));
+  let effectiveMessages = messages.filter(m => !m.isStreaming);
+  if (contextLimit > 0) effectiveMessages = effectiveMessages.slice(-contextLimit);
 
   // 2. Join-time filtering
   let joinFilteredMessages = effectiveMessages;
