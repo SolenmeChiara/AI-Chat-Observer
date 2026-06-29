@@ -35,10 +35,15 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   // 1. System Message Style
   if (message.isSystem) {
     return (
-      <div className="flex w-full mb-6 justify-center">
+      <div className="flex w-full mb-6 justify-center group">
         <span className="text-xs bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-200 dark:border-zinc-700">
            {message.text}
         </span>
+        {onDelete && (
+          <button onClick={() => onDelete(message.id)} className="ml-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-0.5" title={t("删除消息")}>
+            <Trash2 size={10} />
+          </button>
+        )}
       </div>
     );
   }
