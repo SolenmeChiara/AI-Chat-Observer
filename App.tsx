@@ -1367,6 +1367,7 @@ const App: React.FC = () => {
       let chunkCount = 0;
       let splitCount = 0;
       let currentSplitId = newMessageId;
+      let splitConsumedLength = 0;
 
       // Reasoning timing
       const streamStartTime = Date.now();
@@ -1522,30 +1523,39 @@ const App: React.FC = () => {
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
           if (replyMatch) detectedReplyId = replyMatch[1];
 
-          // Real-time [SPLIT]: finalize current segment and start a new message
-          if (entertainmentConfig?.enableSplit && /\[SPLIT\]/i.test(cleanText)) {
-            const splitIdx = cleanText.search(/\[SPLIT\]/i);
-            const finalized = cleanText.substring(0, splitIdx).trim();
-            cleanText = cleanText.substring(splitIdx + 7).trim();
+          // Real-time [SPLIT]: only check text after what's already been consumed by previous splits
+          if (entertainmentConfig?.enableSplit) {
+            const remaining = cleanText.substring(splitConsumedLength);
+            let splitIdx = remaining.search(/\[SPLIT\]/i);
+            while (splitIdx >= 0) {
+              const finalized = cleanText.substring(splitConsumedLength, splitConsumedLength + splitIdx).trim();
+              splitConsumedLength += splitIdx + 7;
 
-            if (finalized) {
-              splitCount++;
-              const nextId = `${newMessageId}-split-${splitCount}`;
-              updateThisSession(s => ({
-                ...s,
-                messages: [
-                  ...s.messages.map(m => m.id === currentSplitId ? { ...m, text: finalized, isStreaming: undefined } : m),
-                  { id: nextId, senderId: agent.id, text: '', timestamp: Date.now(), isStreaming: true }
-                ]
-              }));
-              currentSplitId = nextId;
+              if (finalized) {
+                splitCount++;
+                const nextId = `${newMessageId}-split-${splitCount}`;
+                updateThisSession(s => ({
+                  ...s,
+                  messages: [
+                    ...s.messages.map(m => m.id === currentSplitId ? { ...m, text: finalized, isStreaming: undefined } : m),
+                    { id: nextId, senderId: agent.id, text: '', timestamp: Date.now(), isStreaming: true }
+                  ]
+                }));
+                currentSplitId = nextId;
+              }
+
+              const nextRemaining = cleanText.substring(splitConsumedLength);
+              splitIdx = nextRemaining.search(/\[SPLIT\]/i);
             }
           }
+
+          // Show only the text after all consumed splits
+          const currentSegmentText = entertainmentConfig?.enableSplit ? cleanText.substring(splitConsumedLength).replace(/\[SPLIT\]/gi, '') : cleanText;
 
           // Update streaming message
           updateThisSession(s => ({
               ...s,
-              messages: s.messages.map(m => m.id === currentSplitId ? { ...m, text: cleanText, replyToId: detectedReplyId } : m)
+              messages: s.messages.map(m => m.id === currentSplitId ? { ...m, text: currentSegmentText, replyToId: detectedReplyId } : m)
           }));
         }
         if (chunk.usage) accumulatedUsage = chunk.usage;
