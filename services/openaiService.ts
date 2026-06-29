@@ -251,7 +251,9 @@ export async function* streamOpenAIReply(
   // -------------------------------
 
   const splitProtocol = entertainmentConfig?.enableSplit ? `
-- Paragraph break: use [SPLIT] anywhere in your message to create a visual paragraph break
+- Message split: use [SPLIT] inside {{RESPONSE:}} to break your reply into separate chat bubbles.
+  Example: {{RESPONSE: Hey everyone[SPLIT]Just wanted to say[SPLIT]This topic is really interesting}}
+  This sends 3 separate messages. Keep each segment short and natural, like real chat.
 ` : '';
 
   // System Prompt Injection
