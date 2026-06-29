@@ -1738,8 +1738,11 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
-        // Handle remaining [SPLIT] in final text (for any not caught during streaming)
-        if (currentGroup?.entertainmentConfig?.enableSplit) {
+        // If real-time splits happened, finalText should only be the last segment
+        if (currentGroup?.entertainmentConfig?.enableSplit && splitCount > 0) {
+          const allParts = finalText.split(/\[SPLIT\]/gi).map(s => s.trim()).filter(s => s.length > 0);
+          finalText = allParts[allParts.length - 1] || finalText;
+        } else if (currentGroup?.entertainmentConfig?.enableSplit) {
           finalText = finalText.replace(/\[SPLIT\]/gi, '').trim();
         }
 
