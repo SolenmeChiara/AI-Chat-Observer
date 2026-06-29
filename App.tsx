@@ -1517,7 +1517,7 @@ const App: React.FC = () => {
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
           if (entertainmentConfig?.enableSplit) {
-            cleanText = cleanText.replace(/\[SPLIT\]/gi, '\n\n');
+            cleanText = cleanText.replace(/\[SPLIT\]/gi, '');
           }
 
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
@@ -1709,8 +1709,11 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
-        if (currentGroup?.entertainmentConfig?.enableSplit) {
-          finalText = finalText.replace(/\[SPLIT\]/gi, '\n\n');
+        // Split into multiple messages if [SPLIT] is present and enabled
+        let splitParts: string[] = [finalText];
+        if (currentGroup?.entertainmentConfig?.enableSplit && /\[SPLIT\]/i.test(finalText)) {
+          splitParts = finalText.split(/\[SPLIT\]/gi).map(s => s.trim()).filter(s => s.length > 0);
+          console.log(`[${agent.name}] ✂️ Split into ${splitParts.length} messages`);
         }
 
         console.log(`[${agent.name}] 💬 Final text (${finalText.length} chars):`, finalText.substring(0, 300) + (finalText.length > 300 ? '...' : ''));
@@ -1727,31 +1730,37 @@ const App: React.FC = () => {
           id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           senderId: agentId,
           text: extractedPMContent,
-          timestamp: Date.now() + 1,  // +1ms to sort after public message
+          timestamp: Date.now() + 1,
           pmTargetId: detectedPMTargetId,
         } : null;
 
-        // Update the placeholder message with final data (clear isStreaming)
-        // When dual output: main message is public (no pmTargetId), PM is a separate message
+        // Build extra messages from [SPLIT] parts (index 1+)
+        const extraSplitMessages: Message[] = splitParts.slice(1).map((part, i) => ({
+          id: `${newMessageId}-split-${i}`,
+          senderId: agentId,
+          text: part,
+          timestamp: Date.now() + i + 1,
+        }));
+
         updateThisSession(s => ({
             ...s,
             messages: [
               ...s.messages.map(m => m.id === newMessageId ? {
                 ...m,
-                text: finalText,
+                text: splitParts[0],
                 reasoningText: accumulatedReasoning || undefined,
                 reasoningSignature: capturedSignature,
                 reasoningDuration: reasoningDuration,
                 tokens: accumulatedUsage,
                 cost: cost,
                 replyToId: detectedReplyId,
-                pmTargetId: extractedPMContent ? undefined : detectedPMTargetId,  // Only set if PM-only (no dual output)
+                pmTargetId: extractedPMContent ? undefined : detectedPMTargetId,
                 isStreaming: undefined
               } : m),
+              ...extraSplitMessages,
               ...(pmMessage ? [pmMessage] : []),
             ],
             lastUpdated: Date.now()
-            // NOTE: Don't clear yieldedAgentIds here - only USER messages should wake up PASSed agents
         }));
 
         // EXECUTE SEARCH if detected
