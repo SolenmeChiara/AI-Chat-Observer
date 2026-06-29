@@ -363,6 +363,7 @@ const en: Record<string, string> = {
   '抽取塔罗牌': 'Tarot draw',
   '隐藏入群前消息': 'Hide pre-join messages',
   '段落分割': 'Paragraph split',
+  '正在输入中...': 'is typing...',
 };
 
 let currentLocale: Locale = 'zh';

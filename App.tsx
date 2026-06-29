@@ -1365,6 +1365,8 @@ const App: React.FC = () => {
       let isPass = false;
       let detectedReplyId: string | undefined = undefined;
       let chunkCount = 0;
+      let splitCount = 0;
+      let currentSplitId = newMessageId;
 
       // Reasoning timing
       const streamStartTime = Date.now();
@@ -1516,17 +1518,34 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
-          if (entertainmentConfig?.enableSplit) {
-            cleanText = cleanText.replace(/\[SPLIT\]/gi, '');
-          }
 
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
           if (replyMatch) detectedReplyId = replyMatch[1];
 
+          // Real-time [SPLIT]: finalize current segment and start a new message
+          if (entertainmentConfig?.enableSplit && /\[SPLIT\]/i.test(cleanText)) {
+            const splitIdx = cleanText.search(/\[SPLIT\]/i);
+            const finalized = cleanText.substring(0, splitIdx).trim();
+            cleanText = cleanText.substring(splitIdx + 7).trim();
+
+            if (finalized) {
+              splitCount++;
+              const nextId = `${newMessageId}-split-${splitCount}`;
+              updateThisSession(s => ({
+                ...s,
+                messages: [
+                  ...s.messages.map(m => m.id === currentSplitId ? { ...m, text: finalized, isStreaming: undefined } : m),
+                  { id: nextId, senderId: agent.id, text: '', timestamp: Date.now(), isStreaming: true }
+                ]
+              }));
+              currentSplitId = nextId;
+            }
+          }
+
           // Update streaming message
           updateThisSession(s => ({
               ...s,
-              messages: s.messages.map(m => m.id === newMessageId ? { ...m, text: cleanText, replyToId: detectedReplyId } : m)
+              messages: s.messages.map(m => m.id === currentSplitId ? { ...m, text: cleanText, replyToId: detectedReplyId } : m)
           }));
         }
         if (chunk.usage) accumulatedUsage = chunk.usage;
@@ -1714,14 +1733,13 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
-        // Split into multiple messages if [SPLIT] is present and enabled
-        let splitParts: string[] = [finalText];
-        if (currentGroup?.entertainmentConfig?.enableSplit && /\[SPLIT\]/i.test(finalText)) {
-          splitParts = finalText.split(/\[SPLIT\]/gi).map(s => s.trim()).filter(s => s.length > 0);
-          console.log(`[${agent.name}] ✂️ Split into ${splitParts.length} messages`);
+        // Handle remaining [SPLIT] in final text (for any not caught during streaming)
+        if (currentGroup?.entertainmentConfig?.enableSplit) {
+          finalText = finalText.replace(/\[SPLIT\]/gi, '').trim();
         }
 
         console.log(`[${agent.name}] 💬 Final text (${finalText.length} chars):`, finalText.substring(0, 300) + (finalText.length > 300 ? '...' : ''));
+        if (splitCount > 0) console.log(`[${agent.name}] ✂️ Split into ${splitCount + 1} messages during stream`);
         if (extractedPMContent) console.log(`[${agent.name}] 📨 PM text (${extractedPMContent.length} chars):`, extractedPMContent.substring(0, 200));
         if (detectedAdminAction) console.log(`[${agent.name}] 🔧 Admin action:`, detectedAdminAction);
         if (detectedSearchQuery) console.log(`[${agent.name}] 🔍 Search query:`, detectedSearchQuery);
@@ -1739,30 +1757,22 @@ const App: React.FC = () => {
           pmTargetId: detectedPMTargetId,
         } : null;
 
-        // Build extra messages from [SPLIT] parts (index 1+)
-        const extraSplitMessages: Message[] = splitParts.slice(1).map((part, i) => ({
-          id: `${newMessageId}-split-${i}`,
-          senderId: agentId,
-          text: part,
-          timestamp: Date.now() + i + 1,
-        }));
-
+        // Finalize the current (possibly split) message
         updateThisSession(s => ({
             ...s,
             messages: [
-              ...s.messages.map(m => m.id === newMessageId ? {
+              ...s.messages.map(m => m.id === currentSplitId ? {
                 ...m,
-                text: splitParts[0],
-                reasoningText: accumulatedReasoning || undefined,
-                reasoningSignature: capturedSignature,
-                reasoningDuration: reasoningDuration,
-                tokens: accumulatedUsage,
-                cost: cost,
-                replyToId: detectedReplyId,
-                pmTargetId: extractedPMContent ? undefined : detectedPMTargetId,
+                text: finalText,
+                reasoningText: m.id === newMessageId ? (accumulatedReasoning || undefined) : m.reasoningText,
+                reasoningSignature: m.id === newMessageId ? capturedSignature : m.reasoningSignature,
+                reasoningDuration: m.id === newMessageId ? reasoningDuration : m.reasoningDuration,
+                tokens: m.id === newMessageId ? accumulatedUsage : m.tokens,
+                cost: m.id === newMessageId ? cost : m.cost,
+                replyToId: m.id === newMessageId ? detectedReplyId : m.replyToId,
+                pmTargetId: m.id === newMessageId ? (extractedPMContent ? undefined : detectedPMTargetId) : m.pmTargetId,
                 isStreaming: undefined
               } : m),
-              ...extraSplitMessages,
               ...(pmMessage ? [pmMessage] : []),
             ],
             lastUpdated: Date.now()
@@ -2848,6 +2858,20 @@ const App: React.FC = () => {
           >
             <ArrowDown size={20} />
           </button>
+        )}
+
+        {/* Typing Indicator */}
+        {processingAgents.size > 0 && (
+          <div className="max-w-4xl mx-auto w-full px-4">
+            <div className="bg-gray-200/80 dark:bg-zinc-700/80 rounded-lg px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+              <span className="flex gap-0.5">
+                <span className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                <span className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                <span className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+              </span>
+              {Array.from(processingAgents).map(id => agents.find(a => a.id === id)?.name).filter(Boolean).join(', ')} {tt('正在输入中...')}
+            </div>
+          </div>
         )}
 
         {/* Input Area */}
