@@ -251,9 +251,10 @@ export async function* streamOpenAIReply(
   // -------------------------------
 
   const splitProtocol = entertainmentConfig?.enableSplit ? `
-- Message split: use [SPLIT] inside {{RESPONSE:}} to break your reply into separate chat bubbles.
-  Example: {{RESPONSE: Hey everyone[SPLIT]Just wanted to say[SPLIT]This topic is really interesting}}
-  This sends 3 separate messages. Keep each segment short and natural, like real chat.
+- Message split: break your reply into separate chat bubbles using either method:
+  Method 1: {{RESPONSE: Hey everyone[SPLIT]Just wanted to say[SPLIT]Great topic}}
+  Method 2: {{RESPONSE: Hey everyone}}{{RESPONSE: Just wanted to say}}{{RESPONSE: Great topic}}
+  Both send 3 separate messages. Keep each segment short, like real chat.
 ` : '';
 
   // System Prompt Injection
