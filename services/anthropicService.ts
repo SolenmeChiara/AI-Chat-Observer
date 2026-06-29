@@ -410,10 +410,19 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+        // Add cache breakpoint to the second-to-last message content block
+        if (formattedMessages.length >= 2) {
+          const target = formattedMessages[formattedMessages.length - 2];
+          if (Array.isArray(target.content) && target.content.length > 0) {
+            const lastBlock = target.content[target.content.length - 1];
+            if (!lastBlock.cache_control) lastBlock.cache_control = { type: 'ephemeral' };
+          }
+        }
+
         const body: any = {
             model: modelId,
             max_tokens: maxTokensConfig,
-            system: systemInstruction,
+            system: [{ type: 'text', text: systemInstruction, cache_control: { type: 'ephemeral' } }],
             messages: formattedMessages,
             stream: true
         };
@@ -513,6 +522,11 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}
                 // Capture usage from message_start
                 if (json.type === 'message_start' && json.message?.usage) {
                     capturedUsage.input = json.message.usage.input_tokens || 0;
+                    const cacheRead = json.message.usage.cache_read_input_tokens || 0;
+                    const cacheWrite = json.message.usage.cache_creation_input_tokens || 0;
+                    if (cacheRead > 0 || cacheWrite > 0) {
+                      console.log(`[Anthropic] 💾 Cache: ${cacheRead} read, ${cacheWrite} written, ${capturedUsage.input} uncached`);
+                    }
                 }
 
                 // Parsing Content vs Thinking Delta
