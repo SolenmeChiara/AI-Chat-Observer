@@ -436,8 +436,8 @@ const App: React.FC = () => {
   };
 
   const handleDeleteMessage = useCallback((messageId: string) => {
-    updateActiveSessionMessages(prev => prev.filter(m => m.id !== messageId));
-  }, []);
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: s.messages.filter(m => m.id !== messageId), lastUpdated: Date.now() } : s));
+  }, [activeSessionId]);
 
   const handleReplyTo = useCallback((targetMsg: Message) => {
     setReplyToId(targetMsg.id);
