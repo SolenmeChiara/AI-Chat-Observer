@@ -38,6 +38,10 @@ interface RightSidebarProps {
   // 可见性屏蔽
   agentVisibility?: Record<string, string[]>;
   onUpdateAgentVisibility?: (agentId: string, blockedIds: string[]) => void;
+  // Join-time visibility
+  agentJoinedAt?: Record<string, string>;
+  hidePreJoinMessages?: Record<string, boolean>;
+  onToggleHidePreJoin?: (agentId: string) => void;
   // User profile switching
   userProfiles?: UserProfile[];
   activeProfileId?: string | 'narrator';
@@ -49,6 +53,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   debateConfig, onUpdateDebateConfig,
   humanDisguise, onToggleHumanDisguise,
   agentVisibility, onUpdateAgentVisibility,
+  agentJoinedAt, hidePreJoinMessages, onToggleHidePreJoin,
   userProfiles, activeProfileId, onSwitchProfile
 }) => {
   const t = useT();
@@ -574,6 +579,23 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     />
                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
                       <User size={10} /> {t('向其他 Agent 标记为人类')}
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {/* Hide pre-join messages toggle */}
+              {onToggleHidePreJoin && agentJoinedAt?.[agent.id] && (
+                <div className="mt-2 pt-2 border-t border-gray-100 dark:border-zinc-700">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="accent-amber-500"
+                      checked={hidePreJoinMessages?.[agent.id] || false}
+                      onChange={() => onToggleHidePreJoin(agent.id)}
+                    />
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <EyeOff size={10} /> {t('隐藏入群前消息')}
                     </span>
                   </label>
                 </div>

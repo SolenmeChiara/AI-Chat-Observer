@@ -177,6 +177,11 @@ export interface ChatSession {
 
   // 人类伪装：列表中的 agentId 在其他 agent 的上下文中显示为人类
   humanDisguise?: string[];
+
+  // Join-time visibility: agentId → message ID of their join message
+  agentJoinedAt?: Record<string, string>;
+  // Per-agent toggle: if true, hide messages before their join point
+  hidePreJoinMessages?: Record<string, boolean>;
 }
 
 // User Profile for multi-identity support

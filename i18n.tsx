@@ -361,6 +361,7 @@ const en: Record<string, string> = {
   '逆位': 'Reversed',
   '正位': 'Upright',
   '抽取塔罗牌': 'Tarot draw',
+  '隐藏入群前消息': 'Hide pre-join messages',
 };
 
 let currentLocale: Locale = 'zh';

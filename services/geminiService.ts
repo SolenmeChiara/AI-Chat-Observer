@@ -86,7 +86,9 @@ export async function* streamGeminiReply(
   groupAdminIds?: string[],
   entertainmentConfig?: EntertainmentConfig,
   agentVisibility?: Record<string, string[]>,
-  humanDisguise?: string[]
+  humanDisguise?: string[],
+  agentJoinedAt?: Record<string, string>,
+  hidePreJoinMessages?: Record<string, boolean>
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
   
@@ -95,20 +97,26 @@ export async function* streamGeminiReply(
     .filter(m => !m.isStreaming)  // 过滤掉正在生成中的占位符消息
     .slice(-Math.max(2, contextLimit));
 
-  // 2. Visibility Logic
-  const visibleMessages = effectiveMessages.filter(m => {
-    if (m.isSystem) return true; // Everyone sees system messages
-    // PM：仅 sender 和 target 可见（最高优先级，包括用户发的 PM）
+  // 2. Join-time filtering
+  let joinFilteredMessages = effectiveMessages;
+  const joinMsgId = agentJoinedAt?.[agent.id];
+  if (joinMsgId && hidePreJoinMessages?.[agent.id]) {
+    const joinIdx = effectiveMessages.findIndex(m => m.id === joinMsgId);
+    if (joinIdx >= 0) joinFilteredMessages = effectiveMessages.slice(joinIdx);
+  }
+
+  // 3. Visibility Logic
+  const visibleMessages = joinFilteredMessages.filter(m => {
+    if (m.isSystem) return true;
     if (m.pmTargetId) {
-      if (m.senderId === agent.id) return true; // sender sees own PM
-      return m.pmTargetId === agent.id; // only target can see
+      if (m.senderId === agent.id) return true;
+      return m.pmTargetId === agent.id;
     }
-    if (m.senderId === USER_ID) return true; // Always see user
-    if (m.senderId === agent.id) return true; // Always see self
-    // 单向屏蔽
+    if (m.senderId === USER_ID) return true;
+    if (m.senderId === agent.id) return true;
     const blocked = agentVisibility?.[agent.id];
     if (blocked?.includes(m.senderId)) return false;
-    return visibilityMode === 'OPEN'; // Only see others if OPEN
+    return visibilityMode === 'OPEN';
   });
 
   // 3. Find Last Action (Memory Injection)
@@ -271,6 +279,7 @@ ${attentionInstruction}
 You MUST use one of these formats. Unwrapped text is discarded.
 - Speak: {{RESPONSE: your message}}
 - Stay silent: {{PASS}}
+- Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
 - Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
 - @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone
 ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}

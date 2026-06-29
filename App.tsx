@@ -744,14 +744,19 @@ const App: React.FC = () => {
     } : g));
 
     // Add system message for new member joining
+    const joinMessageId = `join-${Date.now()}`;
     const joinMessage: Message = {
-      id: `join-${Date.now()}`,
+      id: joinMessageId,
       senderId: 'system',
       text: `${agent.name || t('新成员')} ${t('加入了群组')}`,
       timestamp: Date.now(),
       isSystem: true
     };
-    updateActiveSession(s => ({ ...s, messages: [...s.messages, joinMessage] }));
+    updateActiveSession(s => ({
+      ...s,
+      messages: [...s.messages, joinMessage],
+      agentJoinedAt: { ...(s.agentJoinedAt || {}), [id]: joinMessageId }
+    }));
   };
 
   // 切换群组管理员状态
@@ -1334,19 +1339,22 @@ const App: React.FC = () => {
             vertexLocation: provider.vertexLocation
           },
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
-          agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise
+          agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
+          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
+          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
-          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
+          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       }
 
@@ -1395,6 +1403,20 @@ const App: React.FC = () => {
           if (accumulatedText.includes("{{PASS}}")) {
              isPass = true;
              break;
+          }
+
+          // SELF-MUTE: any agent can silence themselves
+          const silenceMatch = accumulatedText.match(/\{\{SILENCE:\s*(\d+)(min|h|d|m)\}\}/i);
+          if (silenceMatch) {
+            const num = parseInt(silenceMatch[1]);
+            const unit = silenceMatch[2].toLowerCase();
+            let duration = num;
+            if (unit === 'h') duration = num * 60;
+            else if (unit === 'd') duration = num * 60 * 24;
+            detectedAdminAction = { type: 'MUTE', target: agent.name, duration };
+          }
+          if (accumulatedText.includes("{{SILENCE}}")) {
+            detectedAdminAction = { type: 'MUTE', target: agent.name, duration: 0 };
           }
 
           // ADMIN COMMAND PARSING
@@ -1492,6 +1514,7 @@ const App: React.FC = () => {
              .replace(/\{\{SEARCH:\s*(.+?)\}\}/, '')
              .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
+             .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
 
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
@@ -1681,6 +1704,7 @@ const App: React.FC = () => {
              .replace(/\{\{SEARCH:\s*(.+?)\}\}/, '')
              .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
+             .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
 
         console.log(`[${agent.name}] 💬 Final text (${finalText.length} chars):`, finalText.substring(0, 300) + (finalText.length > 300 ? '...' : ''));
@@ -2603,6 +2627,14 @@ const App: React.FC = () => {
               delete newVis[agentId];
             }
             return { ...s, agentVisibility: Object.keys(newVis).length > 0 ? newVis : undefined };
+          });
+        }}
+        agentJoinedAt={activeSession.agentJoinedAt}
+        hidePreJoinMessages={activeSession.hidePreJoinMessages}
+        onToggleHidePreJoin={(agentId) => {
+          updateActiveSession(s => {
+            const current = s.hidePreJoinMessages || {};
+            return { ...s, hidePreJoinMessages: { ...current, [agentId]: !current[agentId] } };
           });
         }}
         userProfiles={settings.userProfiles}
