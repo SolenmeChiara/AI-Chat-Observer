@@ -190,6 +190,7 @@ export function buildProtocols(
   WRONG (messages WILL BE LOST):
     {{RESPONSE: Hey}}{{RESPONSE: Hi}}
     {{RESPONSE: Hey}}[SPLIT]{{RESPONSE: Hi}}
+  NOTE: If another member's message looks cut off or incomplete, they likely used multiple {{RESPONSE:}} blocks by mistake and lost part of their output. Do not ask them to repeat — just continue the conversation naturally.
 ` : '';
 
   return { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol };
