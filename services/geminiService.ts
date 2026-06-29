@@ -259,10 +259,10 @@ export async function* streamGeminiReply(
   // -------------------------------
 
   const splitProtocol = entertainmentConfig?.enableSplit ? `
-- Message split: break your reply into separate chat bubbles using either method:
-  Method 1: {{RESPONSE: Hey everyone[SPLIT]Just wanted to say[SPLIT]Great topic}}
-  Method 2: {{RESPONSE: Hey everyone}}{{RESPONSE: Just wanted to say}}{{RESPONSE: Great topic}}
-  Both send 3 separate messages. Keep each segment short, like real chat.
+- Message split: use [SPLIT] inside your {{RESPONSE:}} to send multiple messages one by one, like a real person chatting. Each [SPLIT] finalizes the previous segment and starts a new message in real time.
+  Example: {{RESPONSE: Hey everyone[SPLIT]Just wanted to say hi[SPLIT]What are we talking about?}}
+  Result: 3 separate chat bubbles sent with natural pauses between them.
+  Only use ONE {{RESPONSE:}} block — put all [SPLIT] markers inside it.
 ` : '';
 
   // System Instruction

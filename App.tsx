@@ -1644,16 +1644,11 @@ const App: React.FC = () => {
         }
       }
 
-      // 2. Extract RESPONSE content (supports multiple {{RESPONSE:}} blocks → joined with [SPLIT])
-      const responseOpenRegex = /\{\{RESPONSE:\s*/g;
-      const responseParts: string[] = [];
-      let responseMatch;
-      while ((responseMatch = responseOpenRegex.exec(accumulatedText)) !== null) {
-        const part = extractBraceContent(accumulatedText, responseMatch.index + responseMatch[0].length);
-        if (part) responseParts.push(part);
-      }
-      if (responseParts.length > 0) {
-        extractedContent = responseParts.join('[SPLIT]');
+      // 2. Extract RESPONSE content
+      const responseOpenRegex = /\{\{RESPONSE:\s*/;
+      const responseOpenMatch = responseOpenRegex.exec(accumulatedText);
+      if (responseOpenMatch) {
+        extractedContent = extractBraceContent(accumulatedText, responseOpenMatch.index + responseOpenMatch[0].length);
         // If PM was nested inside RESPONSE, clean it out of the public content
         if (extractedPMContent && detectedPMTargetId) {
           const pmTarget = detectedPMTargetId === USER_ID
