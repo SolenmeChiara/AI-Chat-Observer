@@ -267,14 +267,32 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
               {message.attachments.filter(att => att.type === 'image').length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {message.attachments.filter(att => att.type === 'image').map((att, idx) => (
-                    <img
+                    <div
                       key={idx}
-                      src={blobUrls[idx] || att.content}
-                      alt={`Image ${idx + 1}`}
-                      className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
-                      style={{ maxHeight: '150px', maxWidth: '200px' }}
-                      onClick={() => setLightboxSrc(blobUrls[idx] || att.content)}
-                    />
+                      draggable={!!blobUrls[idx]}
+                      onDragStart={(e) => {
+                        const url = blobUrls[idx];
+                        if (!url) { e.preventDefault(); return; }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 48; canvas.height = 48;
+                        const ctx = canvas.getContext('2d');
+                        const img = e.currentTarget.querySelector('img');
+                        if (ctx && img) ctx.drawImage(img, 0, 0, 48, 48);
+                        e.dataTransfer.setDragImage(canvas, 24, 24);
+                        e.dataTransfer.setData('text/uri-list', url);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      className="inline-block"
+                    >
+                      <img
+                        src={blobUrls[idx] || att.content}
+                        alt={`Image ${idx + 1}`}
+                        draggable={false}
+                        className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
+                        style={{ maxHeight: '150px', maxWidth: '200px' }}
+                        onClick={() => setLightboxSrc(blobUrls[idx] || att.content)}
+                      />
+                    </div>
                   ))}
                 </div>
               )}
