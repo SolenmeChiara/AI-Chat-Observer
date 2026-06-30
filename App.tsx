@@ -1506,7 +1506,7 @@ const App: React.FC = () => {
             }
           }
 
-          // Clean Text (Remove commands)
+          // Clean Text (Remove commands and stray wrapper braces)
           let cleanText = displayText
              .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
              .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
@@ -1518,6 +1518,7 @@ const App: React.FC = () => {
              .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
+             .replace(/\}\}/g, '')
              .trimStart();
 
           const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
@@ -1534,10 +1535,11 @@ const App: React.FC = () => {
               if (finalized) {
                 splitCount++;
                 const nextId = `${newMessageId}-split-${splitCount}`;
+                const targetId = currentSplitId;
                 updateThisSession(s => ({
                   ...s,
                   messages: [
-                    ...s.messages.map(m => m.id === currentSplitId ? { ...m, text: finalized, isStreaming: undefined } : m),
+                    ...s.messages.map(m => m.id === targetId ? { ...m, text: finalized, isStreaming: undefined } : m),
                     { id: nextId, senderId: agent.id, text: '', timestamp: Date.now(), isStreaming: true }
                   ]
                 }));
@@ -1552,10 +1554,11 @@ const App: React.FC = () => {
           // Show only the text after all consumed splits
           const currentSegmentText = entertainmentConfig?.enableSplit ? cleanText.substring(splitConsumedLength).replace(/\[SPLIT\]/gi, '') : cleanText;
 
-          // Update streaming message
+          // Update streaming message (capture currentSplitId by value to avoid stale closure)
+          const streamTargetId = currentSplitId;
           updateThisSession(s => ({
               ...s,
-              messages: s.messages.map(m => m.id === currentSplitId ? { ...m, text: currentSegmentText, replyToId: detectedReplyId } : m)
+              messages: s.messages.map(m => m.id === streamTargetId ? { ...m, text: currentSegmentText, replyToId: detectedReplyId } : m)
           }));
         }
         if (chunk.usage) accumulatedUsage = chunk.usage;
@@ -1738,11 +1741,10 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
-        // If real-time splits happened, finalText should only be the last segment
-        if (currentGroup?.entertainmentConfig?.enableSplit && splitCount > 0) {
-          const allParts = finalText.split(/\[SPLIT\]/gi).map(s => s.trim()).filter(s => s.length > 0);
-          finalText = allParts[allParts.length - 1] || finalText;
-        } else if (currentGroup?.entertainmentConfig?.enableSplit) {
+        // When real-time splits happened, streaming already set correct text for all segments.
+        // Skip text overwrite to avoid clobbering with potentially incomplete extractBraceContent result.
+        const skipFinalTextOverwrite = !!(currentGroup?.entertainmentConfig?.enableSplit && splitCount > 0);
+        if (!skipFinalTextOverwrite && currentGroup?.entertainmentConfig?.enableSplit) {
           finalText = finalText.replace(/\[SPLIT\]/gi, '').trim();
         }
 
@@ -1766,21 +1768,43 @@ const App: React.FC = () => {
         } : null;
 
         // Finalize the current (possibly split) message
+        // When splits happened, currentSplitId (last segment) and newMessageId (first segment) differ.
+        // Last segment gets finalText; first segment gets metadata (reasoning, tokens, cost).
         updateThisSession(s => ({
             ...s,
             messages: [
-              ...s.messages.map(m => m.id === currentSplitId ? {
-                ...m,
-                text: finalText,
-                reasoningText: m.id === newMessageId ? (accumulatedReasoning || undefined) : m.reasoningText,
-                reasoningSignature: m.id === newMessageId ? capturedSignature : m.reasoningSignature,
-                reasoningDuration: m.id === newMessageId ? reasoningDuration : m.reasoningDuration,
-                tokens: m.id === newMessageId ? accumulatedUsage : m.tokens,
-                cost: m.id === newMessageId ? cost : m.cost,
-                replyToId: m.id === newMessageId ? detectedReplyId : m.replyToId,
-                pmTargetId: m.id === newMessageId ? (extractedPMContent ? undefined : detectedPMTargetId) : m.pmTargetId,
-                isStreaming: undefined
-              } : m),
+              ...s.messages.map(m => {
+                if (m.id === currentSplitId) {
+                  return {
+                    ...m,
+                    ...(skipFinalTextOverwrite ? {} : { text: finalText }),
+                    isStreaming: undefined,
+                    ...(currentSplitId === newMessageId ? {
+                      reasoningText: accumulatedReasoning || undefined,
+                      reasoningSignature: capturedSignature,
+                      reasoningDuration: reasoningDuration,
+                      tokens: accumulatedUsage,
+                      cost: cost,
+                      replyToId: detectedReplyId,
+                      pmTargetId: extractedPMContent ? undefined : detectedPMTargetId,
+                    } : {}),
+                  };
+                }
+                if (m.id === newMessageId && currentSplitId !== newMessageId) {
+                  return {
+                    ...m,
+                    reasoningText: accumulatedReasoning || undefined,
+                    reasoningSignature: capturedSignature,
+                    reasoningDuration: reasoningDuration,
+                    tokens: accumulatedUsage,
+                    cost: cost,
+                    replyToId: detectedReplyId,
+                    pmTargetId: extractedPMContent ? undefined : detectedPMTargetId,
+                    isStreaming: undefined,
+                  };
+                }
+                return m;
+              }),
               ...(pmMessage ? [pmMessage] : []),
             ],
             lastUpdated: Date.now()
@@ -2296,7 +2320,7 @@ const App: React.FC = () => {
         if (!isDebateModeActive) {
             if (sessionMembers.length > 1 && a.id === lastSpeakerId) return false;
             const spokeAtCount = agentLastSpokeAt.current.get(a.id);
-            if (spokeAtCount !== undefined && (messages.length - spokeAtCount) < cooldownMessages) return false;
+            if (spokeAtCount !== undefined && spokeAtCount <= messages.length && (messages.length - spokeAtCount) < cooldownMessages) return false;
         }
 
         return true;
