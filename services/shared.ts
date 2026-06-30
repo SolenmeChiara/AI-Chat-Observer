@@ -27,9 +27,10 @@ export function buildMemberList(
 ): string {
   return allAgents.map(a => {
     const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
+    const mentionBadge = a.mentionOnly ? " [MENTION-ONLY]" : "";
     const isDisguised = humanDisguise?.includes(a.id) && a.id !== currentAgent.id;
     const typeLabel = isDisguised ? "(Human)" : "(AI Robot)";
-    return `- ${a.name} ${typeLabel}${roleBadge}`;
+    return `- ${a.name} ${typeLabel}${roleBadge}${mentionBadge}`;
   }).join('\n');
 }
 

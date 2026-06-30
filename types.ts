@@ -88,6 +88,7 @@ export interface Agent {
   voiceId?: string;      // TTS voice ID for this agent
   voiceProviderId?: string; // TTS provider ID for this agent
   enablePM?: boolean;    // 启用私讯功能 (需群组总开关也开启)
+  mentionOnly?: boolean; // Only respond when @mentioned, stay silent otherwise
 }
 
 export interface Attachment {

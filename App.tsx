@@ -436,8 +436,17 @@ const App: React.FC = () => {
   };
 
   const handleDeleteMessage = useCallback((messageId: string) => {
+    // If the deleted message is currently streaming, abort the generation
+    const targetMsg = messages.find(m => m.id === messageId);
+    if (targetMsg && processingAgents.has(targetMsg.senderId)) {
+      const ctrl = abortControllers.current.get(targetMsg.senderId);
+      if (ctrl) {
+        console.log(`[Delete] 🛑 Aborting generation for ${targetMsg.senderId} (message deleted)`);
+        ctrl.abort();
+      }
+    }
     setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: s.messages.filter(m => m.id !== messageId), lastUpdated: Date.now() } : s));
-  }, [activeSessionId]);
+  }, [activeSessionId, messages, processingAgents]);
 
   const handleReplyTo = useCallback((targetMsg: Message) => {
     setReplyToId(targetMsg.id);
@@ -2385,6 +2394,7 @@ const App: React.FC = () => {
         if (pendingTriggerRef.current.has(a.id)) return false; // Also check pending
         if ((activeSession.mutedAgentIds || []).includes(a.id)) return false;
         if ((activeSession.yieldedAgentIds || []).includes(a.id)) return false;
+        if (a.mentionOnly) return false; // Mention-only agents skip auto-play
 
         // 辩论模式跳过 cooldown 和 lastSpeaker 检查（顺序由 debate sequence 保证）
         if (!isDebateModeActive) {
@@ -2405,6 +2415,7 @@ const App: React.FC = () => {
             if (pendingTriggerRef.current.has(a.id)) reasons.push('pending');
             if ((activeSession.mutedAgentIds || []).includes(a.id)) reasons.push('muted');
             if ((activeSession.yieldedAgentIds || []).includes(a.id)) reasons.push('yielded');
+            if (a.mentionOnly) reasons.push('mentionOnly');
             if (sessionMembers.length > 1 && a.id === lastSpeakerId) reasons.push('lastSpeaker');
             const spokeAt = agentLastSpokeAt.current.get(a.id);
             if (spokeAt !== undefined && (messages.length - spokeAt) < cooldownMessages) reasons.push(`cooldown(${messages.length - spokeAt}/${cooldownMessages})`);

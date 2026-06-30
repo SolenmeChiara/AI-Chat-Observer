@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider, UserProfile } from '../types';
-import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles, Download } from 'lucide-react';
+import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles, Download, AtSign } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
@@ -1621,6 +1621,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     </div>
                                 </div>
                             )}
+
+                            {/* Mention-only mode */}
+                            <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                        <AtSign size={10} /> {t('仅@时发言')}
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        className="accent-zinc-900"
+                                        checked={editData.mentionOnly || false}
+                                        onChange={(e) => updateDraftAgent(agent.id, { mentionOnly: e.target.checked })}
+                                    />
+                                </div>
+                                <p className="text-[9px] text-gray-400 mt-0.5">
+                                    {t('开启后该角色不会自动发言，只在被@时回复')}
+                                </p>
+                            </div>
 
                             {/* 私讯 PM 功能 (需群组总开关也开启) */}
                             <div className="border-t border-gray-100 dark:border-zinc-700 pt-2 mt-2">
