@@ -1415,7 +1415,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                    <BrainCircuit size={10} /> {t('推理链模式 (R1/Claude/Gemini)')}
+                                    <BrainCircuit size={10} /> {t('推理链模式')}
                                 </span>
                                 <input
                                     type="checkbox"

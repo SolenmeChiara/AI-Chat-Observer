@@ -53,7 +53,7 @@ const en: Record<string, string> = {
   '人设 Prompt...': 'System Prompt...',
   '高级参数': 'Advanced Parameters',
   '温度': 'Temp',
-  '推理链模式 (R1/Claude/Gemini)': 'Reasoning Mode (R1/Claude/Gemini)',
+  '推理链模式': 'Reasoning Mode',
   '推理预算': 'Reasoning Budget',
   '如 2048 (仅 Claude 有效)': 'e.g. 2048 (Claude only)',
   '视觉代理 (借眼睛)': 'Vision Proxy (Borrow Eyes)',
