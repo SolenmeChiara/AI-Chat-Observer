@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
 import { useT } from '../i18n';
@@ -30,6 +30,26 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  // Convert base64 image attachments to blob URLs for efficient drag & render
+  const imageBlobUrls = useMemo(() => {
+    const imageAtts = message.attachments?.filter(att => att.type === 'image') || [];
+    return imageAtts.map(att => {
+      if (!att.content || !att.content.startsWith('data:')) return att.content;
+      try {
+        const [header, b64] = att.content.split(',');
+        const mime = header.match(/data:([^;]+)/)?.[1] || 'image/png';
+        const bytes = atob(b64);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        return URL.createObjectURL(new Blob([arr], { type: mime }));
+      } catch { return att.content; }
+    });
+  }, [message.attachments]);
+
+  useEffect(() => {
+    return () => { imageBlobUrls.forEach(url => { if (url?.startsWith('blob:')) URL.revokeObjectURL(url); }); };
+  }, [imageBlobUrls]);
 
   const isThisMessagePlaying = currentPlayingMessageId === message.id;
 
@@ -239,11 +259,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                   {message.attachments.filter(att => att.type === 'image').map((att, idx) => (
                     <img
                       key={idx}
-                      src={att.content}
+                      src={imageBlobUrls[idx] || att.content}
                       alt={`Image ${idx + 1}`}
                       className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
                       style={{ maxHeight: '150px', maxWidth: '200px' }}
-                      onClick={() => setLightboxSrc(att.content)}
+                      onClick={() => setLightboxSrc(imageBlobUrls[idx] || att.content)}
                     />
                   ))}
                 </div>
@@ -328,6 +348,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             src={lightboxSrc}
             alt="Full size"
             className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            draggable={false}
             onClick={(e) => e.stopPropagation()}
           />
           <button
