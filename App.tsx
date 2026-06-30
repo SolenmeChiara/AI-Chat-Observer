@@ -1343,10 +1343,20 @@ const App: React.FC = () => {
       if (isImageGenModel(agent.modelId)) {
         console.log(`[${agent.name}] 🎨 Image generation agent detected`);
 
-        // Extract prompt: use last user message text, or last message mentioning this agent
-        const visibleMsgs = messages.filter(m => !m.isStreaming && !m.isSystem);
-        const lastUserMsg = [...visibleMsgs].reverse().find(m => m.senderId === USER_ID);
-        const imagePrompt = lastUserMsg?.text || 'a creative illustration';
+        // Build full context prompt from conversation history
+        const visibleMsgs = processedMessages.filter(m => !m.isStreaming);
+        const contextWindow = visibleMsgs.slice(-(settings.contextLimit || 20));
+        const promptParts: string[] = [];
+        if (agent.systemPrompt) promptParts.push(`[System] ${agent.systemPrompt}`);
+        if (scenario) promptParts.push(`[Scenario] ${scenario}`);
+        if (summary) promptParts.push(`[Summary] ${summary}`);
+        for (const msg of contextWindow) {
+          const senderName = msg.senderId === USER_ID
+            ? (settings.userName || 'User')
+            : (currentSessionMembers.find(a => a.id === msg.senderId)?.name || msg.senderId);
+          promptParts.push(`[${senderName}] ${msg.text}`);
+        }
+        const imagePrompt = promptParts.join('\n') || 'a creative illustration';
 
         const imageGen = streamImageGeneration(
           agent, provider.baseUrl || 'https://api.openai.com/v1', provider.apiKey || '',
