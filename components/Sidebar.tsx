@@ -1318,6 +1318,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                         {currentProvider ? `${currentProvider.name} • ${editData.modelId || t('未选择')}` : <span className="text-orange-400">{t('未配置供应商')}</span>}
                       </div>
                     </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); updateDraftAgent(agent.id, { mentionOnly: !editData.mentionOnly }); }}
+                      className={`p-1 rounded transition-colors ${editData.mentionOnly ? 'text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-300 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400'}`}
+                      title={editData.mentionOnly ? t('仅@时发言（点击关闭）') : t('点击开启仅@时发言')}
+                    >
+                      <AtSign size={13} />
+                    </button>
                     <button onClick={(e) => { e.stopPropagation(); removeAgent(agent.id); discardDraftAgent(agent.id); }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
                     {isCollapsed ? <ChevronRight size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
                   </div>
