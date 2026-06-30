@@ -100,6 +100,9 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
       { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30 },
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', inputPricePer1M: 1.25, outputPricePer1M: 10.00 },
       { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', inputPricePer1M: 0.10, outputPricePer1M: 0.40 },
+      { id: 'gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image', inputPricePer1M: 0.075, outputPricePer1M: 0.30 },
+      { id: 'gemini-3-pro-image', name: 'Gemini 3 Pro Image', inputPricePer1M: 1.25, outputPricePer1M: 10.00 },
+      { id: 'gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image', inputPricePer1M: 0.075, outputPricePer1M: 0.30 },
     ]
   },
   {

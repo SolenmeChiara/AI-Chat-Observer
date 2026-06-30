@@ -1475,6 +1475,23 @@ const App: React.FC = () => {
             }));
         }
 
+        // Image part (from Gemini image models or other image-capable models)
+        if (chunk.image) {
+          const imageAttachment = {
+            type: 'image' as const,
+            content: chunk.image.startsWith('data:') ? chunk.image : `data:image/png;base64,${chunk.image}`,
+            mimeType: 'image/png',
+            fileName: 'generated.png'
+          };
+          updateThisSession(s => ({
+            ...s,
+            messages: s.messages.map(m => m.id === newMessageId ? {
+              ...m,
+              attachments: [...(m.attachments || []), imageAttachment]
+            } : m)
+          }));
+        }
+
         if (chunk.text) {
           // Record when reasoning ends (first text chunk received)
           if (!reasoningEndTime && accumulatedReasoning) {

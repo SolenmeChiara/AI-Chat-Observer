@@ -22,6 +22,11 @@ function isGemini3Model(modelId: string): boolean {
   return lower.includes('gemini-3') || lower.includes('gemini3');
 }
 
+// Helper: Detect Gemini image generation models (can output text + images)
+function isGeminiImageModel(modelId: string): boolean {
+  return modelId.toLowerCase().includes('-image');
+}
+
 // Helper: Map reasoningBudget to Gemini 3 thinking_level
 // LOW: minimizes latency/cost, HIGH: maximizes reasoning depth
 function mapBudgetToThinkingLevel(budget: number): 'LOW' | 'HIGH' {
@@ -229,10 +234,12 @@ export async function* streamGeminiReply(
       // Build config object
       // Note: Gemini 3 recommends using default temperature (1.0) for thinking mode
       const effectiveTemp = isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature;
+      const isImageModel = isGeminiImageModel(modelId);
       const apiConfig: any = {
         systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
         maxOutputTokens: agent.config.maxTokens,
         tools: enableGoogleSearch ? [{ googleSearch: {} }] : undefined,
+        ...(isImageModel ? { responseModalities: ['TEXT', 'IMAGE'] } : {}),
       };
       if (effectiveTemp !== null) apiConfig.temperature = effectiveTemp;
       if (agent.config.topP !== null) apiConfig.topP = agent.config.topP;
@@ -308,25 +315,30 @@ export async function* streamGeminiReply(
     if (streamResult) {
       for await (const chunk of streamResult) {
         // For thinking-enabled models, parse parts to separate thought from response
-        if (mayHaveThinking && chunk.candidates?.[0]?.content?.parts) {
+        if (chunk.candidates?.[0]?.content?.parts) {
           for (const part of chunk.candidates[0].content.parts) {
+            // Image part (Gemini image models output inlineData with base64 images)
+            if (part.inlineData?.data && part.inlineData?.mimeType?.startsWith('image/')) {
+              if (!part.thought) {
+                yield { image: part.inlineData.data, isComplete: false };
+              }
+              continue;
+            }
+
             if (part.text) {
               if (part.thought) {
-                // This is thinking/reasoning content
                 yield { reasoning: part.text, isComplete: false };
               } else {
-                // This is regular response content
                 totalText += part.text;
                 yield { text: part.text, isComplete: false };
               }
             }
-            // Capture thought signature for Gemini 3 (required for multi-turn)
             if (part.thoughtSignature) {
               capturedThoughtSignature = part.thoughtSignature;
             }
           }
-        } else {
-          // Non-thinking model or fallback: use simple text extraction
+        } else if (!chunk.candidates?.[0]?.content?.parts) {
+          // Non-parts fallback: use simple text extraction
           const text = chunk.text;
           if (text) {
             totalText += text;
