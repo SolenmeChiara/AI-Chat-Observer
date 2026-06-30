@@ -11,15 +11,21 @@ const KNOWN_PRICING: Record<string, [number, number]> = {
   'claude-haiku-4-5-20251001': [0.8, 4], 'claude-haiku-3-5-20241022': [0.8, 4],
   'claude-3-5-sonnet-20241022': [3, 15], 'claude-3-5-haiku-20241022': [0.8, 4],
   // OpenAI
-  'gpt-4o': [2.5, 10], 'gpt-4o-mini': [0.15, 0.6],
+  'gpt-5.5': [5, 30], 'gpt-5.5-pro': [30, 180],
+  'gpt-5.4': [2.5, 15], 'gpt-5.4-mini': [0.75, 4.5], 'gpt-5.4-nano': [0.2, 1.25], 'gpt-5.4-pro': [30, 180],
+  'gpt-5.2': [1.75, 14], 'gpt-5.2-pro': [21, 168],
+  'gpt-5.1': [1.25, 10],
+  'gpt-5': [1.25, 10], 'gpt-5-mini': [0.25, 2], 'gpt-5-nano': [0.05, 0.4], 'gpt-5-pro': [15, 120],
   'gpt-4.1': [2, 8], 'gpt-4.1-mini': [0.4, 1.6], 'gpt-4.1-nano': [0.1, 0.4],
-  'o4-mini': [1.1, 4.4], 'o3': [10, 40], 'o3-mini': [1.1, 4.4],
+  'gpt-4o': [2.5, 10], 'gpt-4o-mini': [0.15, 0.6],
+  'o1': [15, 60], 'o3-pro': [20, 80], 'o3': [2, 8], 'o4-mini': [1.1, 4.4], 'o3-mini': [1.1, 4.4],
   'gpt-image-2': [0, 0], 'gpt-image-1': [0, 0],
   // Gemini
-  'gemini-2.5-flash': [0.075, 0.3], 'gemini-2.5-pro': [1.25, 10],
-  'gemini-3.5-flash': [0.1, 0.4],
-  'gemini-3.1-flash-image': [0.075, 0.3], 'gemini-3-pro-image': [1.25, 10],
-  'gemini-2.5-flash-image': [0.075, 0.3],
+  'gemini-3.5-flash': [1.5, 9],
+  'gemini-3.1-flash-lite': [0.25, 1.5], 'gemini-3.1-pro-preview': [2, 12], 'gemini-3.1-flash-image': [0.5, 3],
+  'gemini-3-flash-preview': [0.5, 3], 'gemini-3-pro-image': [2, 12],
+  'gemini-2.5-pro': [1.25, 10], 'gemini-2.5-flash': [0.3, 2.5], 'gemini-2.5-flash-lite': [0.1, 0.4],
+  'gemini-2.5-flash-image': [0.3, 2.5],
   // DeepSeek
   'deepseek-chat': [0.27, 1.10], 'deepseek-reasoner': [0.55, 2.19],
 };
