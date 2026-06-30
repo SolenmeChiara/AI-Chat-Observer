@@ -12,35 +12,24 @@ body {
 
 /* Text selection styling */
 ::selection {
-  background-color: #3b82f6; /* blue-500 */
-  color: #ffffff;
+  background-color: #2563eb !important; /* blue-600 */
+  color: #ffffff !important;
 }
 
 ::-moz-selection {
-  background-color: #3b82f6;
-  color: #ffffff;
+  background-color: #2563eb !important;
+  color: #ffffff !important;
 }
 
-/* Dark mode selection */
+/* Dark mode: bright highlight against dark backgrounds */
 .dark ::selection {
-  background-color: #3b82f6; /* blue-500 — brighter for dark backgrounds */
-  color: #ffffff;
+  background-color: #60a5fa !important; /* blue-400 */
+  color: #18181b !important;
 }
 
 .dark ::-moz-selection {
-  background-color: #3b82f6;
-  color: #ffffff;
-}
-
-/* Input fields in dark mode need even stronger contrast */
-.dark input::selection, .dark textarea::selection {
-  background-color: #60a5fa; /* blue-400 */
-  color: #1e1e2e;
-}
-
-.dark input::-moz-selection, .dark textarea::-moz-selection {
-  background-color: #60a5fa;
-  color: #1e1e2e;
+  background-color: #60a5fa !important;
+  color: #18181b !important;
 }
 
 /* Mobile optimizations */
