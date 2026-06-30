@@ -8,7 +8,7 @@ import RightSidebar from './components/RightSidebar';
 import ChatBubble from './components/ChatBubble';
 import StatsPanel from './components/StatsPanel';
 import { streamGeminiReply } from './services/geminiService';
-import { streamOpenAIReply, streamOpenAIResponsesReply } from './services/openaiService';
+import { streamOpenAIReply, streamOpenAIResponsesReply, streamImageGeneration, isImageGenModel } from './services/openaiService';
 import { streamAnthropicReply } from './services/anthropicService';
 import { generateSessionName, updateSessionSummary } from './services/summaryService';
 import { AgentType } from './types';
@@ -1328,6 +1328,69 @@ const App: React.FC = () => {
       // Get agent visibility config from active session
       const agentVisibility = activeSession.agentVisibility;
       const humanDisguise = activeSession.humanDisguise;
+
+      // === IMAGE GENERATION AGENT (standalone path, no {{RESPONSE:}} parsing) ===
+      if (isImageGenModel(agent.modelId)) {
+        console.log(`[${agent.name}] 🎨 Image generation agent detected`);
+
+        // Extract prompt: use last user message text, or last message mentioning this agent
+        const visibleMsgs = messages.filter(m => !m.isStreaming && !m.isSystem);
+        const lastUserMsg = [...visibleMsgs].reverse().find(m => m.senderId === USER_ID);
+        const imagePrompt = lastUserMsg?.text || 'a creative illustration';
+
+        const imageGen = streamImageGeneration(
+          agent, provider.baseUrl || 'https://api.openai.com/v1', provider.apiKey || '',
+          agent.modelId, imagePrompt,
+          agent.config.imageSize, agent.config.imageQuality
+        );
+
+        let imageReasoningText = '';
+        for await (const chunk of imageGen) {
+          if (abortController.signal.aborted) throw new Error("Request aborted");
+
+          if (chunk.reasoning) {
+            imageReasoningText += chunk.reasoning;
+            updateThisSession(s => ({
+              ...s,
+              messages: s.messages.map(m => m.id === newMessageId ? { ...m, reasoningText: imageReasoningText } : m)
+            }));
+          }
+
+          if (chunk.image) {
+            const imageAttachment = {
+              type: 'image' as const,
+              content: `data:image/png;base64,${chunk.image}`,
+              mimeType: 'image/png',
+              fileName: 'generated.png'
+            };
+            const displayText = chunk.revisedPrompt || '';
+            updateThisSession(s => ({
+              ...s,
+              messages: s.messages.map(m => m.id === newMessageId ? {
+                ...m,
+                text: displayText,
+                reasoningText: imageReasoningText || undefined,
+                attachments: [imageAttachment],
+                isStreaming: undefined
+              } : m),
+              lastUpdated: Date.now()
+            }));
+
+            console.log(`[${agent.name}] 🎨 Image generated! Revised prompt: ${displayText.substring(0, 100)}`);
+          }
+
+          if (chunk.usage) {
+            const cost = 0; // Image gen pricing is per-image, not per-token
+            updateThisSession(s => ({
+              ...s,
+              messages: s.messages.map(m => m.id === newMessageId ? { ...m, tokens: chunk.usage } : m)
+            }));
+          }
+        }
+
+        // Skip the entire text-based response processing
+        return;
+      }
 
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(

@@ -650,3 +650,94 @@ export async function* streamOpenAIResponsesReply(
     reader.releaseLock();
   }
 }
+
+// ============================================================================
+// OpenAI Image Generation (POST /v1/images/generations)
+// Standalone image generation agent — no {{RESPONSE:}} parsing needed
+// ============================================================================
+
+export function isImageGenModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return lower.includes('gpt-image') || lower.includes('dall-e') || lower.includes('dalle');
+}
+
+export async function* streamImageGeneration(
+  agent: Agent,
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  size?: string,
+  quality?: string
+): AsyncGenerator<StreamChunk> {
+
+  if (!apiKey || !baseUrl) throw new Error("Missing Config");
+
+  // Derive image API endpoint from base URL
+  let endpoint = baseUrl;
+  if (endpoint.endsWith('/chat/completions')) {
+    endpoint = endpoint.replace(/\/chat\/completions$/, '/images/generations');
+  } else if (endpoint.endsWith('/responses')) {
+    endpoint = endpoint.replace(/\/responses$/, '/images/generations');
+  } else if (endpoint.endsWith('/v1')) {
+    endpoint += '/images/generations';
+  } else {
+    endpoint = endpoint.replace(/\/?$/, '/images/generations');
+  }
+
+  console.log(`[ImageGen] 🎨 Generating image with ${modelId}: "${prompt.substring(0, 100)}..."`);
+  yield { reasoning: `Generating: ${prompt}`, isComplete: false };
+
+  const requestBody: any = {
+    model: modelId,
+    prompt: prompt,
+    n: 1,
+    response_format: 'b64_json',
+  };
+
+  if (size && size !== 'auto') requestBody.size = size;
+  if (quality && quality !== 'auto') requestBody.quality = quality;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      let errorDetail = response.statusText;
+      try {
+        const errBody = await response.json();
+        errorDetail = errBody.error?.message || JSON.stringify(errBody);
+      } catch { /* ignore */ }
+      throw new Error(`API ${response.status}: ${errorDetail}`);
+    }
+
+    const result = await response.json();
+    const imageData = result.data?.[0];
+
+    if (!imageData?.b64_json) {
+      throw new Error("No image data in response");
+    }
+
+    const revisedPrompt = imageData.revised_prompt || '';
+    if (revisedPrompt) {
+      console.log(`[ImageGen] 💭 Revised prompt: ${revisedPrompt.substring(0, 200)}`);
+    }
+
+    yield {
+      image: imageData.b64_json,
+      revisedPrompt: revisedPrompt,
+      isComplete: true,
+      usage: { input: 0, output: 0 }
+    };
+
+  } catch (error: any) {
+    console.error("[ImageGen] ❌ Error:", error.message);
+    throw error;
+  }
+}

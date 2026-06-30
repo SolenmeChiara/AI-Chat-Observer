@@ -112,6 +112,8 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
       { id: 'gpt-4o', name: 'GPT-4o', inputPricePer1M: 2.50, outputPricePer1M: 10.00 },
       { id: 'gpt-4o-mini', name: 'GPT-4o Mini', inputPricePer1M: 0.15, outputPricePer1M: 0.60 },
       { id: 'o4-mini', name: 'o4-mini', inputPricePer1M: 1.10, outputPricePer1M: 4.40 },
+      { id: 'gpt-image-2', name: 'GPT Image 2', inputPricePer1M: 0, outputPricePer1M: 0 },
+      { id: 'gpt-image-1', name: 'GPT Image 1', inputPricePer1M: 0, outputPricePer1M: 0 },
     ]
   },
   {

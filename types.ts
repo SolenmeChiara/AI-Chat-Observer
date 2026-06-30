@@ -55,6 +55,10 @@ export interface AgentConfig {
   visionProxyEnabled?: boolean;
   visionProxyProviderId?: string;
   visionProxyModelId?: string;
+
+  // Image generation settings (for gpt-image-* models)
+  imageSize?: string;    // e.g. '1024x1024', '1536x1024', 'auto'
+  imageQuality?: string; // 'low' | 'medium' | 'high' | 'auto'
 }
 
 // 搜索引擎类型
@@ -232,6 +236,8 @@ export interface StreamChunk {
   text?: string;
   reasoning?: string; // Chunk of reasoning text
   reasoningSignature?: string; // Anthropic thinking signature
+  image?: string; // Base64 image data from image generation
+  revisedPrompt?: string; // Revised prompt from image generation model
   usage?: { input: number; output: number };
   isComplete: boolean;
 }

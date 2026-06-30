@@ -5,6 +5,7 @@ import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare,
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
+import { isImageGenModel } from '../services/openaiService';
 import { useT } from '../i18n';
 
 // TTS Settings Panel Component
@@ -1375,6 +1376,40 @@ const Sidebar: React.FC<SidebarProps> = ({
                           {currentProvider?.models.map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
                        </select>
                      </div>
+
+                     {/* Image Generation Settings (only for image models) */}
+                     {isImageGenModel(editData.modelId) && (
+                       <div className="border-t border-gray-100 dark:border-zinc-700 pt-3 mt-1 space-y-2">
+                         <div className="flex items-center gap-2 text-xs font-bold text-gray-500 dark:text-gray-400 mb-2">
+                           <ImageIcon size={12} /> {t('生图设置')}
+                         </div>
+                         <div className="flex items-center gap-2">
+                           <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('尺寸')}</span>
+                           <select className="flex-1 text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                             value={editData.config.imageSize || 'auto'}
+                             onChange={(e) => updateDraftAgentConfig(agent.id, { imageSize: e.target.value })}
+                           >
+                             <option value="auto">Auto</option>
+                             <option value="1024x1024">1024x1024</option>
+                             <option value="1536x1024">1536x1024</option>
+                             <option value="1024x1536">1024x1536</option>
+                             <option value="2048x2048">2048x2048</option>
+                           </select>
+                         </div>
+                         <div className="flex items-center gap-2">
+                           <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('质量')}</span>
+                           <select className="flex-1 text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                             value={editData.config.imageQuality || 'auto'}
+                             onChange={(e) => updateDraftAgentConfig(agent.id, { imageQuality: e.target.value })}
+                           >
+                             <option value="auto">Auto</option>
+                             <option value="low">Low</option>
+                             <option value="medium">Medium</option>
+                             <option value="high">High</option>
+                           </select>
+                         </div>
+                       </div>
+                     )}
 
                      {/* Advanced Params */}
                      <div className="border-t border-gray-100 dark:border-zinc-700 pt-3 mt-1">
