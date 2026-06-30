@@ -1343,20 +1343,27 @@ const App: React.FC = () => {
       if (isImageGenModel(agent.modelId)) {
         console.log(`[${agent.name}] 🎨 Image generation agent detected`);
 
-        // Build full context prompt from conversation history
+        // Build context prompt, truncated to fit API limit (32k chars)
+        const IMG_PROMPT_LIMIT = 30000;
         const visibleMsgs = processedMessages.filter(m => !m.isStreaming);
         const contextWindow = visibleMsgs.slice(-(settings.contextLimit || 20));
-        const promptParts: string[] = [];
-        if (agent.systemPrompt) promptParts.push(`[System] ${agent.systemPrompt}`);
-        if (scenario) promptParts.push(`[Scenario] ${scenario}`);
-        if (summary) promptParts.push(`[Summary] ${summary}`);
-        for (const msg of contextWindow) {
+        let header = '';
+        if (agent.systemPrompt) header += `[System] ${agent.systemPrompt}\n`;
+        if (scenario) header += `[Scenario] ${scenario}\n`;
+        if (summary) header += `[Summary] ${summary}\n`;
+        const msgLines: string[] = [];
+        let msgLen = 0;
+        for (let i = contextWindow.length - 1; i >= 0; i--) {
+          const msg = contextWindow[i];
           const senderName = msg.senderId === USER_ID
             ? (settings.userName || 'User')
             : (currentSessionMembers.find(a => a.id === msg.senderId)?.name || msg.senderId);
-          promptParts.push(`[${senderName}] ${msg.text}`);
+          const line = `[${senderName}] ${msg.text}`;
+          if (header.length + msgLen + line.length > IMG_PROMPT_LIMIT) break;
+          msgLines.unshift(line);
+          msgLen += line.length + 1;
         }
-        const imagePrompt = promptParts.join('\n') || 'a creative illustration';
+        const imagePrompt = (header + msgLines.join('\n')).trim() || 'a creative illustration';
 
         const imageGen = streamImageGeneration(
           agent, provider.baseUrl || 'https://api.openai.com/v1', provider.apiKey || '',
