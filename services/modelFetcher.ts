@@ -3,6 +3,36 @@ import { ApiProvider, AgentType, ModelConfig } from '../types';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Known model pricing (per 1M tokens). Used as fallback when API doesn't return prices.
+const KNOWN_PRICING: Record<string, [number, number]> = {
+  // Anthropic
+  'claude-opus-4-6': [15, 75], 'claude-opus-4-7': [15, 75], 'claude-opus-4-8': [15, 75],
+  'claude-sonnet-4-6': [3, 15], 'claude-sonnet-4-5-20241022': [3, 15],
+  'claude-haiku-4-5-20251001': [0.8, 4], 'claude-haiku-3-5-20241022': [0.8, 4],
+  'claude-3-5-sonnet-20241022': [3, 15], 'claude-3-5-haiku-20241022': [0.8, 4],
+  // OpenAI
+  'gpt-4o': [2.5, 10], 'gpt-4o-mini': [0.15, 0.6],
+  'gpt-4.1': [2, 8], 'gpt-4.1-mini': [0.4, 1.6], 'gpt-4.1-nano': [0.1, 0.4],
+  'o4-mini': [1.1, 4.4], 'o3': [10, 40], 'o3-mini': [1.1, 4.4],
+  'gpt-image-2': [0, 0], 'gpt-image-1': [0, 0],
+  // Gemini
+  'gemini-2.5-flash': [0.075, 0.3], 'gemini-2.5-pro': [1.25, 10],
+  'gemini-3.5-flash': [0.1, 0.4],
+  'gemini-3.1-flash-image': [0.075, 0.3], 'gemini-3-pro-image': [1.25, 10],
+  'gemini-2.5-flash-image': [0.075, 0.3],
+  // DeepSeek
+  'deepseek-chat': [0.27, 1.10], 'deepseek-reasoner': [0.55, 2.19],
+};
+
+function lookupPricing(modelId: string): [number, number] | undefined {
+  const lower = modelId.toLowerCase();
+  if (KNOWN_PRICING[lower]) return KNOWN_PRICING[lower];
+  for (const [key, price] of Object.entries(KNOWN_PRICING)) {
+    if (lower.includes(key) || key.includes(lower)) return price;
+  }
+  return undefined;
+}
+
 export const fetchRemoteModels = async (provider: ApiProvider): Promise<ModelConfig[]> => {
   let url = '';
   let headers: Record<string, string> = {};
@@ -103,12 +133,13 @@ export const fetchRemoteModels = async (provider: ApiProvider): Promise<ModelCon
       // Google: { models: [ { name: "models/gemini-pro", ... } ] }
       rawModels = data.models || [];
       return rawModels.map((m: any) => {
-        const id = m.name.replace('models/', ''); // remove prefix
+        const id = m.name.replace('models/', '');
+        const pricing = lookupPricing(id);
         return {
           id: id,
           name: m.displayName || id,
-          inputPricePer1M: 0, // Google typically free tier or complex pricing
-          outputPricePer1M: 0
+          inputPricePer1M: pricing?.[0] ?? 0,
+          outputPricePer1M: pricing?.[1] ?? 0
         };
       });
     } else if (provider.type === AgentType.ANTHROPIC) {
@@ -116,12 +147,15 @@ export const fetchRemoteModels = async (provider: ApiProvider): Promise<ModelCon
       // NOTE: Anthropic models endpoint output might vary, but usually { data: [...] }
       // Sometimes just list of models. Assuming standard structure.
       rawModels = data.data || [];
-      return rawModels.map((m: any) => ({
-        id: m.id,
-        name: m.display_name || m.id,
-        inputPricePer1M: 0, // Anthropic API doesn't return price in list
-        outputPricePer1M: 0
-      })).sort((a, b) => b.id.localeCompare(a.id)); // Newest first usually
+      return rawModels.map((m: any) => {
+        const pricing = lookupPricing(m.id);
+        return {
+          id: m.id,
+          name: m.display_name || m.id,
+          inputPricePer1M: pricing?.[0] ?? 0,
+          outputPricePer1M: pricing?.[1] ?? 0
+        };
+      }).sort((a, b) => b.id.localeCompare(a.id));
     } else {
       // OpenAI Standard: { data: [...] }
       if (Array.isArray(data)) {
@@ -150,10 +184,14 @@ export const fetchRemoteModels = async (provider: ApiProvider): Promise<ModelCon
         if (m.pricing) {
           const promptPrice = parsePrice(m.pricing.prompt);
           const completionPrice = parsePrice(m.pricing.completion);
-          
-          // Convert to "Per 1M Tokens" if raw is per token
           if (!isNaN(promptPrice)) inputPrice = promptPrice * 1000000;
           if (!isNaN(completionPrice)) outputPrice = completionPrice * 1000000;
+        }
+
+        // Fallback to known pricing if API didn't provide any
+        if (inputPrice === 0 && outputPrice === 0) {
+          const known = lookupPricing(m.id);
+          if (known) { inputPrice = known[0]; outputPrice = known[1]; }
         }
 
         // Extract clean display name
