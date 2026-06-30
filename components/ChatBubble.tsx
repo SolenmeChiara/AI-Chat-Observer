@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
 import { useT } from '../i18n';
@@ -30,36 +30,17 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [lightboxBlobUrl, setLightboxBlobUrl] = useState<string | null>(null);
 
-  // Async-convert base64 images to blob URLs for drag support
-  const [blobUrls, setBlobUrls] = useState<Record<number, string>>({});
-  const blobUrlsRef = useRef<string[]>([]);
+  // Convert to blob URL when lightbox opens (for drag support)
   useEffect(() => {
-    const imageAtts = message.attachments?.filter(att => att.type === 'image') || [];
-    if (imageAtts.length === 0) return;
+    if (!lightboxSrc?.startsWith('data:')) { setLightboxBlobUrl(null); return; }
     let cancelled = false;
-    const urls: string[] = [];
-    Promise.all(imageAtts.map(async (att, idx) => {
-      if (!att.content?.startsWith('data:')) return;
-      try {
-        const res = await fetch(att.content);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        if (!cancelled) urls[idx] = url;
-      } catch { /* keep base64 fallback */ }
-    })).then(() => {
-      if (cancelled) { urls.forEach(u => u && URL.revokeObjectURL(u)); return; }
-      blobUrlsRef.current = urls;
-      const map: Record<number, string> = {};
-      urls.forEach((u, i) => { if (u) map[i] = u; });
-      setBlobUrls(map);
-    });
-    return () => {
-      cancelled = true;
-      blobUrlsRef.current.forEach(u => u && URL.revokeObjectURL(u));
-      blobUrlsRef.current = [];
-    };
-  }, [message.id]);
+    fetch(lightboxSrc).then(r => r.blob()).then(blob => {
+      if (!cancelled) setLightboxBlobUrl(URL.createObjectURL(blob));
+    }).catch(() => {});
+    return () => { cancelled = true; if (lightboxBlobUrl) URL.revokeObjectURL(lightboxBlobUrl); };
+  }, [lightboxSrc]);
 
   const isThisMessagePlaying = currentPlayingMessageId === message.id;
 
@@ -267,32 +248,15 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
               {message.attachments.filter(att => att.type === 'image').length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {message.attachments.filter(att => att.type === 'image').map((att, idx) => (
-                    <div
+                    <img
                       key={idx}
-                      draggable={!!blobUrls[idx]}
-                      onDragStart={(e) => {
-                        const url = blobUrls[idx];
-                        if (!url) { e.preventDefault(); return; }
-                        const canvas = document.createElement('canvas');
-                        canvas.width = 48; canvas.height = 48;
-                        const ctx = canvas.getContext('2d');
-                        const img = e.currentTarget.querySelector('img');
-                        if (ctx && img) ctx.drawImage(img, 0, 0, 48, 48);
-                        e.dataTransfer.setDragImage(canvas, 24, 24);
-                        e.dataTransfer.setData('text/uri-list', url);
-                        e.dataTransfer.effectAllowed = 'copy';
-                      }}
-                      className="inline-block"
-                    >
-                      <img
-                        src={blobUrls[idx] || att.content}
-                        alt={`Image ${idx + 1}`}
-                        draggable={false}
-                        className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
-                        style={{ maxHeight: '150px', maxWidth: '200px' }}
-                        onClick={() => setLightboxSrc(blobUrls[idx] || att.content)}
-                      />
-                    </div>
+                      src={att.content}
+                      alt={`Image ${idx + 1}`}
+                      draggable={false}
+                      className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
+                      style={{ maxHeight: '150px', maxWidth: '200px' }}
+                      onClick={() => setLightboxSrc(att.content)}
+                    />
                   ))}
                 </div>
               )}
@@ -373,18 +337,29 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           onClick={() => setLightboxSrc(null)}
         >
           <img
-            src={lightboxSrc}
+            src={lightboxBlobUrl || lightboxSrc}
             alt="Full size"
             className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            draggable={false}
             onClick={(e) => e.stopPropagation()}
           />
-          <button
-            className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 rounded-full p-2"
-            onClick={() => setLightboxSrc(null)}
-          >
-            <X size={20} />
-          </button>
+          <div className="absolute top-4 right-4 flex gap-2">
+            {lightboxBlobUrl && (
+              <a
+                href={lightboxBlobUrl}
+                download="image.png"
+                className="text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <FileImage size={20} />
+              </a>
+            )}
+            <button
+              className="text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+              onClick={() => setLightboxSrc(null)}
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
       )}
     </div>
