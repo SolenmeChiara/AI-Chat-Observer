@@ -1116,18 +1116,29 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <span className="text-[10px] text-gray-400">{t('排除私讯')}</span>
                          </div>
                          {activeGroup.memoryConfig?.summaryProviderId && (
-                            <div>
-                               <label className="text-[10px] text-gray-400 block mb-1">{t('总结模型')}</label>
-                               <select
-                                  className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
-                                  value={activeGroup.memoryConfig?.summaryModelId || ''}
-                                  onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { summaryModelId: e.target.value })}
-                               >
-                                  <option value="">{t('选择模型')}</option>
-                                  {providers.find(p => p.id === activeGroup.memoryConfig?.summaryProviderId)?.models.map(m => (
-                                     <option key={m.id} value={m.id}>{m.name}</option>
-                                  ))}
-                               </select>
+                            <div className="grid grid-cols-2 gap-2">
+                               <div>
+                                  <label className="text-[10px] text-gray-400 block mb-1">{t('总结模型')}</label>
+                                  <select
+                                     className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                     value={activeGroup.memoryConfig?.summaryModelId || ''}
+                                     onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { summaryModelId: e.target.value })}
+                                  >
+                                     <option value="">{t('选择模型')}</option>
+                                     {providers.find(p => p.id === activeGroup.memoryConfig?.summaryProviderId)?.models.map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                     ))}
+                                  </select>
+                               </div>
+                               <div>
+                                  <label className="text-[10px] text-gray-400 block mb-1">{t('最大输出 tokens')}</label>
+                                  <input
+                                     type="number" min="500" max="16000" step="500"
+                                     className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                     value={activeGroup.memoryConfig?.summaryMaxTokens || 2000}
+                                     onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { summaryMaxTokens: parseInt(e.target.value) || 2000 })}
+                                  />
+                               </div>
                             </div>
                          )}
                       </div>

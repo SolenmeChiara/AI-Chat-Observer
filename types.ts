@@ -134,6 +134,7 @@ export interface MemoryConfig {
   summaryModelId: string; // e.g. 'gemini-flash'
   summaryProviderId: string;
   excludePM?: boolean; // 总结时排除私讯
+  summaryMaxTokens?: number; // Max output tokens for summary generation (default 2000)
 }
 
 export interface MuteInfo {

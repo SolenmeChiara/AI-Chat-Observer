@@ -1027,7 +1027,8 @@ const App: React.FC = () => {
                     provider,
                     conf.summaryModelId,
                     agents,
-                    conf.excludePM
+                    conf.excludePM,
+                    conf.summaryMaxTokens
                 );
 
                 if (newSummary) {

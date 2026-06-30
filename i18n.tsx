@@ -53,6 +53,7 @@ const en: Record<string, string> = {
   '人设 Prompt...': 'System Prompt...',
   '仅@时发言': 'Mention-only',
   '开启后该角色不会自动发言，只在被@时回复': 'When enabled, this agent will only respond when @mentioned',
+  '最大输出 tokens': 'Max Output Tokens',
   '生图设置': 'Image Settings',
   '尺寸': 'Size',
   '质量': 'Quality',

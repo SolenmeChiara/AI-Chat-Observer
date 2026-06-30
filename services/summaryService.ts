@@ -275,8 +275,10 @@ export const updateSessionSummary = async (
   provider: ApiProvider,
   modelId: string,
   allAgents: any[], // to resolve names
-  excludePM?: boolean
+  excludePM?: boolean,
+  maxTokens?: number
 ): Promise<string | null> => {
+  const outputTokens = maxTokens || 2000;
 
   const transcript = recentMessages.map(m => {
      const sender = allAgents.find((a:any) => a.id === m.senderId);
@@ -331,7 +333,7 @@ export const updateSessionSummary = async (
         const res = await ai.models.generateContent({
            model: modelId,
            contents: prompt,
-           config: { maxOutputTokens: 2000 }
+           config: { maxOutputTokens: outputTokens }
         });
         return res.text?.trim() || null;
      } else if (provider.type === AgentType.ANTHROPIC) {
@@ -350,7 +352,7 @@ export const updateSessionSummary = async (
                 },
                 body: JSON.stringify({
                     model: modelId,
-                    max_tokens: 2000,
+                    max_tokens: outputTokens,
                     messages: [{ role: 'user', content: prompt }]
                 })
             },
