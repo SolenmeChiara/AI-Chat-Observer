@@ -75,7 +75,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-[90%] max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-zinc-700">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-zinc-700">
           <div className="flex items-center gap-2">
             <BarChart3 size={20} className="text-blue-500" />
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t('会话统计')}</h2>
@@ -118,7 +118,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
           {/* Agent Stats Table */}
           <div>
             <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('发言统计')}</h3>
-            <div className="bg-gray-50 dark:bg-zinc-800 rounded-xl overflow-hidden">
+            <div className="bg-gray-100 dark:bg-zinc-800 rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -142,7 +142,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                             <img
                               src={agent.avatar}
                               alt=""
-                              className="w-6 h-6 rounded-full object-contain bg-white border border-gray-100 dark:border-zinc-700"
+                              className="w-6 h-6 rounded-full object-contain bg-white border border-gray-200 dark:border-zinc-700"
                             />
                           )}
                           <span className="font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
@@ -189,7 +189,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
           {/* Word Cloud */}
           <div>
             <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('词云图')}</h3>
-            <div className="bg-gray-50 dark:bg-zinc-800 rounded-xl p-4 flex items-center justify-center min-h-[250px]">
+            <div className="bg-gray-100 dark:bg-zinc-800 rounded-xl p-4 flex items-center justify-center min-h-[250px]">
               {stats.wordFrequencies.length > 0 ? (
                 <canvas
                   ref={canvasRef}
@@ -218,7 +218,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                         ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
                         : idx < 10
                         ? 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300'
-                        : 'bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-gray-400'
+                        : 'bg-gray-100 dark:bg-zinc-900 text-gray-500 dark:text-gray-400'
                     }`}
                   >
                     {word.text}

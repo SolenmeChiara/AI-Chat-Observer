@@ -2724,7 +2724,7 @@ const App: React.FC = () => {
   const tt = useT();
 
   if (!isDbLoaded) {
-      return <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-black text-gray-500 dark:text-gray-400">
+      return <div className="flex h-screen w-full items-center justify-center bg-gray-100 dark:bg-black text-gray-500 dark:text-gray-400">
           <div className="flex flex-col items-center gap-4 max-w-md text-center">
             {dbError ? (
               <>
@@ -2770,7 +2770,7 @@ const App: React.FC = () => {
 
   return (
     <I18nProvider locale={settings.language || 'zh'}>
-    <div className="flex h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-gray-100 font-sans selection:bg-gray-200 dark:selection:bg-zinc-700">
+    <div className="flex h-screen bg-gray-100 dark:bg-black text-gray-900 dark:text-gray-100 font-sans selection:bg-gray-200 dark:selection:bg-zinc-700">
       
       {/* Backdrop for mobile sidebars */}
       {(isSidebarOpen || isRightSidebarOpen) && (
@@ -2917,7 +2917,7 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-1 sm:gap-3">
             {/* Cost - hidden on mobile */}
-            <div className="hidden sm:flex items-center gap-1 bg-gray-50 dark:bg-zinc-900 px-3 py-1.5 rounded-md border border-gray-100 dark:border-zinc-700">
+            <div className="hidden sm:flex items-center gap-1 bg-gray-100 dark:bg-zinc-900 px-3 py-1.5 rounded-md border border-gray-200 dark:border-zinc-700">
                <DollarSign size={14} className="text-gray-400"/>
                <span className="text-xs font-mono text-gray-600 dark:text-gray-300 font-medium">${totalCost.toFixed(6)}</span>
             </div>
@@ -3085,12 +3085,12 @@ const App: React.FC = () => {
                           ${isProcessing ? 'opacity-50 cursor-not-allowed border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 animate-pulse' :
                             isMuted ? 'opacity-40 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 cursor-not-allowed line-through' :
                             isYielded ? 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50' :
-                            'border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:border-gray-300 dark:hover:border-zinc-500 hover:bg-gray-50 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow'
+                            'border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:border-gray-300 dark:hover:border-zinc-500 hover:bg-gray-100 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow'
                           }
                           ${!canClick && !isProcessing && !isMuted ? 'opacity-50 cursor-not-allowed' : ''}
                         `}
                       >
-                        <img src={agent.avatar} className="w-3.5 h-3.5 rounded-full object-contain bg-white border border-gray-100 dark:border-zinc-700"/>
+                        <img src={agent.avatar} className="w-3.5 h-3.5 rounded-full object-contain bg-white border border-gray-200 dark:border-zinc-700"/>
                         {agent.name} {isYielded && tt('(放弃)')}
                       </button>
                     );
@@ -3100,7 +3100,7 @@ const App: React.FC = () => {
 
             {/* Reply Preview */}
             {replyToId && (
-              <div className="flex items-center justify-between bg-gray-50 dark:bg-zinc-800 px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-700 text-xs text-gray-600 dark:text-gray-300">
+              <div className="flex items-center justify-between bg-gray-100 dark:bg-zinc-800 px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-700 text-xs text-gray-600 dark:text-gray-300">
                  <div className="flex items-center gap-2 truncate">
                     <div className="font-bold text-zinc-800 dark:text-white">{tt('回复')}</div>
                     <div className="truncate max-w-[300px]">{messages.find(m => m.id === replyToId)?.text}</div>
@@ -3125,7 +3125,7 @@ const App: React.FC = () => {
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {attachments.map((att, idx) => (
-                  <div key={idx} className="flex items-center gap-2 bg-gray-50 dark:bg-zinc-800 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700 text-xs text-gray-600 dark:text-gray-300">
+                  <div key={idx} className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-800 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700 text-xs text-gray-600 dark:text-gray-300">
                     {att.type === 'image' ? <ImageIcon size={12} className="text-blue-500" /> : <FileText size={12} className="text-orange-500" />}
                     <span className="text-zinc-800 dark:text-white max-w-[100px] truncate">
                       {att.type === 'image' ? `${tt('图片')}${idx + 1}` : att.fileName}
@@ -3146,7 +3146,7 @@ const App: React.FC = () => {
 
             {/* MENTION POPUP */}
             {showMentionPopup && (mentionFilteredAgents.length > 0 || mentionQuery === '' || '全体成员'.includes(mentionQuery)) && (
-                <div className="absolute bottom-full left-4 mb-2 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-64 max-h-48 overflow-y-auto z-50">
+                <div className="absolute bottom-full left-4 mb-2 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 shadow-xl rounded-xl w-64 max-h-48 overflow-y-auto z-50">
                    <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-900">
                        {tt('提及成员 (@)')}
                    </div>
@@ -3155,7 +3155,7 @@ const App: React.FC = () => {
                        <button
                            onClick={() => handleSelectMention('全体成员')}
                            className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors border-b border-gray-50 dark:border-zinc-700
-                               ${selectedMentionIndex === 0 && mentionFilteredAgents.length === 0 ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-blue-600 dark:text-blue-400 hover:bg-gray-50 dark:hover:bg-zinc-700'}
+                               ${selectedMentionIndex === 0 && mentionFilteredAgents.length === 0 ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-blue-600 dark:text-blue-400 hover:bg-gray-100 dark:hover:bg-zinc-700'}
                            `}
                        >
                            <Users size={16} className="text-blue-500" />
@@ -3168,10 +3168,10 @@ const App: React.FC = () => {
                            key={agent.id}
                            onClick={() => handleSelectMention(agent.name)}
                            className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors
-                               ${index === selectedMentionIndex ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-700'}
+                               ${index === selectedMentionIndex ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700'}
                            `}
                        >
-                           <img src={agent.avatar} className="w-5 h-5 rounded-full border border-gray-100 dark:border-zinc-700 object-contain"/>
+                           <img src={agent.avatar} className="w-5 h-5 rounded-full border border-gray-200 dark:border-zinc-700 object-contain"/>
                            <span>{agent.name}</span>
                        </button>
                    ))}
@@ -3198,7 +3198,7 @@ const App: React.FC = () => {
                     <MessageSquare size={16} />
                   </button>
                   {showPmPopup && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-zinc-700 shadow-xl rounded-xl w-52 max-h-48 overflow-y-auto z-50">
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 shadow-xl rounded-xl w-52 max-h-48 overflow-y-auto z-50">
                       <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-900">
                         {tt('选择私讯目标')}
                       </div>
@@ -3215,10 +3215,10 @@ const App: React.FC = () => {
                           key={agent.id}
                           onClick={() => { setPmTargetId(agent.id); setShowPmPopup(false); }}
                           className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors ${
-                            pmTargetId === agent.id ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-700'
+                            pmTargetId === agent.id ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700'
                           }`}
                         >
-                          <img src={agent.avatar} className="w-5 h-5 rounded-full border border-gray-100 dark:border-zinc-700 object-contain"/>
+                          <img src={agent.avatar} className="w-5 h-5 rounded-full border border-gray-200 dark:border-zinc-700 object-contain"/>
                           <span>{agent.name}</span>
                           {pmTargetId === agent.id && <span className="ml-auto text-[9px] bg-purple-500 text-white px-1 rounded">{tt('当前')}</span>}
                         </button>
@@ -3243,7 +3243,7 @@ const App: React.FC = () => {
                       : `${tt('在')} "${activeSession.name}" ${tt('发言... (Enter发送, Shift+Enter换行)')}`
                 }
                 rows={1}
-                className={`w-full bg-gray-50 dark:bg-zinc-800 border rounded-xl px-4 py-3.5 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-y-auto ${
+                className={`w-full bg-gray-100 dark:bg-zinc-800 border rounded-xl px-4 py-3.5 pr-14 text-gray-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-zinc-600 focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-500 focus:border-transparent transition-all placeholder-gray-400 dark:placeholder-gray-500 shadow-inner resize-none overflow-y-auto ${
                   activeGroup?.entertainmentConfig?.enablePM && sessionMembers.length > 0 ? 'pl-16' : 'pl-10'
                 } ${pmTargetId ? 'border-purple-300 dark:border-purple-600' : 'border-gray-200 dark:border-zinc-700'}`}
                 style={{ minHeight: '52px', maxHeight: '150px' }}
