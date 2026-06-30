@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
 import { useT } from '../i18n';
-import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square, Trash2 } from 'lucide-react';
+import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square, Trash2, X } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -29,6 +29,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   const t = useT();
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const isThisMessagePlaying = currentPlayingMessageId === message.id;
 
@@ -240,9 +241,9 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                       key={idx}
                       src={att.content}
                       alt={`Image ${idx + 1}`}
-                      className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90"
+                      className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
                       style={{ maxHeight: '150px', maxWidth: '200px' }}
-                      onClick={() => window.open(att.content, '_blank')}
+                      onClick={() => setLightboxSrc(att.content)}
                     />
                   ))}
                 </div>
@@ -315,6 +316,26 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             alt="User Avatar"
             className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-600 shadow-sm object-contain bg-white p-0.5"
           />
+        </div>
+      )}
+      {/* Image Lightbox */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-zoom-out"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <img
+            src={lightboxSrc}
+            alt="Full size"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+            onClick={() => setLightboxSrc(null)}
+          >
+            <X size={20} />
+          </button>
         </div>
       )}
     </div>
