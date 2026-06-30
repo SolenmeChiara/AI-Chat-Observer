@@ -1,18 +1,19 @@
 
 import { Agent, Message, StreamChunk, AgentRole, EntertainmentConfig } from '../types';
 import { USER_ID } from '../constants';
+import {
+  formatMessageTime,
+  buildMemberList,
+  buildAttentionInstruction,
+  buildProtocols,
+  buildSystemPrompt,
+  buildMemoryContext,
+  filterVisibleMessages,
+  formatMessageText,
+  appendDocumentAttachments
+} from './shared';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Format timestamp for display in chat history (e.g., "01-15 14:30")
-function formatMessageTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hour = String(date.getHours()).padStart(2, '0');
-  const minute = String(date.getMinutes()).padStart(2, '0');
-  return `${month}-${day} ${hour}:${minute}`;
-}
 
 // Helper: Check if model requires max_completion_tokens instead of max_tokens
 // This applies to: o1, o3, gpt-4.5+, and other newer reasoning models
@@ -84,204 +85,36 @@ export async function* streamOpenAIReply(
   
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
-  // 1. Context Limit Slicing (exclude streaming placeholders - they're invisible to other AIs)
-  let effectiveMessages = messages.filter(m => !m.isStreaming);
-  if (contextLimit > 0) effectiveMessages = effectiveMessages.slice(-contextLimit);
-
-  // 2. Join-time filtering
-  let joinFilteredMessages = effectiveMessages;
-  const joinMsgId = agentJoinedAt?.[agent.id];
-  if (joinMsgId && hidePreJoinMessages?.[agent.id]) {
-    const joinIdx = effectiveMessages.findIndex(m => m.id === joinMsgId);
-    if (joinIdx >= 0) joinFilteredMessages = effectiveMessages.slice(joinIdx);
-  }
-
-  // 3. Visibility Logic
-  const visibleMessages = joinFilteredMessages.filter(m => {
-    if (m.isSystem) return true;
-    if (m.pmTargetId) {
-      if (m.senderId === agent.id) return true;
-      return m.pmTargetId === agent.id;
-    }
-    if (m.senderId === USER_ID) return true;
-    if (m.senderId === agent.id) return true;
-    const blocked = agentVisibility?.[agent.id];
-    if (blocked?.includes(m.senderId)) return false;
-    return visibilityMode === 'OPEN';
-  });
+  // 1-3. Filter messages by visibility rules
+  const visibleMessages = filterVisibleMessages(
+    messages, agent, visibilityMode, contextLimit,
+    agentVisibility, agentJoinedAt, hidePreJoinMessages
+  );
 
   // 3. Find Last Action
   const myLastMessage = [...visibleMessages].reverse().find(m => m.senderId === agent.id && !m.isSystem);
-  const myLastActionContext = myLastMessage 
-    ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...".` 
+  const myLastActionContext = myLastMessage
+    ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...".`
     : "";
 
   // 4. Build Group Member List
-  const memberList = allAgents.map(a => {
-      const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
-      const isDisguised = humanDisguise?.includes(a.id) && a.id !== agent.id;
-      const typeLabel = isDisguised ? "(Human)" : "(AI Robot)";
-      return `- ${a.name} ${typeLabel}${roleBadge}`;
-  }).join('\n');
+  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise);
 
-  // --- 5. ATTENTION / ADDRESSING LOGIC ---
-  let attentionInstruction = "";
-  if (visibleMessages.length > 0) {
-    const lastMsg = visibleMessages[visibleMessages.length - 1];
-    const lastTextLower = lastMsg.text.toLowerCase();
-    const myNameLower = agent.name.toLowerCase();
-    
-    // Check if I am mentioned
-    const isDirectlyMentioned = lastTextLower.includes(`@${myNameLower}`) || lastTextLower.includes(myNameLower);
-    
-    // Check if others are mentioned
-    const otherMentionedAgent = allAgents.find(a => 
-        a.id !== agent.id && 
-        (lastTextLower.includes(`@${a.name.toLowerCase()}`) || lastTextLower.includes(a.name.toLowerCase()))
-    );
+  // 5. Attention / Addressing Logic
+  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
 
-    if (isDirectlyMentioned) {
-        attentionInstruction = `
-        >>> [URGENT ATTENTION]
-        The last message EXPLICITLY mentions you ("${agent.name}"). 
-        You are being directly addressed. You MUST respond. Do NOT pass.
-        `;
-    } else if (otherMentionedAgent) {
-        attentionInstruction = `
-        >>> [RESTRAINT NOTICE]
-        The last message is explicitly addressing another agent: "${otherMentionedAgent.name}".
-        Unless you have a critical correction or are explicitly invited to join, you should output "{{PASS}}".
-        `;
-    } else if (allAgents.length === 1) {
-        attentionInstruction = `>>> You are the only AI in this chat. You MUST use {{RESPONSE:}} to respond to the user.`;
-    } else {
-        attentionInstruction = `
-        >>> [AMBIGUOUS ADDRESSING]
-        The user did not mention anyone specific.
-        - If the topic is relevant to your persona, use {{RESPONSE:}} to speak.
-        - If another agent is better suited, output {{PASS}}.
-        `;
-    }
-  }
-  // ---------------------------------------
+  // 6-8. Build Protocols (Admin, Search, Entertainment, PM, Split)
+  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
 
-  // --- 6. ADMIN & MEMORY LOGIC ---
-  let adminProtocol = "";
-  // Check both: agent role AND group admin list (for backwards compatibility)
-  const isGroupAdmin = agent.role === AgentRole.ADMIN || groupAdminIds?.includes(agent.id);
-  if (isGroupAdmin) {
-      adminProtocol = `
-      [ADMIN COMMANDS]
-      You are a group admin. Available commands (inside {{RESPONSE:}}):
-      {{MUTE: Name, Duration}} (10min/30min/1h/1d) | {{UNMUTE: Name}}
-      {{NOTE: content}} | {{DELNOTE: keyword}} | {{CLEARNOTES}}
-      Never mute the User or other admins.
-      `;
-  }
-
-  const memoryContext = `
-    [SHARED MEMORY]
-    Long-Term Summary: ${summary || "None"}
-    Recent Admin Notes: ${adminNotes && adminNotes.length > 0 ? adminNotes.join('; ') : "None"}
-  `;
-
-  // --- 7. SEARCH TOOL ---
-  let searchToolProtocol = "";
-  if (hasSearchTool) {
-    searchToolProtocol = `
-      [SEARCH TOOL]
-      Use {{SEARCH: query}} inside {{RESPONSE:}} to search the web. One search per message.
-      Example: {{RESPONSE: {{SEARCH: latest AI news}} Let me look that up}}
-    `;
-  }
-
-  // --- 8. ENTERTAINMENT TOOLS (Dice, Tarot) ---
-  let entertainmentProtocol = "";
-  if (entertainmentConfig?.enableDice || entertainmentConfig?.enableTarot) {
-    const tools: string[] = [];
-
-    if (entertainmentConfig.enableDice) {
-      tools.push(`
-      **Dice Roll**
-      Use {{ROLL: expression}} to roll dice. The system will display results automatically.
-      Format: XdY+Z (X dice with Y sides, plus/minus Z modifier)
-      Examples:
-      - {{ROLL: d20}} - Roll a 20-sided die
-      - {{ROLL: 2d6+3}} - Roll two 6-sided dice, add 3 to result
-      - {{ROLL: d100}} - Roll a percentile die
-
-      Use cases: TRPG sessions, skill checks, random decisions`);
-    }
-
-    if (entertainmentConfig.enableTarot) {
-      tools.push(`
-      **Tarot Cards**
-      Use {{TAROT: N}} to draw N tarot cards. System shows upright/reversed positions.
-      Examples:
-      - {{TAROT: 1}} - Draw one card
-      - {{TAROT: 3}} - Draw three cards (Past/Present/Future spread)
-
-      Use cases: Divination, plot progression, character fate decisions`);
-    }
-
-    entertainmentProtocol = `
-    [ENTERTAINMENT TOOLS]
-    This chat has the following entertainment features enabled. Use inside {{RESPONSE:}}:
-    ${tools.join('\n')}
-
-    Usage examples:
-    {{RESPONSE: Let me roll the dice {{ROLL: d20}}}}
-    {{RESPONSE: Drawing a tarot card for you {{TAROT: 1}}}}
-    `;
-  }
-
-  // --- PM (Private Message) PROTOCOL ---
-  let pmProtocol = "";
-  if (entertainmentConfig?.enablePM && agent.enablePM) {
-    const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
-    const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
-    pmProtocol = `
-    [PRIVATE MESSAGE]
-    Send a PM visible only to one member: {{RES_PM_Name: message}}
-    Can combine with public message: {{RESPONSE: public text}}{{RES_PM_Name: private text}}
-    Available targets: ${pmTargetNames}
-    One PM target per turn. Do NOT wrap PM inside {{RESPONSE:}}.
-    `;
-  }
-  // -------------------------------
-
-  const splitProtocol = entertainmentConfig?.enableSplit ? `
-- Message split: use [SPLIT] inside your {{RESPONSE:}} to send multiple messages one by one, like a real person chatting. Each [SPLIT] finalizes the previous segment and starts a new message in real time.
-  Example: {{RESPONSE: Hey everyone[SPLIT]Just wanted to say hi[SPLIT]What are we talking about?}}
-  Result: 3 separate chat bubbles sent with natural pauses between them.
-  Only use ONE {{RESPONSE:}} block — put all [SPLIT] markers inside it.
-` : '';
+  // Memory Context
+  const memoryContext = buildMemoryContext(summary, adminNotes);
 
   // System Prompt Injection
-  const systemInstruction = `
-${scenario ? `[SCENARIO]\n${scenario}\n` : ''}
-${memoryContext}
-
-[GROUP CHAT]
-Time: ${new Date().toLocaleString()}
-You are ${agent.name} (${agent.role}) in a group chat.
-Persona: ${agent.systemPrompt}
-
-Members:
-- ${userName || 'User'} (Human)${userPersona ? `: ${userPersona}` : ''}
-${memberList}
-${myLastActionContext}
-${attentionInstruction}
-
-[OUTPUT FORMAT]
-You MUST use one of these formats. Unwrapped text is discarded.
-- Speak: {{RESPONSE: your message}}
-- Stay silent: {{PASS}}
-- Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
-- Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
-- @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone
-${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${splitProtocol}
-  `;
+  const systemInstruction = buildSystemPrompt(
+    scenario, memoryContext, agent, memberList,
+    userName, userPersona, myLastActionContext,
+    attentionInstruction, protocols
+  );
 
   const formattedMessages = [
     { role: 'system', content: systemInstruction },
@@ -292,14 +125,9 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${spli
          return { role: 'user' as const, content: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
        }
 
-       const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
+       // OpenAI: all messages get timestamp (addTimestampToSelf=true)
+       let textContent = formatMessageText(m, agent, allAgents, userName, false, true);
 
-       const timeStr = formatMessageTime(m.timestamp);
-       const pmLabel = m.pmTargetId ? ' [PM]' : '';
-       const isAI = !m.isSystem && m.senderId !== USER_ID && m.senderId !== 'SYSTEM' && m.senderId !== 'narrator';
-       const displayText = isAI ? `{{RESPONSE: ${m.text}}}` : m.text;
-       let textContent = `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${displayText}`;
-       
        // Handle Quote/Reply
        if (m.replyToId) {
           const replyTarget = messages.find(msg => msg.id === m.replyToId);
@@ -309,11 +137,7 @@ ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${spli
        }
 
        // Handle Document Attachments (multiple)
-       if (m.attachments) {
-         m.attachments.filter(att => att.type === 'document' && att.textContent).forEach((att, idx) => {
-           textContent += `\n\n[Attached File ${idx + 1}: ${att.fileName}]\n${att.textContent}\n[End of File]`;
-         });
-       }
+       textContent = appendDocumentAttachments(textContent, m);
 
        // Handle Multimodal (Images - multiple)
        const imageAttachments = m.attachments?.filter(att => att.type === 'image') || [];
