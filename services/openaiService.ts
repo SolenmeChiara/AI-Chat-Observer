@@ -688,11 +688,12 @@ export async function* streamImageGeneration(
   console.log(`[ImageGen] 🎨 Generating image with ${modelId}: "${prompt.substring(0, 100)}..."`);
   yield { reasoning: `Generating: ${prompt}`, isComplete: false };
 
+  const isGptImage = /gpt-image/i.test(modelId);
   const requestBody: any = {
     model: modelId,
     prompt: prompt,
     n: 1,
-    response_format: 'b64_json',
+    ...(isGptImage ? { output_format: 'png' } : { response_format: 'b64_json' }),
   };
 
   if (size && size !== 'auto') requestBody.size = size;
