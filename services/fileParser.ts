@@ -19,7 +19,7 @@ export interface CompressionOptions {
 }
 
 // Helper: Calculate base64 size in bytes
-const getBase64Size = (base64: string): number => {
+export const getBase64Size = (base64: string): number => {
   // Remove data URL prefix if present
   const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
   // Base64 is ~4/3 of original size, so multiply by 0.75 to get actual bytes
@@ -27,7 +27,7 @@ const getBase64Size = (base64: string): number => {
 };
 
 // Helper: Compress image using canvas
-const compressImage = async (
+export const compressImage = async (
   dataUrl: string,
   maxSizeBytes: number,
   originalMimeType: string

@@ -12,7 +12,7 @@ import { streamOpenAIReply, streamOpenAIResponsesReply, streamImageGeneration, i
 import { streamAnthropicReply } from './services/anthropicService';
 import { generateSessionName, updateSessionSummary } from './services/summaryService';
 import { AgentType } from './types';
-import { parseFile } from './services/fileParser';
+import { parseFile, compressImage, getBase64Size } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings } from './services/db';
 import { describeImage } from './services/visionProxyService';
 import { I18nProvider, useT, t } from './i18n';
@@ -1367,11 +1367,22 @@ const App: React.FC = () => {
           }
 
           if (chunk.image) {
+            let imageContent = `data:image/png;base64,${chunk.image}`;
+            let imageMime = 'image/png';
+            if (settings.compressImages) {
+              const maxBytes = (settings.maxImageSizeMB || 4) * 1024 * 1024;
+              if (getBase64Size(imageContent) > maxBytes) {
+                try {
+                  imageContent = await compressImage(imageContent, maxBytes, 'image/png');
+                  imageMime = 'image/jpeg';
+                } catch (e) { console.warn('Generated image compression failed:', e); }
+              }
+            }
             const imageAttachment = {
               type: 'image' as const,
-              content: `data:image/png;base64,${chunk.image}`,
-              mimeType: 'image/png',
-              fileName: 'generated.png'
+              content: imageContent,
+              mimeType: imageMime,
+              fileName: `generated.${imageMime === 'image/jpeg' ? 'jpg' : 'png'}`
             };
             const displayText = chunk.revisedPrompt || '';
             updateThisSession(s => ({
@@ -1478,11 +1489,22 @@ const App: React.FC = () => {
 
         // Image part (from Gemini image models or other image-capable models)
         if (chunk.image) {
+          let imgContent = chunk.image.startsWith('data:') ? chunk.image : `data:image/png;base64,${chunk.image}`;
+          let imgMime = 'image/png';
+          if (settings.compressImages) {
+            const maxBytes = (settings.maxImageSizeMB || 4) * 1024 * 1024;
+            if (getBase64Size(imgContent) > maxBytes) {
+              try {
+                imgContent = await compressImage(imgContent, maxBytes, 'image/png');
+                imgMime = 'image/jpeg';
+              } catch (e) { console.warn('Generated image compression failed:', e); }
+            }
+          }
           const imageAttachment = {
             type: 'image' as const,
-            content: chunk.image.startsWith('data:') ? chunk.image : `data:image/png;base64,${chunk.image}`,
-            mimeType: 'image/png',
-            fileName: 'generated.png'
+            content: imgContent,
+            mimeType: imgMime,
+            fileName: `generated.${imgMime === 'image/jpeg' ? 'jpg' : 'png'}`
           };
           updateThisSession(s => ({
             ...s,
