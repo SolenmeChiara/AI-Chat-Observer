@@ -245,22 +245,23 @@ export async function* streamGeminiReply(
       if (agent.config.topP !== null) apiConfig.topP = agent.config.topP;
 
       // Add thinkingConfig based on model version
+      // Image models have built-in thinking (always on), just need includeThoughts to see it
       // For Gemini 3: skip if there's incomplete thinking in history (missing signatures)
-      if (agent.config.enableReasoning && !(isGemini3 && hasIncompleteThinking)) {
+      if (isImageModel) {
+        apiConfig.thinkingConfig = {
+          ...(isGemini3Model(modelId) ? { thinkingLevel: agent.config.enableReasoning ? 'HIGH' : 'MINIMAL' } : {}),
+          includeThoughts: true
+        };
+      } else if (agent.config.enableReasoning && !(isGemini3 && hasIncompleteThinking)) {
         if (isGemini3) {
-          // Gemini 3: use thinking_level (LOW/HIGH), NOT thinkingBudget
-          // includeThoughts: true enables visible thought summaries
           apiConfig.thinkingConfig = {
             thinkingLevel: mapBudgetToThinkingLevel(agent.config.reasoningBudget || 8000),
-            includeThoughts: true  // Required to see thinking output
+            includeThoughts: true
           };
         } else {
-          // Gemini 2.5 and earlier: use thinkingBudget
-          // thinkingBudget: -1 = dynamic, 0 = disabled, >0 = specific budget
-          // includeThoughts: true enables visible thought summaries
           apiConfig.thinkingConfig = {
-            thinkingBudget: agent.config.reasoningBudget || -1,  // Default to dynamic
-            includeThoughts: true  // Required to see thinking output
+            thinkingBudget: agent.config.reasoningBudget || -1,
+            includeThoughts: true
           };
         }
       }
@@ -310,7 +311,8 @@ export async function* streamGeminiReply(
     // Check if thinking might be enabled (thinking model OR enableReasoning config)
     const isThinkingModel = modelId.toLowerCase().includes('thinking');
     const isGemini3 = isGemini3Model(modelId);
-    const mayHaveThinking = isThinkingModel || agent.config.enableReasoning;
+    const isImageModel = isGeminiImageModel(modelId);
+    const mayHaveThinking = isThinkingModel || agent.config.enableReasoning || isImageModel;
 
     if (streamResult) {
       for await (const chunk of streamResult) {
