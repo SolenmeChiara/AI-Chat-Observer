@@ -145,7 +145,7 @@ const TTSSettingsPanel: React.FC<{
   const supportsFetchVoices = activeProvider?.type === 'elevenlabs' || activeProvider?.type === 'fishaudio';
 
   return (
-    <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
       <div
         className="p-4 flex items-center justify-between cursor-pointer select-none"
         onClick={() => setCollapsed(!collapsed)}
@@ -172,7 +172,7 @@ const TTSSettingsPanel: React.FC<{
               <label className="text-xs text-gray-600 dark:text-gray-300 block mb-1">{t('TTS 服务商')}</label>
               <div className="flex gap-1">
                 <select
-                  className="flex-1 text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  className="flex-1 text-xs p-2 border border-gray-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                   value={ttsSettings.activeProviderId || 'browser'}
                   onChange={(e) => updateTTSSettings({ activeProviderId: e.target.value })}
                 >
@@ -210,13 +210,13 @@ const TTSSettingsPanel: React.FC<{
                 <div className="text-xs font-medium text-blue-700 dark:text-blue-300">{t('添加自定义 TTS 服务商')}</div>
                 <input
                   type="text"
-                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                   placeholder={t('服务商名称')}
                   value={newProviderName}
                   onChange={(e) => setNewProviderName(e.target.value)}
                 />
                 <select
-                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                  className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                   value={newProviderType}
                   onChange={(e) => setNewProviderType(e.target.value as TTSEngineType)}
                 >
@@ -239,7 +239,7 @@ const TTSSettingsPanel: React.FC<{
                   </button>
                   <button
                     onClick={() => setShowAddProvider(false)}
-                    className="flex-1 text-xs py-1.5 bg-gray-200 dark:bg-zinc-600 text-gray-700 dark:text-gray-300 rounded"
+                    className="flex-1 text-xs py-1.5 bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-gray-300 rounded"
                   >
                     {t('取消')}
                   </button>
@@ -249,7 +249,7 @@ const TTSSettingsPanel: React.FC<{
 
             {/* Provider Config */}
             {activeProvider && activeProvider.type !== 'browser' && (
-              <div className="bg-gray-50 dark:bg-zinc-700/50 p-3 rounded-lg space-y-3">
+              <div className="bg-gray-50 dark:bg-zinc-800/50 p-3 rounded-lg space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{activeProvider.name} {t('配置')}</span>
                   {activeProvider.freeQuota && (
@@ -262,7 +262,7 @@ const TTSSettingsPanel: React.FC<{
                   <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">API Key</label>
                   <input
                     type="password"
-                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                     placeholder={activeProvider.type === 'minimax' ? 'group_id:api_key' : 'API Key...'}
                     value={activeProvider.apiKey || ''}
                     onChange={(e) => updateProvider(activeProvider.id, { apiKey: e.target.value })}
@@ -274,7 +274,7 @@ const TTSSettingsPanel: React.FC<{
                   <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">{t('API 地址 (可选)')}</label>
                   <input
                     type="text"
-                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                     placeholder={activeProvider.baseUrl}
                     value={activeProvider.baseUrl || ''}
                     onChange={(e) => updateProvider(activeProvider.id, { baseUrl: e.target.value })}
@@ -286,14 +286,14 @@ const TTSSettingsPanel: React.FC<{
                   <label className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">{t('价格 ($/百万字符)')}</label>
                   <input
                     type="number"
-                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                    className="w-full text-xs p-2 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                     value={activeProvider.pricePer1MChars || 0}
                     onChange={(e) => updateProvider(activeProvider.id, { pricePer1MChars: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
 
                 {/* Voice Management */}
-                <div className="border-t border-gray-200 dark:border-zinc-600 pt-2">
+                <div className="border-t border-gray-200 dark:border-zinc-700 pt-2">
                   <div className="flex items-center justify-between">
                     <div
                       className="flex items-center gap-1 cursor-pointer flex-1"
@@ -322,7 +322,7 @@ const TTSSettingsPanel: React.FC<{
                       {/* Existing voices */}
                       <div className="max-h-32 overflow-y-auto space-y-1">
                         {activeProvider.voices.map(v => (
-                          <div key={v.id} className="flex items-center justify-between text-[10px] bg-white dark:bg-zinc-700 p-1.5 rounded">
+                          <div key={v.id} className="flex items-center justify-between text-[10px] bg-white dark:bg-zinc-800 p-1.5 rounded">
                             <span className="text-gray-700 dark:text-gray-300 truncate flex-1">{v.name}</span>
                             <span className="text-gray-400 mx-2 font-mono">{v.id}</span>
                             {v.isCustom && (
@@ -341,14 +341,14 @@ const TTSSettingsPanel: React.FC<{
                       <div className="flex gap-1">
                         <input
                           type="text"
-                          className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                          className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                           placeholder={t('音色名称')}
                           value={newVoiceName}
                           onChange={(e) => setNewVoiceName(e.target.value)}
                         />
                         <input
                           type="text"
-                          className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                          className="flex-1 text-[10px] p-1.5 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                           placeholder="Voice ID"
                           value={newVoiceId}
                           onChange={(e) => setNewVoiceId(e.target.value)}
@@ -374,7 +374,7 @@ const TTSSettingsPanel: React.FC<{
               </div>
               <input
                 type="range" min="0.5" max="2.0" step="0.1"
-                className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none"
                 value={ttsSettings.rate}
                 onChange={(e) => updateTTSSettings({ rate: parseFloat(e.target.value) })}
               />
@@ -388,7 +388,7 @@ const TTSSettingsPanel: React.FC<{
               </div>
               <input
                 type="range" min="0" max="1" step="0.1"
-                className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none"
                 value={ttsSettings.volume}
                 onChange={(e) => updateTTSSettings({ volume: parseFloat(e.target.value) })}
               />
@@ -399,7 +399,7 @@ const TTSSettingsPanel: React.FC<{
               <button
                 onClick={handleAutoAssignVoices}
                 disabled={availableVoices.length === 0}
-                className="w-full text-xs py-2 px-3 bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-lg transition-colors disabled:opacity-50"
+                className="w-full text-xs py-2 px-3 bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-lg transition-colors disabled:opacity-50"
               >
                 🎲 {t('自动为')} {agents.length} {t('个角色分配不同音色')}
               </button>
@@ -409,7 +409,7 @@ const TTSSettingsPanel: React.FC<{
             </div>
 
             {/* Agent Voice Assignment */}
-            <div className="border-t border-gray-200 dark:border-zinc-600 pt-3">
+            <div className="border-t border-gray-200 dark:border-zinc-700 pt-3">
               <label className="text-xs text-gray-600 dark:text-gray-300 block mb-2">{t('角色音色设置')}</label>
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {agents.map(agent => (
@@ -417,7 +417,7 @@ const TTSSettingsPanel: React.FC<{
                     <img src={agent.avatar} alt="" className="w-6 h-6 rounded-full object-contain bg-white" />
                     <span className="text-xs text-gray-700 dark:text-gray-300 flex-shrink-0 w-20 truncate">{agent.name}</span>
                     <select
-                      className="flex-1 text-xs p-1 border border-gray-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-gray-900 dark:text-white"
+                      className="flex-1 text-xs p-1 border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                       value={agent.voiceId || ''}
                       onChange={(e) => {
                         setAgents(prev => prev.map(a =>
@@ -902,10 +902,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className={`fixed inset-y-0 left-0 w-full sm:w-96 bg-white dark:bg-zinc-800 shadow-2xl border-r border-gray-100 dark:border-zinc-700 transform transition-transform duration-300 z-50 overflow-hidden flex flex-col ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+    <div className={`fixed inset-y-0 left-0 w-full sm:w-96 bg-white dark:bg-zinc-900 shadow-2xl border-r border-gray-100 dark:border-zinc-700 transform transition-transform duration-300 z-50 overflow-hidden flex flex-col ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
 
       {/* Header */}
-      <div className="p-4 border-b border-gray-100 dark:border-zinc-700 flex justify-between items-center bg-white dark:bg-zinc-800">
+      <div className="p-4 border-b border-gray-100 dark:border-zinc-700 flex justify-between items-center bg-white dark:bg-zinc-900">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t('控制面板')}</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white"><X size={20} /></button>
       </div>
@@ -919,7 +919,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50 dark:bg-zinc-900/50">
+      <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50 dark:bg-black/50">
         
         {/* --- SESSIONS TAB (两级结构：群组 > 对话) --- */}
         {activeTab === 'sessions' && (
@@ -931,10 +931,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                const groupSessions = sessions.filter(s => s.groupId === group.id);
 
                return (
-                 <div key={group.id} className="rounded-xl border border-gray-200 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-800">
+                 <div key={group.id} className="rounded-xl border border-gray-200 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900">
                    {/* 群组头部 */}
                    <div
-                     className={`group p-3 flex items-center gap-2 cursor-pointer transition-colors ${isActiveGroup ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}`}
+                     className={`group p-3 flex items-center gap-2 cursor-pointer transition-colors ${isActiveGroup ? 'bg-zinc-100 dark:bg-zinc-800' : 'hover:bg-gray-50 dark:hover:bg-zinc-700/50'}`}
                      onClick={() => {
                        // Always expand when clicking (don't toggle if not expanded)
                        if (!isExpanded) {
@@ -959,7 +959,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                      >
                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                      </button>
-                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isActiveGroup ? 'bg-zinc-900 dark:bg-zinc-500 text-white' : 'bg-gray-100 dark:bg-zinc-600 text-gray-500 dark:text-gray-400'}`}>
+                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isActiveGroup ? 'bg-zinc-900 dark:bg-zinc-600 text-white' : 'bg-gray-100 dark:bg-zinc-700 text-gray-500 dark:text-gray-400'}`}>
                        {isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />}
                      </div>
                      <div
@@ -994,14 +994,14 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                    {/* 展开的对话列表 */}
                    {isExpanded && (
-                     <div className="border-t border-gray-100 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-900/30">
+                     <div className="border-t border-gray-100 dark:border-zinc-700 bg-gray-50/50 dark:bg-black/30">
                        {groupSessions.map(session => (
                          <div
                            key={session.id}
                            onClick={() => onSwitchSession(session.id)}
-                           className={`px-3 py-2 pl-10 flex items-center gap-2 cursor-pointer transition-colors border-b border-gray-100 dark:border-zinc-700 last:border-b-0 ${activeSessionId === session.id ? 'bg-white dark:bg-zinc-700' : 'hover:bg-white dark:hover:bg-zinc-700/50'}`}
+                           className={`px-3 py-2 pl-10 flex items-center gap-2 cursor-pointer transition-colors border-b border-gray-100 dark:border-zinc-700 last:border-b-0 ${activeSessionId === session.id ? 'bg-white dark:bg-zinc-800' : 'hover:bg-white dark:hover:bg-zinc-700/50'}`}
                          >
-                           <div className={`w-5 h-5 rounded flex items-center justify-center ${activeSessionId === session.id ? 'bg-zinc-900 dark:bg-zinc-500 text-white' : 'bg-gray-200 dark:bg-zinc-600 text-gray-400'}`}>
+                           <div className={`w-5 h-5 rounded flex items-center justify-center ${activeSessionId === session.id ? 'bg-zinc-900 dark:bg-zinc-600 text-white' : 'bg-gray-200 dark:bg-zinc-700 text-gray-400'}`}>
                              <MessageSquare size={10} />
                            </div>
                            <div
@@ -1049,7 +1049,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              })}
 
              {/* 新建群组按钮 */}
-             <button onClick={onCreateGroup} className="w-full py-3 border border-dashed border-gray-300 dark:border-zinc-600 rounded-xl text-gray-500 dark:text-gray-400 text-sm font-medium hover:bg-white dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center justify-center gap-2">
+             <button onClick={onCreateGroup} className="w-full py-3 border border-dashed border-gray-300 dark:border-zinc-700 rounded-xl text-gray-500 dark:text-gray-400 text-sm font-medium hover:bg-white dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center justify-center gap-2">
               <Plus size={16} /> {t('新建群组')}
             </button>
 
@@ -1059,12 +1059,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t('当前群组配置')}</div>
 
                  {/* 群组场景设定 */}
-                 <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
+                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                     <div className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-2 uppercase flex items-center gap-1">
                       <Server size={12}/> {t('群组剧本 / 世界观')}
                     </div>
                     <textarea
-                      className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-24 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
+                      className="w-full text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-24 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
                       placeholder={t('例如：现在你们都在一艘即将沉没的泰坦尼克号上...')}
                       value={activeGroup.scenario || ''}
                       onChange={(e) => onUpdateGroupScenario(activeGroup.id, e.target.value)}
@@ -1072,7 +1072,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                  </div>
 
                  {/* 群组记忆配置 */}
-                 <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
+                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                     <div className="flex justify-between items-center mb-2">
                         <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
                           <BookOpen size={12}/> {t('长期记忆系统')}
@@ -1095,7 +1095,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                <label className="text-[10px] text-gray-400 block mb-1">{t('总结阈值 (条)')}</label>
                                <input
                                   type="number" min="5" max="500"
-                                  className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                  className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                   value={activeGroup.memoryConfig?.threshold || 20}
                                   onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { threshold: parseInt(e.target.value) })}
                                />
@@ -1103,7 +1103,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div>
                                <label className="text-[10px] text-gray-400 block mb-1">{t('总结供应商')}</label>
                                <select
-                                  className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                  className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                   value={activeGroup.memoryConfig?.summaryProviderId || ''}
                                   onChange={(e) => {
                                       const prov = providers.find(p => p.id === e.target.value);
@@ -1132,7 +1132,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                <div>
                                   <label className="text-[10px] text-gray-400 block mb-1">{t('总结模型')}</label>
                                   <select
-                                     className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                     className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                      value={activeGroup.memoryConfig?.summaryModelId || ''}
                                      onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { summaryModelId: e.target.value })}
                                   >
@@ -1146,7 +1146,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <label className="text-[10px] text-gray-400 block mb-1">{t('最大输出 tokens')}</label>
                                   <input
                                      type="number" min="500" max="16000" step="500"
-                                     className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                     className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                      value={activeGroup.memoryConfig?.summaryMaxTokens || 2000}
                                      onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { summaryMaxTokens: parseInt(e.target.value) || 2000 })}
                                   />
@@ -1158,7 +1158,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                  </div>
 
                  {/* 娱乐功能配置 */}
-                 <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
+                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                     <div className="flex justify-between items-center mb-3">
                         <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
                           <Sparkles size={12}/> {t('娱乐功能')}
@@ -1226,14 +1226,14 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                  {/* 当前对话的摘要 (独立于群组) */}
                  {activeSession && (
-                   <div className="bg-white dark:bg-zinc-800 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
+                   <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
                       <div className="flex justify-between items-center mb-2">
                          <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
                            <Edit3 size={12}/> {t('当前对话摘要')}
                          </label>
                       </div>
                       <textarea
-                        className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-20 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
+                        className="w-full text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-20 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
                         placeholder={t('暂无对话摘要...')}
                         value={activeSession.summary || ''}
                         onChange={(e) => onUpdateSummary(activeSession.id, e.target.value)}
@@ -1262,7 +1262,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t('角色列表')} ({agents.length})</span>
               <button
                 onClick={handleAddAgent}
-                className="p-1.5 bg-zinc-900 dark:bg-zinc-600 text-white rounded-lg hover:bg-black dark:hover:bg-zinc-500 transition-colors"
+                className="p-1.5 bg-zinc-900 dark:bg-zinc-700 text-white rounded-lg hover:bg-black dark:hover:bg-zinc-500 transition-colors"
                 title={t('添加新角色')}
               >
                 <Plus size={14} />
@@ -1281,7 +1281,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   key={agent.id}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, agent.id)}
-                  className={`bg-white dark:bg-zinc-800 rounded-xl border shadow-sm relative group transition-all ${draggedAgentId === agent.id ? 'opacity-50 scale-[0.98]' : ''} ${hasDraft ? 'border-blue-400 dark:border-blue-600 ring-1 ring-blue-200 dark:ring-blue-800' : !isActive ? 'border-orange-300 dark:border-orange-700 opacity-70' : 'border-gray-200 dark:border-zinc-700'}`}
+                  className={`bg-white dark:bg-zinc-900 rounded-xl border shadow-sm relative group transition-all ${draggedAgentId === agent.id ? 'opacity-50 scale-[0.98]' : ''} ${hasDraft ? 'border-blue-400 dark:border-blue-600 ring-1 ring-blue-200 dark:ring-blue-800' : !isActive ? 'border-orange-300 dark:border-orange-700 opacity-70' : 'border-gray-200 dark:border-zinc-700'}`}
                 >
                   {/* Badges */}
                   {hasDraft && (
@@ -1308,9 +1308,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="relative">
                       <img
                         src={editData.avatar}
-                        className={`w-8 h-8 rounded-full border bg-gray-50 dark:bg-zinc-700 object-contain p-0.5 ${isActive ? 'border-gray-100 dark:border-zinc-600' : 'border-orange-300 dark:border-orange-600 grayscale'}`}
+                        className={`w-8 h-8 rounded-full border bg-gray-50 dark:bg-zinc-800 object-contain p-0.5 ${isActive ? 'border-gray-100 dark:border-zinc-700' : 'border-orange-300 dark:border-orange-600 grayscale'}`}
                       />
-                      {isActive && <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white dark:border-zinc-800"></div>}
+                      {isActive && <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white dark:border-zinc-700"></div>}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-sm text-gray-800 dark:text-white truncate">{editData.name || t('未命名角色')}</div>
@@ -1329,7 +1329,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div className="relative group/avatar">
                           <img
                             src={editData.avatar}
-                            className="w-12 h-12 rounded-full border border-gray-100 dark:border-zinc-600 bg-gray-50 dark:bg-zinc-700 object-contain p-1 cursor-pointer hover:opacity-80 transition-opacity"
+                            className="w-12 h-12 rounded-full border border-gray-100 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 object-contain p-1 cursor-pointer hover:opacity-80 transition-opacity"
                             onClick={() => {
                               setEditingAgentAvatar(agent.id);
                               agentAvatarInputRef.current?.click();
@@ -1374,7 +1374,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                      {/* 管理员权限现在在群组成员列表中设置 */}
 
                      <textarea
-                        className="w-full text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500"
+                        className="w-full text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500"
                         placeholder={t('人设 Prompt...')}
                         value={editData.systemPrompt}
                         onChange={(e) => updateDraftAgent(agent.id, { systemPrompt: e.target.value })}
@@ -1382,7 +1382,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                      
                      <div className="grid grid-cols-2 gap-2">
                        <select
-                          className={`text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-700 dark:text-gray-200 ${!editData.providerId ? 'text-gray-400' : ''}`}
+                          className={`text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded-lg p-2 text-gray-700 dark:text-gray-200 ${!editData.providerId ? 'text-gray-400' : ''}`}
                           value={editData.providerId}
                           onChange={(e) => updateDraftAgent(agent.id, { providerId: e.target.value, modelId: providers.find(p => p.id === e.target.value)?.models[0]?.id || '' })}
                        >
@@ -1390,7 +1390,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                        </select>
                        <select
-                          className={`text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-2 text-gray-700 dark:text-gray-200 ${!editData.modelId ? 'text-gray-400' : ''}`}
+                          className={`text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded-lg p-2 text-gray-700 dark:text-gray-200 ${!editData.modelId ? 'text-gray-400' : ''}`}
                           value={editData.modelId}
                           onChange={(e) => updateDraftAgent(agent.id, { modelId: e.target.value })}
                           disabled={!editData.providerId}
@@ -1408,7 +1408,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                          </div>
                          <div className="flex items-center gap-2">
                            <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('尺寸')}</span>
-                           <select className="flex-1 text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                           <select className="flex-1 text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                              value={editData.config.imageSize || 'auto'}
                              onChange={(e) => updateDraftAgentConfig(agent.id, { imageSize: e.target.value })}
                            >
@@ -1421,7 +1421,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                          </div>
                          <div className="flex items-center gap-2">
                            <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">{t('质量')}</span>
-                           <select className="flex-1 text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                           <select className="flex-1 text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                              value={editData.config.imageQuality || 'auto'}
                              onChange={(e) => updateDraftAgentConfig(agent.id, { imageQuality: e.target.value })}
                            >
@@ -1446,7 +1446,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     {t('温度')}{editData.config.temperature !== null ? `: ${editData.config.temperature}` : ''}
                                 </label>
                                 {editData.config.temperature !== null ? (
-                                    <input type="range" min="0" max="2" step="0.1" className="flex-1 h-1 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none accent-zinc-800" value={editData.config.temperature} onChange={(e) => updateDraftAgentConfig(agent.id, { temperature: parseFloat(e.target.value) })} />
+                                    <input type="range" min="0" max="2" step="0.1" className="flex-1 h-1 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none accent-zinc-800" value={editData.config.temperature} onChange={(e) => updateDraftAgentConfig(agent.id, { temperature: parseFloat(e.target.value) })} />
                                 ) : (
                                     <span className="flex-1 text-[10px] text-gray-400 italic">{t('使用默认')}</span>
                                 )}
@@ -1457,7 +1457,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     Top-P{editData.config.topP != null ? `: ${editData.config.topP}` : ''}
                                 </label>
                                 {editData.config.topP != null ? (
-                                    <input type="range" min="0" max="1" step="0.05" className="flex-1 h-1 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none accent-zinc-800" value={editData.config.topP} onChange={(e) => updateDraftAgentConfig(agent.id, { topP: parseFloat(e.target.value) })} />
+                                    <input type="range" min="0" max="1" step="0.05" className="flex-1 h-1 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none accent-zinc-800" value={editData.config.topP} onChange={(e) => updateDraftAgentConfig(agent.id, { topP: parseFloat(e.target.value) })} />
                                 ) : (
                                     <span className="flex-1 text-[10px] text-gray-400 italic">{t('使用默认')}</span>
                                 )}
@@ -1466,7 +1466,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <span className="text-[10px] text-gray-500 dark:text-gray-400 w-12">MaxToken</span>
                                 <input
                                     type="number"
-                                    className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                    className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                     value={editData.config.maxTokens}
                                     onChange={(e) => updateDraftAgentConfig(agent.id, { maxTokens: parseInt(e.target.value) })}
                                 />
@@ -1487,7 +1487,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="flex items-center gap-2">
                                     <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16">{t('推理模式')}</span>
                                     <select
-                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                         value={editData.config.reasoningMode || 'manual'}
                                         onChange={(e) => updateDraftAgentConfig(agent.id, { reasoningMode: e.target.value as any })}
                                     >
@@ -1499,7 +1499,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="flex items-center gap-2">
                                     <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16">Effort</span>
                                     <select
-                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                         value={editData.config.effort || 'high'}
                                         onChange={(e) => updateDraftAgentConfig(agent.id, { effort: e.target.value as any })}
                                     >
@@ -1517,7 +1517,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16">{t('推理预算')}</span>
                                     <input
                                         type="number"
-                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                        className="flex-1 text-xs p-1 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                         placeholder={t('如 2048 (仅 Claude 有效)')}
                                         value={editData.config.reasoningBudget}
                                         onChange={(e) => updateDraftAgentConfig(agent.id, { reasoningBudget: parseInt(e.target.value) })}
@@ -1550,7 +1550,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     <div>
                                         <label className="text-[10px] text-gray-400 block mb-1">{t('视觉供应商')}</label>
                                         <select
-                                            className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                            className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                             value={editData.config.visionProxyProviderId || ''}
                                             onChange={(e) => {
                                                 const prov = providers.find(p => p.id === e.target.value);
@@ -1568,7 +1568,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <div>
                                             <label className="text-[10px] text-gray-400 block mb-1">{t('视觉模型')}</label>
                                             <select
-                                                className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                                className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                                 value={editData.config.visionProxyModelId || ''}
                                                 onChange={(e) => updateDraftAgentConfig(agent.id, { visionProxyModelId: e.target.value })}
                                             >
@@ -1612,7 +1612,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     <div>
                                         <label className="text-[10px] text-gray-400 block mb-1">{t('搜索引擎')}</label>
                                         <select
-                                            className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                            className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                             value={editData.searchConfig?.engine || 'serper'}
                                             onChange={(e) => updateDraftAgent(agent.id, {
                                               searchConfig: {
@@ -1632,7 +1632,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <input
                                             type="password"
                                             placeholder={t('搜索引擎 API Key')}
-                                            className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                            className="w-full text-xs p-1.5 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                             value={editData.searchConfig?.apiKey || ''}
                                             onChange={(e) => updateDraftAgent(agent.id, {
                                               searchConfig: {
@@ -1690,7 +1690,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div className="border-t border-blue-200 dark:border-blue-800 pt-3 mt-3 flex gap-2">
                           <button
                             onClick={() => discardDraftAgent(agent.id)}
-                            className="flex-1 py-2 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-zinc-700 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center justify-center gap-1"
+                            className="flex-1 py-2 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-zinc-800 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center justify-center gap-1"
                           >
                             <RotateCcw size={12} /> {t('放弃更改')}
                           </button>
@@ -1713,7 +1713,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         ) : isActive ? (
                           <button
                             onClick={() => { saveDraftAgent(agent.id); updateAgent(agent.id, { isActive: false }); }}
-                            className="w-full py-2 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-zinc-700 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center justify-center gap-2"
+                            className="w-full py-2 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-zinc-800 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors flex items-center justify-center gap-2"
                           >
                             <PowerOff size={14} /> {t('停用角色')}
                           </button>
@@ -1744,8 +1744,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         {activeTab === 'providers' && (
           <div className="space-y-6">
             {providers.map(provider => (
-              <div key={provider.id} className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-zinc-700 overflow-hidden shadow-sm">
-                 <div className="bg-gray-50/50 dark:bg-zinc-700/50 p-3 border-b border-gray-100 dark:border-zinc-600 flex justify-between items-center">
+              <div key={provider.id} className="bg-white dark:bg-zinc-900 rounded-xl border border-gray-200 dark:border-zinc-700 overflow-hidden shadow-sm">
+                 <div className="bg-gray-50/50 dark:bg-zinc-800/50 p-3 border-b border-gray-100 dark:border-zinc-700 flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <Server size={14} className="text-gray-400" />
                       <input
@@ -1762,7 +1762,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="grid gap-2">
                        {/* Provider Type Selector */}
                        <select
-                          className="text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded p-2 w-full text-gray-600 dark:text-gray-200 focus:outline-none"
+                          className="text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded p-2 w-full text-gray-600 dark:text-gray-200 focus:outline-none"
                           value={provider.type}
                           onChange={(e) => updateProvider(provider.id, { type: e.target.value as AgentType })}
                        >
@@ -1775,22 +1775,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                          <>
                            <input
                               placeholder={provider.type === AgentType.ANTHROPIC ? "https://api.anthropic.com/v1" : "API Base URL"}
-                              className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded w-full text-gray-700 dark:text-gray-200"
+                              className="text-xs p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded w-full text-gray-700 dark:text-gray-200"
                               value={provider.baseUrl || ''}
                               onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
                            />
                            {/* OpenAI API Mode Selector */}
                            {provider.type === AgentType.OPENAI_COMPATIBLE && (
-                             <div className="flex gap-1 bg-gray-100 dark:bg-zinc-700 rounded p-0.5">
+                             <div className="flex gap-1 bg-gray-100 dark:bg-zinc-800 rounded p-0.5">
                                <button
                                  onClick={() => updateProvider(provider.id, { openaiApiMode: 'chat' })}
-                                 className={`flex-1 text-xs py-1.5 rounded transition-all ${(provider.openaiApiMode || 'chat') === 'chat' ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                 className={`flex-1 text-xs py-1.5 rounded transition-all ${(provider.openaiApiMode || 'chat') === 'chat' ? 'bg-white dark:bg-zinc-700 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
                                >
                                  Chat Completions
                                </button>
                                <button
                                  onClick={() => updateProvider(provider.id, { openaiApiMode: 'responses' })}
-                                 className={`flex-1 text-xs py-1.5 rounded transition-all ${provider.openaiApiMode === 'responses' ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                 className={`flex-1 text-xs py-1.5 rounded transition-all ${provider.openaiApiMode === 'responses' ? 'bg-white dark:bg-zinc-700 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
                                >
                                  Responses API
                                </button>
@@ -1800,14 +1800,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                              <input
                                 type="password"
                                 placeholder={provider.type === AgentType.ANTHROPIC ? "x-api-key" : "API Key"}
-                                className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded flex-1 text-gray-700 dark:text-gray-200"
+                                className="text-xs p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded flex-1 text-gray-700 dark:text-gray-200"
                                 value={provider.apiKey || ''}
                                 onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
                              />
                              <button
                                 onClick={() => handleFetchModels(provider)}
                                 disabled={isFetching === provider.id}
-                                className="p-2 bg-zinc-100 dark:bg-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-500 transition-colors"
+                                className="p-2 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-600 transition-colors"
                                 title={t('从服务器获取/刷新模型列表')}
                              >
                                 <RefreshCw size={14} className={isFetching === provider.id ? 'animate-spin' : ''} />
@@ -1818,16 +1818,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                        {provider.type === AgentType.GEMINI && (
                          <div className="space-y-2">
                            {/* Gemini Mode Selector */}
-                           <div className="flex gap-1 bg-gray-100 dark:bg-zinc-700 rounded p-0.5">
+                           <div className="flex gap-1 bg-gray-100 dark:bg-zinc-800 rounded p-0.5">
                              <button
                                onClick={() => updateProvider(provider.id, { geminiMode: 'aistudio' })}
-                               className={`flex-1 text-xs py-1.5 rounded transition-all ${(provider.geminiMode || 'aistudio') === 'aistudio' ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                               className={`flex-1 text-xs py-1.5 rounded transition-all ${(provider.geminiMode || 'aistudio') === 'aistudio' ? 'bg-white dark:bg-zinc-700 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
                              >
                                AI Studio
                              </button>
                              <button
                                onClick={() => updateProvider(provider.id, { geminiMode: 'vertex' })}
-                               className={`flex-1 text-xs py-1.5 rounded transition-all ${provider.geminiMode === 'vertex' ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                               className={`flex-1 text-xs py-1.5 rounded transition-all ${provider.geminiMode === 'vertex' ? 'bg-white dark:bg-zinc-700 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
                              >
                                Vertex AI
                              </button>
@@ -1839,14 +1839,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                                <input
                                  type="password"
                                  placeholder={t('Gemini API Key (从 aistudio.google.com 获取)')}
-                                 className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded flex-1 text-gray-700 dark:text-gray-200"
+                                 className="text-xs p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded flex-1 text-gray-700 dark:text-gray-200"
                                  value={provider.apiKey || ''}
                                  onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
                                />
                                <button
                                  onClick={() => handleFetchModels(provider)}
                                  disabled={isFetching === provider.id}
-                                 className="p-2 bg-zinc-100 dark:bg-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-500 transition-colors"
+                                 className="p-2 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-600 transition-colors"
                                  title={t('从服务器获取/刷新模型列表')}
                                >
                                  <RefreshCw size={14} className={isFetching === provider.id ? 'animate-spin' : ''} />
@@ -1860,13 +1860,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                <div className="grid grid-cols-2 gap-2">
                                  <input
                                    placeholder="Google Cloud Project ID"
-                                   className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                   className="text-xs p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                    value={provider.vertexProject || ''}
                                    onChange={(e) => updateProvider(provider.id, { vertexProject: e.target.value })}
                                  />
                                  <input
                                    placeholder={t('Location (如 us-central1)')}
-                                   className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                   className="text-xs p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                    value={provider.vertexLocation || ''}
                                    onChange={(e) => updateProvider(provider.id, { vertexLocation: e.target.value })}
                                  />
@@ -1875,14 +1875,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                                  <input
                                    type="password"
                                    placeholder={t('API Key (可选，用于 Express Mode)')}
-                                   className="text-xs p-2 bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded flex-1 text-gray-700 dark:text-gray-200"
+                                   className="text-xs p-2 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded flex-1 text-gray-700 dark:text-gray-200"
                                    value={provider.apiKey || ''}
                                    onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
                                  />
                                  <button
                                    onClick={() => handleFetchModels(provider)}
                                    disabled={isFetching === provider.id}
-                                   className="p-2 bg-zinc-100 dark:bg-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-500 transition-colors"
+                                   className="p-2 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-500 text-zinc-900 dark:text-white rounded border border-gray-200 dark:border-zinc-600 transition-colors"
                                    title={t('从服务器获取/刷新模型列表')}
                                  >
                                    <RefreshCw size={14} className={isFetching === provider.id ? 'animate-spin' : ''} />
@@ -1897,23 +1897,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                        )}
                     </div>
 
-                    <div className="border-t border-gray-100 dark:border-zinc-600 pt-3">
+                    <div className="border-t border-gray-100 dark:border-zinc-700 pt-3">
                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block flex justify-between">
                          <span>{t('可用模型列表')} ({provider.models.length})</span>
                        </label>
-                       <div className="space-y-3 max-h-64 overflow-y-auto p-2 rounded-lg bg-gray-100 dark:bg-zinc-900/50">
+                       <div className="space-y-3 max-h-64 overflow-y-auto p-2 rounded-lg bg-gray-100 dark:bg-black/50">
                          {provider.models.map((model, idx) => (
-                           <div key={idx} className="space-y-1.5 p-2 bg-white dark:bg-zinc-800 rounded-lg border border-gray-200 dark:border-zinc-600">
+                           <div key={idx} className="space-y-1.5 p-2 bg-white dark:bg-zinc-900 rounded-lg border border-gray-200 dark:border-zinc-700">
                               <div className="grid grid-cols-[1fr_1fr_24px] gap-2 items-center">
                                 <input
                                   placeholder={t('模型ID')}
-                                  className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                  className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
                                   value={model.id}
                                   onChange={(e) => updateModelInProvider(provider.id, idx, 'id', e.target.value)}
                                 />
                                 <input
                                   placeholder={t('显示名称')}
-                                  className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                  className="w-full text-xs px-2 py-1 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
                                   value={model.name}
                                   onChange={(e) => updateModelInProvider(provider.id, idx, 'name', e.target.value)}
                                 />
@@ -1926,7 +1926,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     type="number"
                                     step="0.01"
                                     placeholder="0.00"
-                                    className="w-full text-xs px-2 py-0.5 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                    className="w-full text-xs px-2 py-0.5 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
                                     value={model.inputPricePer1M || ''}
                                     onChange={(e) => updateModelInProvider(provider.id, idx, 'inputPricePer1M', parseFloat(e.target.value) || 0)}
                                   />
@@ -1937,7 +1937,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     type="number"
                                     step="0.01"
                                     placeholder="0.00"
-                                    className="w-full text-xs px-2 py-0.5 bg-gray-50 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-500 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
+                                    className="w-full text-xs px-2 py-0.5 bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200 focus:outline-none focus:border-zinc-400"
                                     value={model.outputPricePer1M || ''}
                                     onChange={(e) => updateModelInProvider(provider.id, idx, 'outputPricePer1M', parseFloat(e.target.value) || 0)}
                                   />
@@ -1960,7 +1960,7 @@ const Sidebar: React.FC<SidebarProps> = ({
            <div className="space-y-6 p-1">
              
              {/* USER PROFILES SETTINGS */}
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><User size={16}/> {t('用户档案 (多身份)')}</h3>
 
                 {/* Hidden file inputs */}
@@ -1982,17 +1982,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="space-y-3">
                   {/* Profile List */}
                   {(settings.userProfiles || []).map((profile, idx) => (
-                    <div key={profile.id} className="border border-gray-200 dark:border-zinc-600 rounded-lg overflow-hidden">
+                    <div key={profile.id} className="border border-gray-200 dark:border-zinc-700 rounded-lg overflow-hidden">
                       {/* Profile Header (Collapsible) */}
                       <div
                         className={`flex items-center gap-2 p-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-700 ${
-                          settings.activeProfileId === profile.id ? 'bg-zinc-100 dark:bg-zinc-700' : ''
+                          settings.activeProfileId === profile.id ? 'bg-zinc-100 dark:bg-zinc-800' : ''
                         }`}
                         onClick={() => setExpandedProfileId(expandedProfileId === profile.id ? null : profile.id)}
                       >
                         <img
                           src={profile.avatar}
-                          className="w-8 h-8 rounded-full object-cover border border-gray-200 dark:border-zinc-600"
+                          className="w-8 h-8 rounded-full object-cover border border-gray-200 dark:border-zinc-700"
                         />
                         <div className="flex-1 min-w-0">
                           <div className="text-xs font-medium text-gray-900 dark:text-white truncate">{profile.name}</div>
@@ -2006,12 +2006,12 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                       {/* Profile Editor (Expanded) */}
                       {expandedProfileId === profile.id && (
-                        <div className="p-3 bg-gray-50 dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-600 space-y-3">
+                        <div className="p-3 bg-gray-50 dark:bg-black border-t border-gray-200 dark:border-zinc-700 space-y-3">
                           <div className="flex gap-3 items-start">
                             <div className="relative">
                               <img
                                 src={profile.avatar}
-                                className="w-12 h-12 rounded-full bg-gray-100 dark:bg-zinc-700 p-0.5 border border-gray-200 dark:border-zinc-600 cursor-pointer object-cover hover:opacity-80 transition-opacity"
+                                className="w-12 h-12 rounded-full bg-gray-100 dark:bg-zinc-800 p-0.5 border border-gray-200 dark:border-zinc-700 cursor-pointer object-cover hover:opacity-80 transition-opacity"
                                 onClick={() => {
                                   setEditingProfileId(profile.id);
                                   avatarInputRef.current?.click();
@@ -2024,13 +2024,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="flex-1 space-y-2">
                               <input
-                                className="w-full text-xs p-2 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded text-gray-700 dark:text-gray-200"
+                                className="w-full text-xs p-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
                                 placeholder={t('档案名称')}
                                 value={profile.name}
                                 onChange={(e) => updateUserProfile(profile.id, { name: e.target.value })}
                               />
                               <input
-                                className="w-full text-xs p-2 bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded text-gray-400"
+                                className="w-full text-xs p-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded text-gray-400"
                                 placeholder={t('头像 URL (或点击头像上传)')}
                                 value={profile.avatar.length > 50 ? t('已上传图片') : profile.avatar}
                                 onChange={(e) => updateUserProfile(profile.id, { avatar: e.target.value })}
@@ -2040,7 +2040,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           <div>
                             <label className="text-[10px] text-gray-400 font-bold block mb-1">{t('人设 / 自我介绍 (AI可见)')}</label>
                             <textarea
-                              className="w-full text-xs bg-white dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none"
+                              className="w-full text-xs bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-16 resize-none"
                               placeholder={t('例如：我是一个图灵测试主考官...')}
                               value={profile.persona || ''}
                               onChange={(e) => updateUserProfile(profile.id, { persona: e.target.value })}
@@ -2071,7 +2071,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                   {/* Add New Profile Button */}
                   <button
-                    className="w-full py-2 text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-zinc-600 rounded-lg hover:bg-gray-50 dark:hover:bg-zinc-700 flex items-center justify-center gap-1"
+                    className="w-full py-2 text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-zinc-700 rounded-lg hover:bg-gray-50 dark:hover:bg-zinc-700 flex items-center justify-center gap-1"
                     onClick={addNewUserProfile}
                   >
                     <Plus size={14} /> {t('添加新档案')}
@@ -2080,7 +2080,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              </div>
 
              {/* STABILITY SETTINGS */}
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><ShieldAlert size={16}/> {t('稳定性与并发')}</h3>
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
@@ -2105,7 +2105,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         </div>
                         <input
                             type="range" min="5000" max="300000" step="5000"
-                            className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                            className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none"
                             value={settings.timeoutDuration || 30000}
                             onChange={(e) => setSettings({...settings, timeoutDuration: parseInt(e.target.value)})}
                         />
@@ -2114,7 +2114,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              </div>
 
              {/* IMAGE COMPRESSION */}
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                   <ImageIcon size={16}/> {t('图片压缩')}
                 </h3>
@@ -2140,7 +2140,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           </div>
                           <input
                               type="range" min="1" max="10" step="1"
-                              className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                              className="w-full accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none"
                               value={settings.maxImageSizeMB ?? 4}
                               onChange={(e) => setSettings({...settings, maxImageSizeMB: parseInt(e.target.value)})}
                           />
@@ -2153,7 +2153,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              </div>
 
              {/* APPEARANCE */}
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                   {settings.darkMode ? <Moon size={16}/> : <Sun size={16}/>} {t('外观')}
                 </h3>
@@ -2174,7 +2174,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-between mt-4">
                     <span className="text-xs text-gray-600 dark:text-gray-300">Language / 语言</span>
                     <select
-                        className="text-xs bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 rounded-lg p-1.5"
+                        className="text-xs bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 rounded-lg p-1.5"
                         value={settings.language || 'zh'}
                         onChange={(e) => setSettings({...settings, language: e.target.value as 'zh' | 'en'})}
                     >
@@ -2184,12 +2184,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
              </div>
 
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Clock size={16}/> {t('思考呼吸时间')}</h3>
                 <div className="flex items-center gap-4">
                   <input
                     type="range" min="500" max="10000" step="500"
-                    className="flex-1 accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                    className="flex-1 accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none"
                     value={settings.breathingTime}
                     onChange={(e) => setSettings({...settings, breathingTime: parseInt(e.target.value)})}
                   />
@@ -2199,12 +2199,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <p className="text-xs text-gray-400 mt-2">{t('一位 AI 发言结束后，等待下一位 AI 开始思考的间隔时间。')}</p>
              </div>
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><GripVertical size={16}/> {t('上下文历史限制')}</h3>
                 <div className="flex items-center gap-4">
                   <input
                     type="range" min="0" max="2000" step="10"
-                    className="flex-1 accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-600 rounded-lg appearance-none"
+                    className="flex-1 accent-zinc-900 h-2 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none"
                     value={settings.contextLimit || 0}
                     onChange={(e) => setSettings({...settings, contextLimit: parseInt(e.target.value)})}
                   />
@@ -2213,20 +2213,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </span>
                 </div>
              </div>
-             <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+             <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                    {settings.visibilityMode === 'OPEN' ? <Eye size={16}/> : <EyeOff size={16}/>} {t('可见性模式')}
                 </h3>
                 <div className="flex gap-2">
                    <button
                      onClick={() => setSettings({...settings, visibilityMode: 'OPEN'})}
-                     className={`flex-1 py-2 text-xs font-medium rounded-lg border ${settings.visibilityMode === 'OPEN' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'bg-white dark:bg-zinc-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-600'}`}
+                     className={`flex-1 py-2 text-xs font-medium rounded-lg border ${settings.visibilityMode === 'OPEN' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'bg-white dark:bg-zinc-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-zinc-700 hover:bg-gray-50 dark:hover:bg-zinc-600'}`}
                    >
                      {t('公开 (标准)')}
                    </button>
                    <button
                      onClick={() => setSettings({...settings, visibilityMode: 'BLIND'})}
-                     className={`flex-1 py-2 text-xs font-medium rounded-lg border ${settings.visibilityMode === 'BLIND' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'bg-white dark:bg-zinc-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-zinc-600 hover:bg-gray-50 dark:hover:bg-zinc-600'}`}
+                     className={`flex-1 py-2 text-xs font-medium rounded-lg border ${settings.visibilityMode === 'BLIND' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'bg-white dark:bg-zinc-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-zinc-700 hover:bg-gray-50 dark:hover:bg-zinc-600'}`}
                    >
                      {t('盲盒 (仅见用户)')}
                    </button>
@@ -2306,7 +2306,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                };
 
                return (
-                 <div className="bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
+                 <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                    <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                      <Download size={16}/> {t('聊天记录导出')}
                    </h3>

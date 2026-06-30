@@ -48,7 +48,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   if (message.isSystem) {
     return (
       <div className="flex w-full mb-6 justify-center group">
-        <span className="text-xs bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-200 dark:border-zinc-700">
+        <span className="text-xs bg-gray-100 dark:bg-zinc-900 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-200 dark:border-zinc-700">
            {message.text}
         </span>
         {onDelete && (
@@ -69,7 +69,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             <img
               src={sender.avatar}
               alt="Avatar"
-              className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-600 shadow-sm object-contain bg-white p-0.5"
+              className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-700 shadow-sm object-contain bg-white p-0.5"
             />
           </div>
         )}
@@ -86,7 +86,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             )}
           </div>
 
-          <div className="w-full bg-white dark:bg-zinc-800 rounded-2xl border border-blue-200 dark:border-blue-800 shadow-sm overflow-hidden">
+          <div className="w-full bg-white dark:bg-zinc-900 rounded-2xl border border-blue-200 dark:border-blue-800 shadow-sm overflow-hidden">
             <button
               onClick={() => setIsSearchExpanded(!isSearchExpanded)}
               className="w-full px-4 py-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-zinc-700 transition-colors"
@@ -177,7 +177,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           <img 
             src={avatarSrc}
             alt="Avatar"
-            className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-600 shadow-sm object-contain bg-white p-0.5 cursor-pointer"
+            className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-700 shadow-sm object-contain bg-white p-0.5 cursor-pointer"
             onClick={() => onMention && sender && onMention(sender.name)}
           />
         </div>
@@ -203,7 +203,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
         {/* Reply Context */}
         {replyToMessage && (
            <div className={`text-xs mb-1 px-3 py-1.5 rounded-lg border-l-2 opacity-80 cursor-pointer
-             ${isUser ? 'bg-zinc-800 text-gray-300 border-gray-500' : 'bg-gray-100 dark:bg-zinc-700 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-zinc-500'}
+             ${isUser ? 'bg-zinc-800 text-gray-300 border-gray-500' : 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-zinc-600'}
            `}>
               <div className="font-bold mb-0.5 flex items-center gap-1">
                 <Reply size={10} /> {t('引用')} {replyToMessage.senderId === USER_ID ? (userProfile?.userName || 'User') : (replyToMessage.senderId === 'SYSTEM' || replyToMessage.isSystem ? 'System' : allAgents?.find(a => a.id === replyToMessage.senderId)?.name || 'Unknown')}
@@ -215,7 +215,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
         {/* REASONING CHAIN (Collapsible) */}
         {message.reasoningText && !isUser && (
           <details className="mb-2 max-w-full" open={userProfile?.expandAllReasoning}>
-            <summary className="list-none cursor-pointer flex items-center gap-1.5 text-[10px] text-gray-400 font-medium bg-gray-50 dark:bg-zinc-700 border border-gray-100 dark:border-zinc-600 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors w-fit">
+            <summary className="list-none cursor-pointer flex items-center gap-1.5 text-[10px] text-gray-400 font-medium bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors w-fit">
                <BrainCircuit size={12} />
                {t('思考过程')}
                {message.reasoningDuration && (
@@ -224,7 +224,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                  </span>
                )}
             </summary>
-            <div className="mt-2 p-3 bg-gray-50 dark:bg-zinc-700 rounded-lg border-l-2 border-gray-300 dark:border-zinc-500 text-xs text-gray-500 dark:text-gray-400 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-w-full" style={{ wordBreak: 'break-word' }}>
+            <div className="mt-2 p-3 bg-gray-50 dark:bg-zinc-800 rounded-lg border-l-2 border-gray-300 dark:border-zinc-600 text-xs text-gray-500 dark:text-gray-400 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-w-full" style={{ wordBreak: 'break-word' }}>
               {message.reasoningText}
             </div>
           </details>
@@ -234,7 +234,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm relative prose prose-sm dark:prose-invert max-w-full overflow-hidden
             ${isUser
               ? 'bg-zinc-900 text-white rounded-br-sm prose-invert'
-              : 'bg-white dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-bl-sm border border-gray-100 dark:border-zinc-700'
+              : 'bg-white dark:bg-zinc-900 text-gray-800 dark:text-gray-200 rounded-bl-sm border border-gray-100 dark:border-zinc-700'
             }
             ${message.pmTargetId ? 'text-purple-600 dark:text-purple-400' : ''}
             ${message.isError ? 'border-red-200 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300' : ''}
@@ -326,7 +326,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           <img
             src={avatarSrc}
             alt="User Avatar"
-            className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-600 shadow-sm object-contain bg-white p-0.5"
+            className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-700 shadow-sm object-contain bg-white p-0.5"
           />
         </div>
       )}

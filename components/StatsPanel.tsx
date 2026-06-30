@@ -73,7 +73,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-zinc-800 rounded-2xl shadow-2xl w-[90%] max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-[90%] max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-zinc-700">
           <div className="flex items-center gap-2">
@@ -118,7 +118,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
           {/* Agent Stats Table */}
           <div>
             <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('发言统计')}</h3>
-            <div className="bg-gray-50 dark:bg-zinc-700 rounded-xl overflow-hidden">
+            <div className="bg-gray-50 dark:bg-zinc-800 rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -131,18 +131,18 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-zinc-600">
                   {stats.agentStats.map((agent, idx) => (
-                    <tr key={agent.agentId} className={idx % 2 === 0 ? 'bg-white dark:bg-zinc-800' : 'bg-gray-50/50 dark:bg-zinc-700/50'}>
+                    <tr key={agent.agentId} className={idx % 2 === 0 ? 'bg-white dark:bg-zinc-900' : 'bg-gray-50/50 dark:bg-zinc-800/50'}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {agent.agentId === USER_ID ? (
-                            <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-zinc-600 flex items-center justify-center text-xs">
+                            <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-zinc-700 flex items-center justify-center text-xs">
                               👤
                             </div>
                           ) : (
                             <img
                               src={agent.avatar}
                               alt=""
-                              className="w-6 h-6 rounded-full object-contain bg-white border border-gray-100 dark:border-zinc-600"
+                              className="w-6 h-6 rounded-full object-contain bg-white border border-gray-100 dark:border-zinc-700"
                             />
                           )}
                           <span className="font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
@@ -161,7 +161,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <div className="w-16 h-2 bg-gray-200 dark:bg-zinc-600 rounded-full overflow-hidden">
+                          <div className="w-16 h-2 bg-gray-200 dark:bg-zinc-700 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-blue-500 rounded-full"
                               style={{
@@ -189,7 +189,7 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
           {/* Word Cloud */}
           <div>
             <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-3">{t('词云图')}</h3>
-            <div className="bg-gray-50 dark:bg-zinc-700 rounded-xl p-4 flex items-center justify-center min-h-[250px]">
+            <div className="bg-gray-50 dark:bg-zinc-800 rounded-xl p-4 flex items-center justify-center min-h-[250px]">
               {stats.wordFrequencies.length > 0 ? (
                 <canvas
                   ref={canvasRef}
@@ -217,8 +217,8 @@ const StatsPanel: React.FC<StatsPanelProps> = ({
                       idx < 3
                         ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
                         : idx < 10
-                        ? 'bg-gray-100 dark:bg-zinc-700 text-gray-700 dark:text-gray-300'
-                        : 'bg-gray-50 dark:bg-zinc-800 text-gray-500 dark:text-gray-400'
+                        ? 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300'
+                        : 'bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-gray-400'
                     }`}
                   >
                     {word.text}
