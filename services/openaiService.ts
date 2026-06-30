@@ -188,11 +188,15 @@ export async function* streamOpenAIReply(
         requestBody.max_tokens = agent.config.maxTokens;
       }
 
-      // Add reasoning_effort for o-series reasoning models
+      // Add reasoning_effort for o-series reasoning models (Chat Completions supports low/medium/high)
       if (isOpenAIReasoningModel && agent.config.enableReasoning) {
         const effort = agent.config.effort;
         if (effort === 'low' || effort === 'medium' || effort === 'high') {
           requestBody.reasoning_effort = effort;
+        } else if (effort === 'none' || effort === 'minimal') {
+          requestBody.reasoning_effort = 'low';
+        } else if (effort === 'xhigh' || effort === 'max') {
+          requestBody.reasoning_effort = 'high';
         } else {
           requestBody.reasoning_effort = mapBudgetToEffort(agent.config.reasoningBudget || 8000);
         }
@@ -482,8 +486,6 @@ export async function* streamOpenAIResponsesReply(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const isOpenAIReasoningModel = /^o[134](-|$)/.test(modelId.toLowerCase());
-
       const requestBody: any = {
         model: modelId,
         instructions: systemInstruction,
@@ -496,18 +498,14 @@ export async function* streamOpenAIResponsesReply(
         requestBody.max_output_tokens = agent.config.maxTokens;
       }
 
-      if (!isOpenAIReasoningModel) {
+      // Reasoning config: Responses API supports reasoning on any model (not just o-series)
+      if (agent.config.enableReasoning) {
+        const effort = agent.config.effort || 'medium';
+        const reasoning: any = { effort, summary: 'auto' };
+        requestBody.reasoning = reasoning;
+      } else {
         if (agent.config.temperature !== null) requestBody.temperature = agent.config.temperature;
         if (agent.config.topP !== null) requestBody.top_p = agent.config.topP;
-      }
-
-      if (isOpenAIReasoningModel && agent.config.enableReasoning) {
-        const effort = agent.config.effort;
-        if (effort === 'low' || effort === 'medium' || effort === 'high') {
-          requestBody.reasoning = { effort };
-        } else {
-          requestBody.reasoning = { effort: mapBudgetToEffort(agent.config.reasoningBudget || 8000) };
-        }
       }
 
       // Derive endpoint: replace /chat/completions or /v1/chat/completions with /responses

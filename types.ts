@@ -40,7 +40,7 @@ export interface ModelConfig {
 }
 
 export type ReasoningMode = 'manual' | 'adaptive';
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface AgentConfig {
   temperature: number | null; // 0.0 - 2.0, null = use provider default

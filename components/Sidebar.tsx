@@ -1445,6 +1445,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         value={editData.config.effort || 'high'}
                                         onChange={(e) => updateDraftAgentConfig(agent.id, { effort: e.target.value as any })}
                                     >
+                                        <option value="none">None</option>
+                                        <option value="minimal">Minimal</option>
                                         <option value="low">Low</option>
                                         <option value="medium">Medium</option>
                                         <option value="high">High</option>
