@@ -128,7 +128,7 @@ export const INITIAL_PROVIDERS: ApiProvider[] = [
     models: [
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', inputPricePer1M: 3.00, outputPricePer1M: 15.00 },
       { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', inputPricePer1M: 0.80, outputPricePer1M: 4.00 },
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', inputPricePer1M: 15.00, outputPricePer1M: 75.00 },
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', inputPricePer1M: 5.00, outputPricePer1M: 25.00 },
     ]
   },
   {

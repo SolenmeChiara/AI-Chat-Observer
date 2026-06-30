@@ -6,7 +6,7 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Known model pricing (per 1M tokens). Used as fallback when API doesn't return prices.
 const KNOWN_PRICING: Record<string, [number, number]> = {
   // Anthropic
-  'claude-opus-4-6': [15, 75], 'claude-opus-4-7': [15, 75], 'claude-opus-4-8': [15, 75],
+  'claude-opus-4-6': [5, 25], 'claude-opus-4-7': [5, 25], 'claude-opus-4-8': [5, 25],
   'claude-sonnet-4-6': [3, 15], 'claude-sonnet-4-5-20241022': [3, 15],
   'claude-haiku-4-5-20251001': [0.8, 4], 'claude-haiku-3-5-20241022': [0.8, 4],
   'claude-3-5-sonnet-20241022': [3, 15], 'claude-3-5-haiku-20241022': [0.8, 4],

@@ -761,8 +761,20 @@ const Sidebar: React.FC<SidebarProps> = ({
     if (!provider.apiKey) { alert(t("请先填写 API Key")); return; }
     setIsFetching(provider.id);
     try {
-      const models = await fetchRemoteModels(provider);
-      if (models.length > 0) { updateProvider(provider.id, { models }); alert(`${t('成功获取')} ${models.length} ${t('个模型！')}`); }
+      const fetched = await fetchRemoteModels(provider);
+      if (fetched.length > 0) {
+        // Merge: preserve user-entered prices for existing models
+        const existingMap = new Map(provider.models.map(m => [m.id, m]));
+        const merged = fetched.map(m => {
+          const existing = existingMap.get(m.id);
+          if (existing && (existing.inputPricePer1M > 0 || existing.outputPricePer1M > 0)) {
+            return { ...m, inputPricePer1M: existing.inputPricePer1M, outputPricePer1M: existing.outputPricePer1M };
+          }
+          return m;
+        });
+        updateProvider(provider.id, { models: merged });
+        alert(`${t('成功获取')} ${fetched.length} ${t('个模型！')}`);
+      }
       else { alert(t("未获取到任何模型。")); }
     } catch (e: any) { alert(`${t('获取失败')}: ${e.message}`); } finally { setIsFetching(null); }
   };
