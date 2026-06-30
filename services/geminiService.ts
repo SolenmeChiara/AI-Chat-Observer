@@ -93,11 +93,12 @@ export async function* streamGeminiReply(
   entertainmentConfig?: EntertainmentConfig,
   agentVisibility?: Record<string, string[]>,
   humanDisguise?: string[],
+  mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
-  
+
   // 1-3. Filter messages by visibility rules
   const visibleMessages = filterVisibleMessages(
     messages, agent, visibilityMode, contextLimit,
@@ -111,7 +112,7 @@ export async function* streamGeminiReply(
     : "You haven't spoken recently.";
 
   // 4. Build Group Member List for Context
-  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise);
+  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
 
   // 5. Attention / Addressing Logic
   const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);

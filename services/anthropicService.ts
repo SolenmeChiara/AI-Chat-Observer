@@ -45,10 +45,11 @@ export async function* streamAnthropicReply(
   entertainmentConfig?: EntertainmentConfig,
   agentVisibility?: Record<string, string[]>,
   humanDisguise?: string[],
+  mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>
 ): AsyncGenerator<StreamChunk> {
-  
+
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
   // 1-3. Filter messages by visibility rules
@@ -64,7 +65,7 @@ export async function* streamAnthropicReply(
     : "";
 
   // 4. Build Group Member List
-  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise);
+  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
 
   // 5. Attention / Addressing Logic
   const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);

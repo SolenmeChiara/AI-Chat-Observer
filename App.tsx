@@ -1424,28 +1424,28 @@ const App: React.FC = () => {
           },
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
           agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       } else if (provider.openaiApiMode === 'responses') {
         console.log(`[${agent.name}] 📡 Using OpenAI Responses API`);
         streamGenerator = streamOpenAIResponsesReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );
       }
 
@@ -2434,7 +2434,7 @@ const App: React.FC = () => {
         if (pendingTriggerRef.current.has(a.id)) return false; // Also check pending
         if ((activeSession.mutedAgentIds || []).includes(a.id)) return false;
         if ((activeSession.yieldedAgentIds || []).includes(a.id)) return false;
-        if (a.mentionOnly) return false; // Mention-only agents skip auto-play
+        if ((activeGroup?.mentionOnlyIds || []).includes(a.id)) return false;
 
         // 辩论模式跳过 cooldown 和 lastSpeaker 检查（顺序由 debate sequence 保证）
         if (!isDebateModeActive) {
@@ -2455,7 +2455,7 @@ const App: React.FC = () => {
             if (pendingTriggerRef.current.has(a.id)) reasons.push('pending');
             if ((activeSession.mutedAgentIds || []).includes(a.id)) reasons.push('muted');
             if ((activeSession.yieldedAgentIds || []).includes(a.id)) reasons.push('yielded');
-            if (a.mentionOnly) reasons.push('mentionOnly');
+            if ((activeGroup?.mentionOnlyIds || []).includes(a.id)) reasons.push('mentionOnly');
             if (sessionMembers.length > 1 && a.id === lastSpeakerId) reasons.push('lastSpeaker');
             const spokeAt = agentLastSpokeAt.current.get(a.id);
             if (spokeAt !== undefined && (messages.length - spokeAt) < cooldownMessages) reasons.push(`cooldown(${messages.length - spokeAt}/${cooldownMessages})`);
@@ -2799,6 +2799,15 @@ const App: React.FC = () => {
             const newList = list.includes(agentId) ? list.filter(id => id !== agentId) : [...list, agentId];
             return { ...s, humanDisguise: newList.length > 0 ? newList : undefined };
           });
+        }}
+        mentionOnlyIds={activeGroup?.mentionOnlyIds}
+        onToggleMentionOnly={(agentId) => {
+          setGroups(prev => prev.map(g => {
+            if (g.id !== activeGroupId) return g;
+            const list = g.mentionOnlyIds || [];
+            const newList = list.includes(agentId) ? list.filter(id => id !== agentId) : [...list, agentId];
+            return { ...g, mentionOnlyIds: newList.length > 0 ? newList : undefined };
+          }));
         }}
         agentVisibility={activeSession.agentVisibility}
         onUpdateAgentVisibility={(agentId, blockedIds) => {

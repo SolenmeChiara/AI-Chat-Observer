@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Agent, MuteInfo, UserProfile, DebateConfig, DebateAssignment } from '../types';
-import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone, Swords, ArrowUp, ArrowDown, ArrowRightLeft, EyeOff } from 'lucide-react';
+import { X, Plus, Minus, User, VolumeX, Clock, Shield, ShieldOff, ChevronDown, Megaphone, Swords, ArrowUp, ArrowDown, ArrowRightLeft, EyeOff, AtSign } from 'lucide-react';
 import { useT } from '../i18n';
 
 // Mute duration options (in minutes)
@@ -38,6 +38,9 @@ interface RightSidebarProps {
   // 可见性屏蔽
   agentVisibility?: Record<string, string[]>;
   onUpdateAgentVisibility?: (agentId: string, blockedIds: string[]) => void;
+  // Mention-only (per-group)
+  mentionOnlyIds?: string[];
+  onToggleMentionOnly?: (agentId: string) => void;
   // Join-time visibility
   agentJoinedAt?: Record<string, string>;
   hidePreJoinMessages?: Record<string, boolean>;
@@ -53,6 +56,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   debateConfig, onUpdateDebateConfig,
   humanDisguise, onToggleHumanDisguise,
   agentVisibility, onUpdateAgentVisibility,
+  mentionOnlyIds, onToggleMentionOnly,
   agentJoinedAt, hidePreJoinMessages, onToggleHidePreJoin,
   userProfiles, activeProfileId, onSwitchProfile
 }) => {
@@ -452,6 +456,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           const muteInfo = getMuteInfo(agent.id);
           const isMuted = !!muteInfo;
           const isAdmin = adminIds.includes(agent.id);
+          const isMentionOnly = (mentionOnlyIds || []).includes(agent.id);
           const debateAssignment = isDebateMode ? debateConfig?.assignments.find(a => a.agentId === agent.id) : null;
           return (
             <div key={agent.id} className={`bg-white dark:bg-zinc-800 p-3 rounded-xl border shadow-sm relative group transition-all hover:shadow-md ${isMuted ? 'opacity-60 border-gray-100 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-700' : 'border-gray-100 dark:border-zinc-700'} ${isAdmin ? 'ring-1 ring-amber-300 dark:ring-amber-600' : ''}`}>
@@ -478,6 +483,11 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     {isAdmin && (
                       <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                         <Shield size={10} /> {t('管理员')}
+                      </span>
+                    )}
+                    {isMentionOnly && (
+                      <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                        <AtSign size={10} /> @
                       </span>
                     )}
                     {isMuted && (
@@ -513,6 +523,15 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       {isAdmin ? <ShieldOff size={10} /> : <Shield size={10} />}
                       {isAdmin ? t('撤销') : t('管理')}
                     </button>
+                    {onToggleMentionOnly && (
+                      <button
+                        onClick={() => onToggleMentionOnly(agent.id)}
+                        className={`px-2 py-1 text-[10px] rounded transition-colors flex items-center gap-1 ${isMentionOnly ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50' : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-zinc-600'}`}
+                      >
+                        <AtSign size={10} />
+                        {isMentionOnly ? t('取消仅@') : t('仅@')}
+                      </button>
+                    )}
                     {isMuted ? (
                       <button
                         onClick={() => onUnmuteAgent(agent.id)}

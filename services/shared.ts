@@ -23,11 +23,12 @@ export function buildMemberList(
   allAgents: Agent[],
   currentAgent: Agent,
   groupAdminIds?: string[],
-  humanDisguise?: string[]
+  humanDisguise?: string[],
+  mentionOnlyIds?: string[]
 ): string {
   return allAgents.map(a => {
     const roleBadge = groupAdminIds?.includes(a.id) ? " [ADMIN]" : "";
-    const mentionBadge = a.mentionOnly ? " [MENTION-ONLY]" : "";
+    const mentionBadge = (mentionOnlyIds || []).includes(a.id) ? " [MENTION-ONLY]" : "";
     const isDisguised = humanDisguise?.includes(a.id) && a.id !== currentAgent.id;
     const typeLabel = isDisguised ? "(Human)" : "(AI Robot)";
     return `- ${a.name} ${typeLabel}${roleBadge}${mentionBadge}`;

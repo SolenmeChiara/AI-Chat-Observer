@@ -79,10 +79,11 @@ export async function* streamOpenAIReply(
   entertainmentConfig?: EntertainmentConfig,
   agentVisibility?: Record<string, string[]>,
   humanDisguise?: string[],
+  mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>
 ): AsyncGenerator<StreamChunk> {
-  
+
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
   // 1-3. Filter messages by visibility rules
@@ -98,7 +99,7 @@ export async function* streamOpenAIReply(
     : "";
 
   // 4. Build Group Member List
-  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise);
+  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
 
   // 5. Attention / Addressing Logic
   const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
@@ -417,6 +418,7 @@ export async function* streamOpenAIResponsesReply(
   entertainmentConfig?: EntertainmentConfig,
   agentVisibility?: Record<string, string[]>,
   humanDisguise?: string[],
+  mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>
 ): AsyncGenerator<StreamChunk> {
@@ -433,7 +435,7 @@ export async function* streamOpenAIResponsesReply(
     ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...".`
     : "";
 
-  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise);
+  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
   const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
   const memoryContext = buildMemoryContext(summary, adminNotes);

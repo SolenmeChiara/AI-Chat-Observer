@@ -157,6 +157,7 @@ export interface ChatGroup {
   name: string;
   memberIds: string[];        // 共享的成员列表
   adminIds?: string[];        // 该群的管理员列表
+  mentionOnlyIds?: string[];  // 仅@时发言的成员列表（分群管理）
   scenario?: string;          // 共享的场景设定
   memoryConfig: MemoryConfig; // 共享的记忆配置
   entertainmentConfig?: EntertainmentConfig; // 娱乐功能配置
