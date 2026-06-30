@@ -22,6 +22,9 @@ export interface ApiProvider {
   apiKey?: string; // API Key for most providers, or Gemini AI Studio
   models: ModelConfig[]; // Presets defined under this provider
 
+  // OpenAI-specific fields
+  openaiApiMode?: 'chat' | 'responses'; // 'chat' = Chat Completions, 'responses' = Responses API
+
   // Gemini-specific fields
   geminiMode?: GeminiMode; // 'aistudio' or 'vertex'
   vertexProject?: string;  // Google Cloud Project ID (for Vertex AI)

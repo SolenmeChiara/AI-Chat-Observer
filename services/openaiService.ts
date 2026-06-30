@@ -389,3 +389,266 @@ export async function* streamOpenAIReply(
     reader.releaseLock();
   }
 }
+
+// ============================================================================
+// OpenAI Responses API (POST /v1/responses)
+// ============================================================================
+
+export async function* streamOpenAIResponsesReply(
+  agent: Agent,
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  messages: Message[],
+  allAgents: Agent[],
+  visibilityMode: 'OPEN' | 'BLIND',
+  contextLimit: number,
+  scenario: string,
+  summary?: string,
+  adminNotes?: string[],
+  userName?: string,
+  userPersona?: string,
+  hasSearchTool?: boolean,
+  groupAdminIds?: string[],
+  entertainmentConfig?: EntertainmentConfig,
+  agentVisibility?: Record<string, string[]>,
+  humanDisguise?: string[],
+  agentJoinedAt?: Record<string, string>,
+  hidePreJoinMessages?: Record<string, boolean>
+): AsyncGenerator<StreamChunk> {
+
+  if (!apiKey || !baseUrl) throw new Error("Missing Config");
+
+  const visibleMessages = filterVisibleMessages(
+    messages, agent, visibilityMode, contextLimit,
+    agentVisibility, agentJoinedAt, hidePreJoinMessages
+  );
+
+  const myLastMessage = [...visibleMessages].reverse().find(m => m.senderId === agent.id && !m.isSystem);
+  const myLastActionContext = myLastMessage
+    ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...".`
+    : "";
+
+  const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise);
+  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
+  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
+  const memoryContext = buildMemoryContext(summary, adminNotes);
+  const systemInstruction = buildSystemPrompt(
+    scenario, memoryContext, agent, memberList,
+    userName, userPersona, myLastActionContext,
+    attentionInstruction, protocols
+  );
+
+  // Build input items (Responses API accepts messages-style input)
+  const inputItems: any[] = visibleMessages.map(m => {
+    if (m.isSearchResult) {
+      const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+      return { role: 'user', content: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
+    }
+
+    let textContent = formatMessageText(m, agent, allAgents, userName, false, true);
+
+    if (m.replyToId) {
+      const replyTarget = messages.find(msg => msg.id === m.replyToId);
+      if (replyTarget) {
+        textContent = `[Replying to: "${replyTarget.text.substring(0, 50)}..."]\n${textContent}`;
+      }
+    }
+
+    textContent = appendDocumentAttachments(textContent, m);
+
+    const imageAttachments = m.attachments?.filter(att => att.type === 'image') || [];
+    if (imageAttachments.length > 0) {
+      const contentParts: any[] = [{ type: "input_text", text: textContent }];
+      imageAttachments.forEach(att => {
+        contentParts.push({
+          type: "input_image",
+          image_url: att.content
+        });
+      });
+      return { role: 'user', content: contentParts };
+    }
+
+    return { role: 'user', content: textContent };
+  });
+
+  inputItems.push({
+    role: 'user',
+    content: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`
+  });
+
+  const MAX_RETRIES = 3;
+  let response: Response | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const isOpenAIReasoningModel = /^o[134](-|$)/.test(modelId.toLowerCase());
+
+      const requestBody: any = {
+        model: modelId,
+        instructions: systemInstruction,
+        input: inputItems,
+        stream: true,
+        store: false,
+      };
+
+      if (agent.config.maxTokens) {
+        requestBody.max_output_tokens = agent.config.maxTokens;
+      }
+
+      if (!isOpenAIReasoningModel) {
+        if (agent.config.temperature !== null) requestBody.temperature = agent.config.temperature;
+        if (agent.config.topP !== null) requestBody.top_p = agent.config.topP;
+      }
+
+      if (isOpenAIReasoningModel && agent.config.enableReasoning) {
+        const effort = agent.config.effort;
+        if (effort === 'low' || effort === 'medium' || effort === 'high') {
+          requestBody.reasoning = { effort };
+        } else {
+          requestBody.reasoning = { effort: mapBudgetToEffort(agent.config.reasoningBudget || 8000) };
+        }
+      }
+
+      // Derive endpoint: replace /chat/completions or /v1/chat/completions with /responses
+      let endpoint = baseUrl;
+      if (endpoint.endsWith('/chat/completions')) {
+        endpoint = endpoint.replace(/\/chat\/completions$/, '/responses');
+      } else if (endpoint.endsWith('/v1')) {
+        endpoint += '/responses';
+      } else {
+        endpoint = endpoint.replace(/\/?$/, '/responses');
+      }
+
+      console.log(`[OpenAI Responses] 📡 POST ${endpoint}`);
+
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        if (response.status === 429 || response.status >= 500) {
+          if (attempt < MAX_RETRIES) {
+            const delay = 1000 * Math.pow(2, attempt);
+            console.warn(`[OpenAI Responses] ⚠️ API Error ${response.status}. Retrying in ${delay}ms...`);
+            await wait(delay);
+            continue;
+          }
+        }
+        let errorDetail = response.statusText;
+        try {
+          const errBody = await response.json();
+          errorDetail = errBody.error?.message || errBody.message || JSON.stringify(errBody);
+        } catch { /* ignore */ }
+        console.error(`[OpenAI Responses] ❌ API Error: ${response.status} - ${errorDetail}`);
+        throw new Error(`API ${response.status}: ${errorDetail}`);
+      }
+
+      if (!response.body) throw new Error("No response body");
+      console.log(`[OpenAI Responses] ✅ Connection established, starting stream...`);
+      break;
+
+    } catch (error: any) {
+      const isHttpError = error.message?.startsWith('API ');
+      if (!isHttpError && attempt < MAX_RETRIES) {
+        const delay = 1000 * Math.pow(2, attempt);
+        console.warn(`[OpenAI Responses] ⚠️ Network Error: ${error.message}. Retrying in ${delay}ms...`);
+        await wait(delay);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (!response || !response.body) {
+    throw new Error("No response received from OpenAI Responses API");
+  }
+
+  // Parse typed SSE events from Responses API
+  const reader = response.body.getReader();
+  try {
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let capturedUsage = { input: 0, output: 0 };
+    let hasReceivedContent = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("event: ") && !trimmed.startsWith("data: ")) continue;
+
+        // Responses API uses "event: <type>\ndata: <json>" format
+        if (trimmed.startsWith("event: ")) continue; // event type line, data follows
+
+        const dataStr = trimmed.slice(6);
+        if (!dataStr || dataStr === "[DONE]") continue;
+
+        try {
+          const json = JSON.parse(dataStr);
+          const eventType = json.type;
+
+          if (json.error || eventType === 'error' || eventType === 'response.failed') {
+            const errMsg = json.error?.message || json.message || JSON.stringify(json);
+            console.error("[OpenAI Responses] Error in stream:", errMsg);
+            throw new Error(errMsg);
+          }
+
+          // Text content delta
+          if (eventType === 'response.output_text.delta') {
+            const text = json.delta;
+            if (text) {
+              hasReceivedContent = true;
+              yield { text, isComplete: false };
+            }
+          }
+
+          // Reasoning summary delta
+          if (eventType === 'response.reasoning_summary_text.delta') {
+            const text = json.delta;
+            if (text) {
+              yield { reasoning: text, isComplete: false };
+            }
+          }
+
+          // Response completed
+          if (eventType === 'response.completed') {
+            const usage = json.response?.usage;
+            if (usage) {
+              capturedUsage = {
+                input: usage.input_tokens || 0,
+                output: usage.output_tokens || 0
+              };
+            }
+          }
+
+        } catch (e: any) {
+          if (e.message && !e.message.includes('JSON')) throw e;
+          if (dataStr.length > 10) {
+            console.warn("[OpenAI Responses] Parse issue:", dataStr.substring(0, 200));
+          }
+        }
+      }
+    }
+
+    console.log(`[OpenAI Responses] ✅ Stream finished (usage: ${capturedUsage.input}/${capturedUsage.output} tokens)`);
+    yield { isComplete: true, usage: capturedUsage };
+
+  } catch (error: any) {
+    console.error("[OpenAI Responses] ❌ Stream Error:", error.message);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}

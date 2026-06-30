@@ -8,7 +8,7 @@ import RightSidebar from './components/RightSidebar';
 import ChatBubble from './components/ChatBubble';
 import StatsPanel from './components/StatsPanel';
 import { streamGeminiReply } from './services/geminiService';
-import { streamOpenAIReply } from './services/openaiService';
+import { streamOpenAIReply, streamOpenAIResponsesReply } from './services/openaiService';
 import { streamAnthropicReply } from './services/anthropicService';
 import { generateSessionName, updateSessionSummary } from './services/summaryService';
 import { AgentType } from './types';
@@ -1346,6 +1346,13 @@ const App: React.FC = () => {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
+          scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
+          activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+        );
+      } else if (provider.openaiApiMode === 'responses') {
+        console.log(`[${agent.name}] 📡 Using OpenAI Responses API`);
+        streamGenerator = streamOpenAIResponsesReply(
+          agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
         );

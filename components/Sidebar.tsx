@@ -1719,6 +1719,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                               value={provider.baseUrl || ''}
                               onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
                            />
+                           {/* OpenAI API Mode Selector */}
+                           {provider.type === AgentType.OPENAI_COMPATIBLE && (
+                             <div className="flex gap-1 bg-gray-100 dark:bg-zinc-700 rounded p-0.5">
+                               <button
+                                 onClick={() => updateProvider(provider.id, { openaiApiMode: 'chat' })}
+                                 className={`flex-1 text-xs py-1.5 rounded transition-all ${(provider.openaiApiMode || 'chat') === 'chat' ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                               >
+                                 Chat Completions
+                               </button>
+                               <button
+                                 onClick={() => updateProvider(provider.id, { openaiApiMode: 'responses' })}
+                                 className={`flex-1 text-xs py-1.5 rounded transition-all ${provider.openaiApiMode === 'responses' ? 'bg-white dark:bg-zinc-600 shadow-sm text-gray-800 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                               >
+                                 Responses API
+                               </button>
+                             </div>
+                           )}
                            <div className="flex gap-2">
                              <input
                                 type="password"
