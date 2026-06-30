@@ -19,7 +19,8 @@ const KNOWN_PRICING: Record<string, [number, number]> = {
   'gpt-4.1': [2, 8], 'gpt-4.1-mini': [0.4, 1.6], 'gpt-4.1-nano': [0.1, 0.4],
   'gpt-4o': [2.5, 10], 'gpt-4o-mini': [0.15, 0.6],
   'o1': [15, 60], 'o3-pro': [20, 80], 'o3': [2, 8], 'o4-mini': [1.1, 4.4], 'o3-mini': [1.1, 4.4],
-  'gpt-image-2': [0, 0], 'gpt-image-1': [0, 0],
+  'gpt-image-2': [8, 30], 'gpt-image-1.5': [8, 32], 'gpt-image-1': [10, 40], 'gpt-image-1-mini': [2.5, 8],
+  'chatgpt-image-latest': [8, 32],
   // Gemini
   'gemini-3.5-flash': [1.5, 9],
   'gemini-3.1-flash-lite': [0.25, 1.5], 'gemini-3.1-pro-preview': [2, 12], 'gemini-3.1-flash-image': [0.5, 3],
