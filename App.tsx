@@ -1340,7 +1340,8 @@ const App: React.FC = () => {
       const humanDisguise = activeSession.humanDisguise;
 
       // === IMAGE GENERATION AGENT (standalone path, no {{RESPONSE:}} parsing) ===
-      if (isImageGenModel(agent.modelId)) {
+      // Skip standalone path when using Responses API — it handles image gen natively
+      if (isImageGenModel(agent.modelId) && provider.openaiApiMode !== 'responses') {
         console.log(`[${agent.name}] 🎨 Image generation agent detected`);
 
         // Build context prompt, truncated to fit API limit (32k chars)
@@ -1358,7 +1359,11 @@ const App: React.FC = () => {
           const senderName = msg.senderId === USER_ID
             ? (settings.userName || 'User')
             : (currentSessionMembers.find(a => a.id === msg.senderId)?.name || msg.senderId);
-          const line = `[${senderName}] ${msg.text}`;
+          const imageNotes = (msg.attachments || [])
+            .filter(a => a.type === 'image')
+            .map((a, i) => `[image${i + 1}: ${a.fileName || 'generated image'}]`)
+            .join(' ');
+          const line = `[${senderName}] ${msg.text}${imageNotes ? ' ' + imageNotes : ''}`;
           if (header.length + msgLen + line.length > IMG_PROMPT_LIMIT) break;
           msgLines.unshift(line);
           msgLen += line.length + 1;

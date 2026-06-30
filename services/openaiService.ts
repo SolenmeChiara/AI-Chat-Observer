@@ -500,6 +500,11 @@ export async function* streamOpenAIResponsesReply(
         requestBody.max_output_tokens = agent.config.maxTokens;
       }
 
+      // Enable image generation tool for image-capable models
+      if (isImageGenModel(modelId)) {
+        requestBody.tools = [{ type: 'image_generation', quality: agent.config.imageQuality || 'auto' }];
+      }
+
       // Reasoning config: Responses API supports reasoning on any model (not just o-series)
       if (agent.config.enableReasoning) {
         const effort = agent.config.effort || 'medium';
@@ -622,8 +627,24 @@ export async function* streamOpenAIResponsesReply(
             }
           }
 
-          // Response completed
+          // Image generation output
+          if (eventType === 'response.image_generation_call.partial_image') {
+            const b64 = json.partial_image_b64;
+            if (b64) {
+              yield { image: b64, isComplete: false };
+            }
+          }
+
+          // Response completed (may contain final image)
           if (eventType === 'response.completed') {
+            const output = json.response?.output;
+            if (Array.isArray(output)) {
+              for (const item of output) {
+                if (item.type === 'image_generation_call' && item.result) {
+                  yield { image: item.result, isComplete: false };
+                }
+              }
+            }
             const usage = json.response?.usage;
             if (usage) {
               capturedUsage = {
