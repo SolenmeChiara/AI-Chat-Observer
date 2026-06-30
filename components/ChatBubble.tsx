@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Message, Agent, GlobalSettings, AgentRole } from '../types';
 import { USER_ID } from '../constants';
 import { useT } from '../i18n';
@@ -30,6 +30,36 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  // Async-convert base64 images to blob URLs for drag support
+  const [blobUrls, setBlobUrls] = useState<Record<number, string>>({});
+  const blobUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const imageAtts = message.attachments?.filter(att => att.type === 'image') || [];
+    if (imageAtts.length === 0) return;
+    let cancelled = false;
+    const urls: string[] = [];
+    Promise.all(imageAtts.map(async (att, idx) => {
+      if (!att.content?.startsWith('data:')) return;
+      try {
+        const res = await fetch(att.content);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        if (!cancelled) urls[idx] = url;
+      } catch { /* keep base64 fallback */ }
+    })).then(() => {
+      if (cancelled) { urls.forEach(u => u && URL.revokeObjectURL(u)); return; }
+      blobUrlsRef.current = urls;
+      const map: Record<number, string> = {};
+      urls.forEach((u, i) => { if (u) map[i] = u; });
+      setBlobUrls(map);
+    });
+    return () => {
+      cancelled = true;
+      blobUrlsRef.current.forEach(u => u && URL.revokeObjectURL(u));
+      blobUrlsRef.current = [];
+    };
+  }, [message.id]);
 
   const isThisMessagePlaying = currentPlayingMessageId === message.id;
 
@@ -239,27 +269,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                   {message.attachments.filter(att => att.type === 'image').map((att, idx) => (
                     <img
                       key={idx}
-                      src={att.content}
+                      src={blobUrls[idx] || att.content}
                       alt={`Image ${idx + 1}`}
                       className="rounded-lg border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
                       style={{ maxHeight: '150px', maxWidth: '200px' }}
-                      onClick={() => setLightboxSrc(att.content)}
-                      onDragStart={(e) => {
-                        if (!att.content?.startsWith('data:')) return;
-                        try {
-                          const [header, b64] = att.content.split(',');
-                          const mime = header.match(/data:([^;]+)/)?.[1] || 'image/png';
-                          const bin = atob(b64);
-                          const arr = new Uint8Array(bin.length);
-                          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                          const blob = new Blob([arr], { type: mime });
-                          const blobUrl = URL.createObjectURL(blob);
-                          e.dataTransfer.setData('text/uri-list', blobUrl);
-                          e.dataTransfer.setData('text/plain', blobUrl);
-                        } catch {
-                          e.preventDefault();
-                        }
-                      }}
+                      onClick={() => setLightboxSrc(blobUrls[idx] || att.content)}
                     />
                   ))}
                 </div>
