@@ -339,6 +339,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           <img
             src={lightboxBlobUrl || lightboxSrc}
             alt="Full size"
+            draggable={false}
             className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
