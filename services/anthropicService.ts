@@ -47,7 +47,8 @@ export async function* streamAnthropicReply(
   humanDisguise?: string[],
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
-  hidePreJoinMessages?: Record<string, boolean>
+  hidePreJoinMessages?: Record<string, boolean>,
+  signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -251,6 +252,7 @@ export async function* streamAnthropicReply(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+        if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
         // Add cache breakpoint to the second-to-last message content block
         if (formattedMessages.length >= 2) {
           const target = formattedMessages[formattedMessages.length - 2];
@@ -286,7 +288,8 @@ export async function* streamAnthropicReply(
                 'anthropic-version': '2023-06-01',
                 'anthropic-dangerous-direct-browser-access': 'true'
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal
         });
 
         console.log(`[Anthropic] 📡 Response received: status=${response.status}`);
@@ -318,6 +321,8 @@ export async function* streamAnthropicReply(
         console.log(`[Anthropic] ✅ Connection established, starting stream...`);
         break;
     } catch (error: any) {
+        // Aborted requests must never be retried — propagate immediately
+        if (error.name === 'AbortError' || signal?.aborted) throw error;
         const isHttpError = error.message?.startsWith('Anthropic ');
         if (!isHttpError && attempt < MAX_RETRIES) {
             const delay = 1000 * Math.pow(2, attempt);

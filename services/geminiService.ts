@@ -95,7 +95,8 @@ export async function* streamGeminiReply(
   humanDisguise?: string[],
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
-  hidePreJoinMessages?: Record<string, boolean>
+  hidePreJoinMessages?: Record<string, boolean>,
+  signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
 
@@ -229,6 +230,7 @@ export async function* streamGeminiReply(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
       // Detect Gemini 3 model
       const isGemini3 = isGemini3Model(modelId);
 
@@ -267,6 +269,8 @@ export async function* streamGeminiReply(
         }
       }
 
+      if (signal) apiConfig.abortSignal = signal;
+
       streamResult = await ai.models.generateContentStream({
         model: modelId,
         contents: finalContents,
@@ -274,6 +278,8 @@ export async function* streamGeminiReply(
       });
       break; // Success, exit retry loop
     } catch (error: any) {
+      // Aborted requests must never be retried — propagate immediately
+      if (error.name === 'AbortError' || signal?.aborted) throw error;
       // Analyze error for retry eligibility
       const errorCode = error.status || error.code || error?.error?.code;
       const errorStatus = error?.error?.status || '';

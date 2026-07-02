@@ -135,6 +135,14 @@ const App: React.FC = () => {
   // 辩论模式：用 ref 跟踪发言序列 index，避免在 autoplay useEffect 中更新 session state 导致死循环
   const debateTurnIndexRef = useRef<number>(0);
 
+  // 搜索事务：整个搜索过程（发起 → 结果/错误落地 → 发起者跟进回复）是一个原子操作。
+  // 事务存在期间，对应 session 的 autoplay 轮转全部暂停，防止其他 agent 插话岔开话题。
+  // 'searching' = 请求进行中；'followup' = 结果已写入消息流，等待专门的 effect 用
+  // 最新渲染的闭包触发发起者（这样它才能看到搜索结果——旧的 setTimeout 方案读的是
+  // 触发时的旧消息快照，搜索结果永远不在里面）。失败路径直接置 null，轮转恢复。
+  // 每次状态变更都伴随一条消息写入，所以依赖 messages 的 effect 必然会被唤醒。
+  const searchTxnRef = useRef<{ status: 'searching' | 'followup'; agentId: string; sessionId: string; query: string } | null>(null);
+
   // Track last message count when summary was triggered (per session)
   const lastSummaryCountRef = useRef<Map<string, number>>(new Map());
 
@@ -401,10 +409,14 @@ const App: React.FC = () => {
 
   const handleDeleteSession = (id: string) => {
     const newSessions = sessions.filter(s => s.id !== id);
-    if (newSessions.length === 0) return; 
+    if (newSessions.length === 0) return;
     setSessions(newSessions);
     if (activeSessionId === id) {
       setActiveSessionId(newSessions[0].id);
+    }
+    // A search transaction bound to a deleted session can never be consumed — drop it
+    if (searchTxnRef.current?.sessionId === id) {
+      searchTxnRef.current = null;
     }
   };
 
@@ -472,6 +484,11 @@ const App: React.FC = () => {
     pendingMentionsRef.current.clear(); // Clear pending mentions
     mentionPairRef.current = null; // Reset mention pair decay
     debateTurnIndexRef.current = 0; // Reset debate turn index
+    // The search results (and the "searching" notice) were just wiped — a follow-up
+    // would reply to nothing, and a dangling 'searching' txn would pause the chat forever
+    if (searchTxnRef.current?.sessionId === activeSessionId) {
+      searchTxnRef.current = null;
+    }
   };
 
   // --- TTS FUNCTIONS ---
@@ -1133,67 +1150,59 @@ const App: React.FC = () => {
 
     updateThisSession(s => ({ ...s, messages: [...s.messages, placeholderMessage], lastUpdated: Date.now() }));
 
-    // Track partial output for timeout recovery
-    let partialOutputText = '';
+    // Set when the timeout callback fires — lets the catch/finally blocks distinguish
+    // a timeout-abort (cleanup already done, a retry may own the locks) from a
+    // user-cancel-abort. Checking abortControllers.current for this is unreliable:
+    // the retry attempt overwrites the map entry and handleStopAll clears it.
+    let timedOut = false;
 
-    const timeoutId = setTimeout(async () => {
-        if (abortControllers.current.has(agentId)) {
-            const ctrl = abortControllers.current.get(agentId);
-            ctrl?.abort();
+    const timeoutId = setTimeout(() => {
+        // Fire only if this attempt still owns its slot (finished/cancelled attempts
+        // are cleaned up in finally, and a newer attempt may have replaced us)
+        if (abortControllers.current.get(agentId) !== abortController) return;
+        timedOut = true;
+        abortController.abort();
 
-            // Get the current partial output from the message
-            const currentSession = sessions.find(s => s.id === capturedSessionId);
-            const partialMsg = currentSession?.messages.find(m => m.id === newMessageId);
-            partialOutputText = partialMsg?.text || '';
+        // Release locks so the retry (or other agents) can proceed
+        setProcessingAgents(prev => {
+            const next = new Set(prev);
+            next.delete(agentId);
+            return next;
+        });
+        abortControllers.current.delete(agentId);
+        pendingTriggerRef.current.delete(agentId);
 
-            // Clean up current attempt
-            setProcessingAgents(prev => {
-                const next = new Set(prev);
-                next.delete(agentId);
-                return next;
-            });
-            abortControllers.current.delete(agentId);
-            pendingTriggerRef.current.delete(agentId);
-
-            // If this is first attempt (retryCount === 0), retry once
-            if (retryCount === 0) {
-                console.log(`[${agent.name}] Timeout on first attempt, retrying...`);
-                // Remove the failed placeholder
-                updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
-                // Retry with retryCount = 1
-                triggerAgentReply(agentId, disableSearch, 1);
-            } else {
-                // Already retried, give up and insert system message
-                console.log(`[${agent.name}] Timeout after retry, inserting recovery message`);
-
-                // Update the failed message with error marker
-                updateThisSession(s => ({
-                    ...s,
-                    messages: s.messages.map(m => m.id === newMessageId ? {
-                        ...m, isError: true, isStreaming: false,
-                        text: partialOutputText
-                            ? `${partialOutputText}\n\n[${formatErrorTimestamp()}] [${t('系统: 响应超时，输出被截断')}]`
-                            : `[${formatErrorTimestamp()}] [${t('系统: 响应超时')} (${settings.timeoutDuration/1000}s)]`
-                    } : m)
-                }));
-
+        // If this is first attempt (retryCount === 0), retry once
+        if (retryCount === 0) {
+            console.log(`[${agent.name}] Timeout on first attempt, retrying...`);
+            // Remove the failed placeholder
+            updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
+            // Retry with retryCount = 1
+            triggerAgentReply(agentId, disableSearch, 1);
+        } else {
+            // Already retried, give up. Read the partial output from live state
+            // (not a stale closure) and finalize message + recovery notice atomically.
+            console.log(`[${agent.name}] Timeout after retry, inserting recovery message`);
+            updateThisSession(s => {
+                const partialText = s.messages.find(m => m.id === newMessageId)?.text || '';
+                const finalized = s.messages.map(m => m.id === newMessageId ? {
+                    ...m, isError: true, isStreaming: false,
+                    text: partialText
+                        ? `${partialText}\n\n[${formatErrorTimestamp()}] [${t('系统: 响应超时，输出被截断')}]`
+                        : `[${formatErrorTimestamp()}] [${t('系统: 响应超时')} (${(settings.timeoutDuration || 30000)/1000}s)]`
+                } : m);
                 // Insert system message to prompt other AIs to continue
                 const recoveryMessage: Message = {
                     id: `recovery-${Date.now()}`,
                     senderId: 'system',
-                    text: partialOutputText
+                    text: partialText
                         ? `[${t('系统提示')}] ${agent.name} ${t('由于网络问题输出被截断。它的未完成输出已显示在上方。请其他成员继续当前话题。')}`
                         : `[${t('系统提示')}] ${t('一个未知错误打断了对话。请继续当下的讨论。')}`,
                     timestamp: Date.now(),
                     isSystem: true
                 };
-
-                updateThisSession(s => ({
-                    ...s,
-                    messages: [...s.messages, recoveryMessage],
-                    lastUpdated: Date.now()
-                }));
-            }
+                return { ...s, messages: [...finalized, recoveryMessage], lastUpdated: Date.now() };
+            });
         }
     }, settings.timeoutDuration || 30000);
 
@@ -1373,7 +1382,8 @@ const App: React.FC = () => {
         const imageGen = streamImageGeneration(
           agent, provider.baseUrl || 'https://api.openai.com/v1', provider.apiKey || '',
           agent.modelId, imagePrompt,
-          agent.config.imageSize, agent.config.imageQuality
+          agent.config.imageSize, agent.config.imageQuality,
+          abortController.signal
         );
 
         let imageReasoningText = '';
@@ -1446,28 +1456,32 @@ const App: React.FC = () => {
           },
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
           agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
+          abortController.signal
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
+          abortController.signal
         );
       } else if (provider.openaiApiMode === 'responses') {
         console.log(`[${agent.name}] 📡 Using OpenAI Responses API`);
         streamGenerator = streamOpenAIResponsesReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
+          abortController.signal
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
         streamGenerator = streamOpenAIReply(
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
-          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages
+          activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
+          abortController.signal
         );
       }
 
@@ -1951,50 +1965,97 @@ const App: React.FC = () => {
             lastUpdated: Date.now()
         }));
 
-        // EXECUTE SEARCH if detected
+        // EXECUTE SEARCH if detected — runs as a search transaction:
+        // announce → fetch → result lands → mark follow-up (consumed by the dedicated
+        // effect with a FRESH closure so the agent actually sees the results).
+        // On failure: system error message lands, transaction cleared, rotation resumes.
         if (detectedSearchQuery && agent.searchConfig) {
-          try {
-            // Execute search
-            const searchResponse = await performSearch(detectedSearchQuery, agent.searchConfig);
-            const resultText = formatSearchResultsForDisplay(searchResponse);
-
-            // Add search result as a message from this agent
-            const searchResultMsg: Message = {
-              id: `search-result-${Date.now()}`,
-              senderId: agent.id,
-              text: resultText,
-              timestamp: Date.now(),
-              isSearchResult: true,
-              searchQuery: detectedSearchQuery
-            };
-
+          if (searchTxnRef.current) {
+            // One search at a time — a second concurrent search would turn the chat
+            // into a retrieval contest and complicate the pause/follow-up logic.
             updateThisSession(s => ({
               ...s,
-              messages: [...s.messages, searchResultMsg],
+              messages: [...s.messages, {
+                id: `search-busy-${Date.now()}`,
+                senderId: 'SYSTEM',
+                text: `[${t('系统提示')}] ${t('已有一个搜索正在进行中')}（${searchTxnRef.current?.query}），${agent.name} ${t('的搜索请求被忽略')}: "${detectedSearchQuery}"`,
+                timestamp: Date.now(),
+                isSystem: true
+              }],
               lastUpdated: Date.now()
             }));
+          } else {
+            const searchingMsgId = `searching-${Date.now()}`;
+            try {
+              searchTxnRef.current = { status: 'searching', agentId, sessionId: capturedSessionId, query: detectedSearchQuery };
 
-            // Wait a moment, then trigger the same agent again to respond with search results
-            // Pass disableSearch=true to prevent infinite loop
-            setTimeout(() => {
-              triggerAgentReply(agentId, true);
-            }, 500);
-          } catch (searchError: any) {
-            console.error('Search failed:', searchError);
-            // Add error message so AI knows search failed
-            const errorMsg: Message = {
-              id: `search-error-${Date.now()}`,
-              senderId: 'SYSTEM',
-              text: `[${formatErrorTimestamp()}] ${t('搜索失败')}: ${searchError.message || t('网络请求错误')}`,
-              timestamp: Date.now(),
-              isSystem: true
-            };
-            updateThisSession(s => ({
-              ...s,
-              messages: [...s.messages, errorMsg],
-              lastUpdated: Date.now()
-            }));
-            // Don't re-trigger AI on search failure
+              // Announce the search — visible to the user and recorded in context for all agents
+              updateThisSession(s => ({
+                ...s,
+                messages: [...s.messages, {
+                  id: searchingMsgId,
+                  senderId: 'SYSTEM',
+                  text: `🔍 ${agent.name} ${t('正在搜索')}: "${detectedSearchQuery}"...`,
+                  timestamp: Date.now(),
+                  isSystem: true
+                }],
+                lastUpdated: Date.now()
+              }));
+
+              const searchResponse = await performSearch(detectedSearchQuery, agent.searchConfig);
+
+              if (searchResponse.error) {
+                // Search failed (timeout, CORS, bad key...) — replace the announcement
+                // with an explicit error, release the transaction, no follow-up.
+                // Deliberately NOT isError: the autoplay loop halts on isError messages,
+                // but a failed search should let the rotation carry on (per design).
+                updateThisSession(s => ({
+                  ...s,
+                  messages: [...s.messages.filter(m => m.id !== searchingMsgId), {
+                    id: `search-error-${Date.now()}`,
+                    senderId: 'SYSTEM',
+                    text: `[${formatErrorTimestamp()}] ${t('搜索失败')}: ${searchResponse.error}`,
+                    timestamp: Date.now(),
+                    isSystem: true
+                  }],
+                  lastUpdated: Date.now()
+                }));
+                searchTxnRef.current = null;
+              } else {
+                const resultText = formatSearchResultsForDisplay(searchResponse);
+                const searchResultMsg: Message = {
+                  id: `search-result-${Date.now()}`,
+                  senderId: agent.id,
+                  text: resultText,
+                  timestamp: Date.now(),
+                  isSearchResult: true,
+                  searchQuery: detectedSearchQuery
+                };
+                updateThisSession(s => ({
+                  ...s,
+                  messages: [...s.messages.filter(m => m.id !== searchingMsgId), searchResultMsg],
+                  lastUpdated: Date.now()
+                }));
+                // Results are in the message flow — hand over to the follow-up effect
+                searchTxnRef.current = { status: 'followup', agentId, sessionId: capturedSessionId, query: detectedSearchQuery };
+              }
+            } catch (searchError: any) {
+              // performSearch swallows its own errors, so this only catches formatting bugs —
+              // still: never leave a dangling transaction, it would pause the chat forever.
+              console.error('Search failed:', searchError);
+              updateThisSession(s => ({
+                ...s,
+                messages: [...s.messages.filter(m => m.id !== searchingMsgId), {
+                  id: `search-error-${Date.now()}`,
+                  senderId: 'SYSTEM',
+                  text: `[${formatErrorTimestamp()}] ${t('搜索失败')}: ${searchError.message || t('网络请求错误')}`,
+                  timestamp: Date.now(),
+                  isSystem: true
+                }],
+                lastUpdated: Date.now()
+              }));
+              searchTxnRef.current = null;
+            }
           }
         }
 
@@ -2031,16 +2092,14 @@ const App: React.FC = () => {
       console.error(`[${agent.name}] ❌ Error caught:`, error.name, error.message);
       console.error(`[${agent.name}] ❌ Error stack:`, error.stack);
 
-      if (error.name === 'AbortError' || error.message === 'Request aborted') {
-          // Check if this was a timeout (abortController already deleted by timeout handler)
-          // vs user cancel (abortController still exists)
-          if (abortControllers.current.has(agentId)) {
-              // User cancelled - remove placeholder
+      if (error.name === 'AbortError' || error.message === 'Request aborted' || abortController.signal.aborted) {
+          if (timedOut) {
+              // Timeout - message finalization/retry already handled by timeout callback
+              console.log(`[${agent.name}] ⏱️ Request aborted by timeout - already handled`);
+          } else {
+              // User cancelled (stop button / message deleted) - remove placeholder
               console.log(`[${agent.name}] 🛑 Request aborted by user - removing placeholder`);
               updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
-          } else {
-              // Timeout - already handled by timeout callback, do nothing
-              console.log(`[${agent.name}] ⏱️ Request aborted by timeout - already handled`);
           }
       }
       else {
@@ -2060,16 +2119,24 @@ const App: React.FC = () => {
     } finally {
       console.log(`[${agent.name}] 🏁 Cleanup: releasing locks`);
       clearTimeout(timeoutId);
-      pendingTriggerRef.current.delete(agentId); // Clear pending flag
       pendingMentionsRef.current.delete(agentId); // Clear from pending mentions (they responded!)
       // Record message count when this agent finished speaking (for cooldown)
       agentLastSpokeAt.current.set(agentId, messages.length);
-      setProcessingAgents(prev => {
-          const next = new Set(prev);
-          next.delete(agentId);
-          return next;
-      });
-      abortControllers.current.delete(agentId);
+      // On timeout the callback already released the locks, and a retry attempt
+      // may own them now — releasing here would let a second stream start for
+      // the same agent and kill the retry's stop/timeout handling.
+      if (!timedOut) {
+          pendingTriggerRef.current.delete(agentId); // Clear pending flag
+          setProcessingAgents(prev => {
+              const next = new Set(prev);
+              next.delete(agentId);
+              return next;
+          });
+      }
+      // Only remove the controller if it is still ours (the retry registers its own)
+      if (abortControllers.current.get(agentId) === abortController) {
+          abortControllers.current.delete(agentId);
+      }
     }
   }, [agents, providers, groups, messages, settings, processingAgents, activeSession.mutedAgentIds, activeSession.groupId, activeSession.summary, activeSession.adminNotes, activeSessionId, sessions]);
 
@@ -2166,6 +2233,20 @@ const App: React.FC = () => {
         return;
       }
 
+      // 同一时间只允许一个搜索事务
+      if (searchTxnRef.current) {
+        const busyMsg: Message = {
+          id: `search-busy-${Date.now()}`,
+          senderId: 'SYSTEM',
+          text: `[${t('系统提示')}] ${t('已有一个搜索正在进行中')}（${searchTxnRef.current.query}），${t('请稍后再试')}`,
+          timestamp: Date.now(),
+          isSystem: true
+        };
+        updateActiveSession(s => ({ ...s, messages: [...s.messages, busyMsg], lastUpdated: Date.now() }));
+        setInputText('');
+        return;
+      }
+
       // 显示搜索中的消息
       const searchingMsg: Message = {
         id: `search-${Date.now()}`,
@@ -2180,30 +2261,48 @@ const App: React.FC = () => {
         lastUpdated: Date.now()
       }));
 
-      // 执行搜索
+      // 执行搜索（事务存在期间 autoplay 轮转暂停；用户发起的搜索不指定跟进者，
+      // 结果落地后清除事务，由 autoplay 用新渲染的闭包自然选人接话）
+      searchTxnRef.current = { status: 'searching', agentId: searchAgent.id, sessionId: activeSessionId, query };
       try {
         const searchResponse = await performSearch(query, searchAgent.searchConfig);
 
-        const resultText = formatSearchResultsForDisplay(searchResponse);
+        if (searchResponse.error) {
+          const errMsg: Message = {
+            id: `search-err-${Date.now()}`,
+            senderId: 'SYSTEM',
+            text: `[${formatErrorTimestamp()}] ${t('搜索失败')}: ${searchResponse.error}`,
+            timestamp: Date.now(),
+            isSystem: true,
+            isError: true
+          };
+          updateActiveSession(s => ({
+            ...s,
+            messages: s.messages.filter(m => m.id !== searchingMsg.id).concat([errMsg]),
+            lastUpdated: Date.now()
+          }));
+        } else {
+          const resultText = formatSearchResultsForDisplay(searchResponse);
 
-        const searchResultMsg: Message = {
-          id: `search-result-${Date.now()}`,
-          senderId: searchAgent.id,
-          text: resultText,
-          timestamp: Date.now(),
-          isSearchResult: true,
-          searchQuery: query
-        };
+          const searchResultMsg: Message = {
+            id: `search-result-${Date.now()}`,
+            senderId: searchAgent.id,
+            text: resultText,
+            timestamp: Date.now(),
+            isSearchResult: true,
+            searchQuery: query
+          };
 
-        updateActiveSession(s => ({
-          ...s,
-          messages: s.messages
-            .filter(m => m.id !== searchingMsg.id)
-            .concat([searchResultMsg]),
-          lastUpdated: Date.now(),
-          yieldedAgentIds: [],
-          yieldedAtCount: undefined
-        }));
+          updateActiveSession(s => ({
+            ...s,
+            messages: s.messages
+              .filter(m => m.id !== searchingMsg.id)
+              .concat([searchResultMsg]),
+            lastUpdated: Date.now(),
+            yieldedAgentIds: [],
+            yieldedAtCount: undefined
+          }));
+        }
       } catch (searchErr: any) {
         const errMsg: Message = {
           id: `search-err-${Date.now()}`,
@@ -2218,6 +2317,8 @@ const App: React.FC = () => {
           messages: s.messages.filter(m => m.id !== searchingMsg.id).concat([errMsg]),
           lastUpdated: Date.now()
         }));
+      } finally {
+        searchTxnRef.current = null;
       }
 
       setInputText('');
@@ -2377,10 +2478,41 @@ const App: React.FC = () => {
     }
   };
 
+  // --- SEARCH FOLLOW-UP ---
+  // Consumes a completed search transaction: triggers the initiating agent so it can
+  // respond to the results. Lives OUTSIDE the autoplay loop (manual triggers deserve
+  // their follow-up too, even with autoplay off). Crucially, this effect re-runs on
+  // every messages change, so the triggerAgentReply it calls is the instance rendered
+  // AFTER the search results landed — its closure actually contains them. The old
+  // implementation called the pre-search instance from a setTimeout, so the second
+  // request never included the results.
+  useEffect(() => {
+    const txn = searchTxnRef.current;
+    if (!txn || txn.status !== 'followup') return;
+    if (txn.sessionId !== activeSessionId) return; // resume when the user returns to that session
+    if (processingAgents.has(txn.agentId) || pendingTriggerRef.current.has(txn.agentId)) return;
+
+    const timeoutId = setTimeout(() => {
+      // Consume inside the timer: if a re-render cancels this timeout, the transaction
+      // stays pending and the next run reschedules it (same pitfall as debate-turn skipping).
+      if (searchTxnRef.current !== txn) return;
+      searchTxnRef.current = null;
+      console.log(`[SearchTxn] Results landed, triggering ${txn.agentId} to respond (search disabled this turn)`);
+      triggerAgentReply(txn.agentId, true);
+    }, 500);
+    return () => clearTimeout(timeoutId);
+  }, [messages, activeSessionId, processingAgents, triggerAgentReply]);
+
   // --- AUTOPLAY LOOP ---
   useEffect(() => {
     if (!isAutoPlay) {
       // console.log('[AutoPlay] Disabled');
+      return;
+    }
+    // SEARCH TRANSACTION GATE: while a search is in flight (or its follow-up hasn't
+    // fired yet), the whole rotation in that session pauses — nobody talks over the
+    // search, and the initiating agent is guaranteed the next word.
+    if (searchTxnRef.current && searchTxnRef.current.sessionId === activeSessionId) {
       return;
     }
     // Check both processing and pending to prevent race conditions

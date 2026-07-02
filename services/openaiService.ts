@@ -81,7 +81,8 @@ export async function* streamOpenAIReply(
   humanDisguise?: string[],
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
-  hidePreJoinMessages?: Record<string, boolean>
+  hidePreJoinMessages?: Record<string, boolean>,
+  signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -163,6 +164,7 @@ export async function* streamOpenAIReply(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
       // Build request body with correct token parameter based on model
       const isNewModel = useMaxCompletionTokens(modelId);
       const isOpenAIReasoningModel = /^o[134](-|$)/.test(modelId.toLowerCase());
@@ -223,7 +225,8 @@ export async function* streamOpenAIReply(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal
       });
 
       console.log(`[OpenAI] 📡 Response received: status=${response.status}`);
@@ -255,6 +258,8 @@ export async function* streamOpenAIReply(
       break;
 
     } catch (error: any) {
+        // Aborted requests must never be retried — propagate immediately
+        if (error.name === 'AbortError' || signal?.aborted) throw error;
         const isHttpError = error.message?.startsWith('API ');
         if (!isHttpError && attempt < MAX_RETRIES) {
             const delay = 1000 * Math.pow(2, attempt);
@@ -420,7 +425,8 @@ export async function* streamOpenAIResponsesReply(
   humanDisguise?: string[],
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
-  hidePreJoinMessages?: Record<string, boolean>
+  hidePreJoinMessages?: Record<string, boolean>,
+  signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -488,6 +494,7 @@ export async function* streamOpenAIResponsesReply(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
       const requestBody: any = {
         model: modelId,
         instructions: systemInstruction,
@@ -533,7 +540,8 @@ export async function* streamOpenAIResponsesReply(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal
       });
 
       if (!response.ok) {
@@ -559,6 +567,8 @@ export async function* streamOpenAIResponsesReply(
       break;
 
     } catch (error: any) {
+      // Aborted requests must never be retried — propagate immediately
+      if (error.name === 'AbortError' || signal?.aborted) throw error;
       const isHttpError = error.message?.startsWith('API ');
       if (!isHttpError && attempt < MAX_RETRIES) {
         const delay = 1000 * Math.pow(2, attempt);
@@ -691,7 +701,8 @@ export async function* streamImageGeneration(
   modelId: string,
   prompt: string,
   size?: string,
-  quality?: string
+  quality?: string,
+  signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -729,7 +740,8 @@ export async function* streamImageGeneration(
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal
     });
 
     if (!response.ok) {

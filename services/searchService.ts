@@ -13,6 +13,9 @@ export interface SearchResponse {
   error?: string;
 }
 
+// 统一请求超时：搜索挂起时不能无限等待，否则搜索事务会永久暂停群聊轮转
+const SEARCH_TIMEOUT_MS = 15000;
+
 // Serper API (Google Search)
 async function searchWithSerper(query: string, apiKey: string): Promise<SearchResult[]> {
   const response = await fetch('https://google.serper.dev/search', {
@@ -24,7 +27,8 @@ async function searchWithSerper(query: string, apiKey: string): Promise<SearchRe
     body: JSON.stringify({
       q: query,
       num: 5
-    })
+    }),
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
   });
 
   if (!response.ok) {
@@ -45,7 +49,8 @@ async function searchWithBrave(query: string, apiKey: string): Promise<SearchRes
     headers: {
       'X-Subscription-Token': apiKey,
       'Accept': 'application/json'
-    }
+    },
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
   });
 
   if (!response.ok) {
@@ -72,7 +77,8 @@ async function searchWithTavily(query: string, apiKey: string): Promise<SearchRe
       query: query,
       max_results: 5,
       include_answer: false
-    })
+    }),
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
   });
 
   if (!response.ok) {
@@ -98,7 +104,8 @@ async function searchWithMetaso(query: string, apiKey: string): Promise<SearchRe
     body: JSON.stringify({
       query: query,
       num: 5
-    })
+    }),
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
   });
 
   if (!response.ok) {
@@ -147,7 +154,9 @@ export async function performSearch(
     console.error('搜索失败:', error);
     // Provide more helpful error messages
     let errorMsg = error.message || '搜索请求失败';
-    if (error.message?.includes('Failed to fetch') || error.name === 'TypeError') {
+    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+      errorMsg = `搜索请求超时（${SEARCH_TIMEOUT_MS / 1000} 秒无响应），请检查网络或搜索服务状态`;
+    } else if (error.message?.includes('Failed to fetch') || error.name === 'TypeError') {
       errorMsg = '网络请求失败 (可能是 CORS 跨域限制，部分搜索引擎需要后端代理)';
     }
     return { query, results: [], error: errorMsg };
