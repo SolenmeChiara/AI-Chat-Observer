@@ -1883,10 +1883,13 @@ const App: React.FC = () => {
           const currentSegmentText = entertainmentConfig?.enableSplit ? cleanText.substring(splitConsumedLength).replace(/\[SPLIT\]/gi, '') : cleanText;
 
           // Update streaming message (capture currentSplitId by value to avoid stale closure)
+          // replyToId belongs to the FIRST segment only: a {{REPLY:}} marker sits at the head
+          // of the whole output, and later [SPLIT] segments are the same speaker continuing —
+          // stamping every active segment rendered the same quote once per segment.
           const streamTargetId = currentSplitId;
           updateThisSession(s => ({
               ...s,
-              messages: s.messages.map(m => m.id === streamTargetId ? { ...m, text: currentSegmentText, replyToId: detectedReplyId } : m)
+              messages: s.messages.map(m => m.id === streamTargetId ? { ...m, text: currentSegmentText, ...(streamTargetId === newMessageId ? { replyToId: detectedReplyId } : {}) } : m)
           }));
         }
         if (chunk.usage) accumulatedUsage = chunk.usage;
