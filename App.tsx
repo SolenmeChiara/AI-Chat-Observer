@@ -1384,10 +1384,26 @@ const App: React.FC = () => {
         }
         const imagePrompt = (header + msgLines.join('\n')).trim() || 'a creative illustration';
 
+        // Reference image: unless disabled, scan the context window back-to-front for the
+        // most recent message carrying image attachments (any sender) and feed them to
+        // /images/edits. contextWindow already excludes isStreaming placeholders.
+        let referenceImages: { dataUrl: string; mimeType: string }[] | undefined;
+        if (agent.config.useImageReference !== false) {
+          for (let i = contextWindow.length - 1; i >= 0; i--) {
+            const imgAtts = (contextWindow[i].attachments || []).filter(a => a.type === 'image');
+            if (imgAtts.length > 0) {
+              referenceImages = imgAtts.slice(0, 4).map(a => ({ dataUrl: a.content, mimeType: a.mimeType }));
+              break;
+            }
+          }
+        }
+        console.log(`[${agent.name}] 🎨 Image request: ${referenceImages ? `edits (${referenceImages.length} reference image(s))` : 'generations (no reference)'}`);
+
         const imageGen = streamImageGeneration(
           agent, provider.baseUrl || 'https://api.openai.com/v1', provider.apiKey || '',
           agent.modelId, imagePrompt,
           agent.config.imageSize, agent.config.imageQuality,
+          referenceImages,
           abortController.signal
         );
 

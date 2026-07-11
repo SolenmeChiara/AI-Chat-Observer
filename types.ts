@@ -61,6 +61,8 @@ export interface AgentConfig {
   // Image generation settings (for gpt-image-* models)
   imageSize?: string;    // e.g. '1024x1024', '1536x1024', 'auto'
   imageQuality?: string; // 'low' | 'medium' | 'high' | 'auto'
+  enableImageTool?: boolean;   // Responses API only — attaches the built-in image_generation tool to a mainline model
+  useImageReference?: boolean; // image agents — use the most recent image in chat as reference via /images/edits; default true
 }
 
 // 搜索引擎类型

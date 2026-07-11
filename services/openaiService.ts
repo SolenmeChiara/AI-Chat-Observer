@@ -576,11 +576,16 @@ export async function* streamOpenAIResponsesReply(
       }
 
       // Assemble tools: native function tools (if any) coexist with image_generation
-      // (if this is an image-capable model) in a single array — an image-capable native
-      // agent is offered both.
+      // in a single array. The image tool attaches when the agent opts in via
+      // enableImageTool (mainline gpt-5.x on Responses), or defensively for any
+      // pure image-gen model that somehow reaches this path.
       const responsesTools: any[] = [...nativeTools];
-      if (isImageGenModel(modelId)) {
-        responsesTools.push({ type: 'image_generation', quality: agent.config.imageQuality || 'auto' });
+      if (agent.config.enableImageTool || isImageGenModel(modelId)) {
+        const imageTool: any = { type: 'image_generation', quality: agent.config.imageQuality || 'auto' };
+        if (agent.config.imageSize && agent.config.imageSize !== 'auto') {
+          imageTool.size = agent.config.imageSize;
+        }
+        responsesTools.push(imageTool);
       }
       if (responsesTools.length > 0) {
         requestBody.tools = responsesTools;
@@ -822,6 +827,21 @@ export function isImageGenModel(modelId: string): boolean {
   return lower.includes('gpt-image') || lower.includes('dall-e') || lower.includes('dalle');
 }
 
+// Decode a base64 data URL into a Blob without going through fetch(). Works in both
+// the browser and Node 18+ (atob / Blob / Uint8Array are all global). Kept fetch-free
+// on purpose so the /images/edits multipart path issues exactly one network call.
+function dataUrlToBlob(dataUrl: string, fallbackMime: string): Blob {
+  const comma = dataUrl.indexOf(',');
+  const header = comma >= 0 ? dataUrl.slice(0, comma) : '';
+  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const mimeMatch = header.match(/data:([^;]+)/);
+  const mime = (mimeMatch ? mimeMatch[1] : '') || fallbackMime || 'image/png';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 export async function* streamImageGeneration(
   agent: Agent,
   baseUrl: string,
@@ -830,47 +850,86 @@ export async function* streamImageGeneration(
   prompt: string,
   size?: string,
   quality?: string,
+  referenceImages?: { dataUrl: string; mimeType: string }[],
   signal?: AbortSignal
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
+  // Reference images route the request to /images/edits (multipart). Cap at 4 (API limit);
+  // extras are dropped with a warning. Empty/undefined → behave exactly like before.
+  let refs = referenceImages ?? [];
+  if (refs.length > 4) {
+    console.warn(`[ImageGen] ⚠️ ${refs.length} reference images provided, truncating to 4`);
+    refs = refs.slice(0, 4);
+  }
+  const useEdits = refs.length > 0;
+  const suffix = useEdits ? '/images/edits' : '/images/generations';
+
   // Derive image API endpoint from base URL
   let endpoint = baseUrl;
   if (endpoint.endsWith('/chat/completions')) {
-    endpoint = endpoint.replace(/\/chat\/completions$/, '/images/generations');
+    endpoint = endpoint.replace(/\/chat\/completions$/, suffix);
   } else if (endpoint.endsWith('/responses')) {
-    endpoint = endpoint.replace(/\/responses$/, '/images/generations');
+    endpoint = endpoint.replace(/\/responses$/, suffix);
   } else if (endpoint.endsWith('/v1')) {
-    endpoint += '/images/generations';
+    endpoint += suffix;
   } else {
-    endpoint = endpoint.replace(/\/?$/, '/images/generations');
+    endpoint = endpoint.replace(/\/?$/, suffix);
   }
 
-  console.log(`[ImageGen] 🎨 Generating image with ${modelId}: "${prompt.substring(0, 100)}..."`);
-  yield { reasoning: `Generating: ${prompt}`, isComplete: false };
+  console.log(`[ImageGen] 🎨 ${useEdits ? `Editing with ${refs.length} reference image(s)` : 'Generating image'} with ${modelId}: "${prompt.substring(0, 100)}..."`);
+  yield { reasoning: `${useEdits ? 'Editing' : 'Generating'}: ${prompt}`, isComplete: false };
 
   const isGptImage = /gpt-image/i.test(modelId);
-  const requestBody: any = {
-    model: modelId,
-    prompt: prompt,
-    n: 1,
-    ...(isGptImage ? { output_format: 'png' } : { response_format: 'b64_json' }),
-  };
-
-  if (size && size !== 'auto') requestBody.size = size;
-  if (quality && quality !== 'auto') requestBody.quality = quality;
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestBody),
-      signal
-    });
+    let response: Response;
+
+    if (useEdits) {
+      // /images/edits is a multipart endpoint: build FormData. Do NOT set Content-Type
+      // manually — the browser adds the multipart boundary. Only Authorization is sent.
+      const form = new FormData();
+      form.append('model', modelId);
+      form.append('prompt', prompt);
+      if (size && size !== 'auto') form.append('size', size);
+      if (quality && quality !== 'auto') form.append('quality', quality);
+      if (isGptImage) form.append('output_format', 'png');
+      else form.append('response_format', 'b64_json');
+      refs.forEach((ref, i) => {
+        const ext = (ref.mimeType?.split('/')[1] || 'png').split('+')[0];
+        form.append('image[]', dataUrlToBlob(ref.dataUrl, ref.mimeType), `reference_${i}.${ext}`);
+      });
+
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: form,
+        signal
+      });
+    } else {
+      const requestBody: any = {
+        model: modelId,
+        prompt: prompt,
+        n: 1,
+        ...(isGptImage ? { output_format: 'png' } : { response_format: 'b64_json' }),
+      };
+
+      if (size && size !== 'auto') requestBody.size = size;
+      if (quality && quality !== 'auto') requestBody.quality = quality;
+
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(requestBody),
+        signal
+      });
+    }
 
     if (!response.ok) {
       let errorDetail = response.statusText;

@@ -1416,8 +1416,30 @@ const Sidebar: React.FC<SidebarProps> = ({
                        </div>
                      )}
 
-                     {/* Image Generation Settings (only for image models) */}
-                     {isImageGenModel(editData.modelId) && (
+                     {/* Image Generation Tool toggle — mainline models on the Responses API only.
+                         Pure image models don't need it (they always take the image API path). */}
+                     {currentProvider?.openaiApiMode === 'responses' && !isImageGenModel(editData.modelId) && (
+                       <div className="border-t border-gray-200 dark:border-zinc-700 pt-3 mt-1 space-y-1">
+                         <div className="flex items-center justify-between">
+                           <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                             <ImageIcon size={10} /> {t('图像生成工具')}
+                           </span>
+                           <input
+                             type="checkbox"
+                             className="accent-zinc-900"
+                             checked={!!editData.config.enableImageTool}
+                             onChange={(e) => updateDraftAgentConfig(agent.id, { enableImageTool: e.target.checked })}
+                           />
+                         </div>
+                         <p className="text-[9px] text-gray-400 dark:text-gray-500 leading-snug">
+                           {t('让此模型可调用内置图像工具(仅 Responses 模式)')}
+                         </p>
+                       </div>
+                     )}
+
+                     {/* Image Generation Settings — shown for pure image models AND mainline
+                         models that have the image_generation tool enabled. */}
+                     {(isImageGenModel(editData.modelId) || editData.config.enableImageTool) && (
                        <div className="border-t border-gray-200 dark:border-zinc-700 pt-3 mt-1 space-y-2">
                          <div className="flex items-center gap-2 text-xs font-bold text-gray-500 dark:text-gray-400 mb-2">
                            <ImageIcon size={12} /> {t('生图设置')}
@@ -1447,6 +1469,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                              <option value="high">High</option>
                            </select>
                          </div>
+                         {/* Reference latest image — only meaningful for the pure-image dedicated
+                             path (/images/edits). Default on (undefined ⇒ checked). */}
+                         {isImageGenModel(editData.modelId) && (
+                           <div className="flex items-center justify-between pt-1">
+                             <span className="text-[10px] text-gray-500 dark:text-gray-400">{t('参考群内最近的图')}</span>
+                             <input
+                               type="checkbox"
+                               className="accent-zinc-900"
+                               checked={editData.config.useImageReference !== false}
+                               onChange={(e) => updateDraftAgentConfig(agent.id, { useImageReference: e.target.checked })}
+                             />
+                           </div>
+                         )}
                        </div>
                      )}
 
