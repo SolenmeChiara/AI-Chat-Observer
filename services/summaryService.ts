@@ -175,7 +175,8 @@ export const generateSessionName = async (
   const prompt = `
     [TASK]
     Read the following group chat conversation.
-    Generate a short, concise title for this chat group (max 10 Chinese characters).
+    Generate a short, concise title for this chat group, written in the SAME language the conversation itself is (mainly) written in — do not translate it into another language.
+    Keep it short: at most ~10 characters for CJK languages, at most ~5 words for alphabetic languages.
     Directly output the title. Do NOT add quotation marks or extra explanation.
     
     [CONVERSATION]
