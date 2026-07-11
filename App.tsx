@@ -1798,7 +1798,7 @@ const App: React.FC = () => {
 
           // Clean Text (Remove commands and stray wrapper braces)
           let cleanText = displayText
-             .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
+             .replace(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/, '')
              .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{UNMUTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{NOTE:\s*(.+?)\}\}/, '')
@@ -1811,7 +1811,11 @@ const App: React.FC = () => {
              .replace(/\}\}/g, '')
              .trimStart();
 
-          const replyMatch = displayText.match(/^\{\{REPLY:\s*(.+?)\}\}/);
+          // Lenient: message ids never contain whitespace or '}', so the id is read up to the
+          // first whitespace and the closing braces are OPTIONAL — models (esp. native-track)
+          // regularly forget to close {{REPLY: long-id}} and the quote used to be lost while
+          // the raw fragment leaked into the displayed message.
+          const replyMatch = displayText.match(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/);
           if (replyMatch) detectedReplyId = replyMatch[1];
 
           // Real-time [SPLIT]: only check text after what's already been consumed by previous splits
@@ -2025,7 +2029,7 @@ const App: React.FC = () => {
         // AND no native tool call. A tool-only turn (e.g. search with no prose) must NOT be
         // forced to PASS, or the search transaction in the speak branch would never run.
         const nativeCleanedBody = extractedContent
-          .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
+          .replace(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/, '')
           .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
           .replace(/\{\{UNMUTE:\s*(.+?)\}\}/, '')
           .replace(/\{\{NOTE:\s*(.+?)\}\}/, '')
@@ -2084,7 +2088,7 @@ const App: React.FC = () => {
 
         // Final text cleanup - use extracted content from RESPONSE
         let finalText = extractedContent
-             .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
+             .replace(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/, '')
              .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{UNMUTE:\s*(.+?)\}\}/, '')
              .replace(/\{\{NOTE:\s*(.+?)\}\}/, '')

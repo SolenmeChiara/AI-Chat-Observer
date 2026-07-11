@@ -141,7 +141,7 @@ export function buildSystemPrompt(
   const outputFormat = mode === 'native' ? `[OUTPUT FORMAT]
 Write your reply directly — no wrapper. Whatever text you output IS your message.
 - Stay silent: output only {{PASS}}
-- Quote old message: start your reply with {{REPLY: message_id}}
+- Quote old message: start your reply with the marker, closing braces required. Example: {{REPLY: 1780000000000-1780000000001}} Your text follows here...
 - @mention: use @Name only when directly addressing someone` : `[OUTPUT FORMAT]
 You MUST use one of these formats. Unwrapped text is discarded.
 - Speak: {{RESPONSE: your message}}
