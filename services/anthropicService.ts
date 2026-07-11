@@ -6,7 +6,7 @@ import {
   buildMemberList,
   buildAttentionInstruction,
   buildProtocols,
-  buildSystemPrompt,
+  buildSystemPromptParts,
   buildMemoryContext,
   filterVisibleMessages,
   formatMessageText,
@@ -84,7 +84,7 @@ export async function* streamAnthropicReply(
   const memoryContext = buildMemoryContext(summary, adminNotes);
 
   // System Prompt Injection
-  const systemInstruction = buildSystemPrompt(
+  const systemParts = buildSystemPromptParts(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
     attentionInstruction, protocols, commandMode
@@ -280,7 +280,15 @@ export async function* streamAnthropicReply(
         const body: any = {
             model: modelId,
             max_tokens: maxTokensConfig,
-            system: [{ type: 'text', text: systemInstruction, cache_control: { type: 'ephemeral' } }],
+            // Prompt caching: breakpoint sits AFTER the stable block (persona/protocols/members),
+            // so it stays byte-identical across turns and gets cache READS (0.1x) instead of
+            // being rewritten (1.25x) every turn. The dynamic block (time/recall/attention)
+            // lives outside the cached prefix — putting it before the breakpoint would bust
+            // the cache every single call (the Time line changes every second).
+            system: [
+                { type: 'text', text: systemParts.stable, cache_control: { type: 'ephemeral' } },
+                { type: 'text', text: systemParts.dynamic }
+            ],
             messages: formattedMessages,
             stream: true
         };

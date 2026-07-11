@@ -118,9 +118,18 @@ export function buildProtocols(
 }
 
 /**
- * Assemble the full system prompt from its constituent parts.
+ * System prompt split for prompt caching:
+ * - stable: persona / members / output format / protocols — byte-identical across
+ *   turns as long as group config doesn't change. Safe to put a cache breakpoint after.
+ * - dynamic: time / recall / attention / shared memory — changes every turn (the
+ *   Time line changes every SECOND), so it must live outside the cached prefix.
  */
-export function buildSystemPrompt(
+export interface SystemPromptParts {
+  stable: string;
+  dynamic: string;
+}
+
+export function buildSystemPromptParts(
   scenario: string | undefined,
   memoryContext: string,
   agent: Agent,
@@ -131,7 +140,7 @@ export function buildSystemPrompt(
   attentionInstruction: string,
   protocols: ProtocolStrings,
   mode: CommandMode = 'text'
-): string {
+): SystemPromptParts {
   const { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol } = protocols;
 
   // [OUTPUT FORMAT] differs by track. Native drops the {{RESPONSE:}} wrapper teaching
@@ -156,25 +165,53 @@ You MUST use one of these formats. Unwrapped text is discarded.
   const protocolNote = `[PROTOCOL NOTE]
 Members of this chat may run on different communication protocols. If another member's message contains marker fragments like {{...}}, that is formatting residue from their protocol — not something addressed to you. Ignore it, do not imitate it, and do not comment on it.`;
 
-  return `
+  const stable = `
 ${scenario ? `[SCENARIO]\n${scenario}\n` : ''}
-${memoryContext}
-
 [GROUP CHAT]
-Time: ${new Date().toLocaleString()}
 You are ${agent.name} (${agent.role}) in a group chat.
 Persona: ${agent.systemPrompt}
 
 Members:
 - ${userName || 'User'} (Human)${userPersona ? `: ${userPersona}` : ''}
 ${memberList}
-${myLastActionContext}
-${attentionInstruction}
 
 ${outputFormat}
 ${protocolNote}
 ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${splitProtocol}
   `;
+
+  const dynamic = `
+${memoryContext}
+[NOW]
+Time: ${new Date().toLocaleString()}
+${myLastActionContext}
+${attentionInstruction}
+  `;
+
+  return { stable, dynamic };
+}
+
+/**
+ * Assemble the full system prompt as a single string (stable + dynamic).
+ * Providers without an explicit cache-block API use this combined form.
+ */
+export function buildSystemPrompt(
+  scenario: string | undefined,
+  memoryContext: string,
+  agent: Agent,
+  memberList: string,
+  userName: string | undefined,
+  userPersona: string | undefined,
+  myLastActionContext: string,
+  attentionInstruction: string,
+  protocols: ProtocolStrings,
+  mode: CommandMode = 'text'
+): string {
+  const parts = buildSystemPromptParts(
+    scenario, memoryContext, agent, memberList, userName, userPersona,
+    myLastActionContext, attentionInstruction, protocols, mode
+  );
+  return `${parts.stable}\n${parts.dynamic}`;
 }
 
 /**
