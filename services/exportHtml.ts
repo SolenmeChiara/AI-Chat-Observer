@@ -2,6 +2,7 @@
 // 手机浏览器直接打开即可阅读。不依赖任何外部资源,断网可看。
 import { ChatSession, Agent, Message } from '../types';
 import { t } from '../i18n';
+import { safeTruncate } from './textUtils';
 
 const USER_ID = 'user';
 
@@ -52,7 +53,7 @@ function renderMessage(msg: Message, session: ChatSession, agents: Agent[], user
     const target = session.messages.find(m => m.id === msg.replyToId);
     if (target) {
       const qName = senderName(target, agents, userName);
-      const qText = target.text.length > 120 ? target.text.slice(0, 120) + '…' : target.text;
+      const qText = target.text.length > 120 ? safeTruncate(target.text, 120) + '…' : target.text;
       quoteHtml = `<div class="quote"><b>${escapeHtml(qName)}</b><br>${escapeHtml(qText)}</div>`;
     }
   }

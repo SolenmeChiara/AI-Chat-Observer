@@ -13,6 +13,7 @@ import {
   appendDocumentAttachments
 } from './shared';
 import { renderToolSchemas, getCommandMode, type CapabilityCall } from './capabilities';
+import { safeTruncate, wellFormedStringify } from './textUtils';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -101,7 +102,7 @@ export async function* streamOpenAIReply(
   // 3. Find Last Action
   const myLastMessage = [...visibleMessages].reverse().find(m => m.senderId === agent.id && !m.isSystem);
   const myLastActionContext = myLastMessage
-    ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...".`
+    ? `Recall that your LAST message was: "${safeTruncate(myLastMessage.text, 100)}...".`
     : "";
 
   // 4. Build Group Member List
@@ -139,7 +140,7 @@ export async function* streamOpenAIReply(
        if (m.replyToId) {
           const replyTarget = messages.find(msg => msg.id === m.replyToId);
           if (replyTarget) {
-              textContent = `[Replying to: "${replyTarget.text.substring(0, 50)}..."]\n${textContent}`;
+              textContent = `[Replying to: "${safeTruncate(replyTarget.text, 50)}..."]\n${textContent}`;
           }
        }
 
@@ -243,7 +244,7 @@ export async function* streamOpenAIReply(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify(requestBody),
+        body: wellFormedStringify(requestBody),
         signal
       });
 
@@ -496,7 +497,7 @@ export async function* streamOpenAIResponsesReply(
 
   const myLastMessage = [...visibleMessages].reverse().find(m => m.senderId === agent.id && !m.isSystem);
   const myLastActionContext = myLastMessage
-    ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...".`
+    ? `Recall that your LAST message was: "${safeTruncate(myLastMessage.text, 100)}...".`
     : "";
 
   const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
@@ -521,7 +522,7 @@ export async function* streamOpenAIResponsesReply(
     if (m.replyToId) {
       const replyTarget = messages.find(msg => msg.id === m.replyToId);
       if (replyTarget) {
-        textContent = `[Replying to: "${replyTarget.text.substring(0, 50)}..."]\n${textContent}`;
+        textContent = `[Replying to: "${safeTruncate(replyTarget.text, 50)}..."]\n${textContent}`;
       }
     }
 
@@ -619,7 +620,7 @@ export async function* streamOpenAIResponsesReply(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify(requestBody),
+        body: wellFormedStringify(requestBody),
         signal
       });
 
@@ -926,7 +927,7 @@ export async function* streamImageGeneration(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify(requestBody),
+        body: wellFormedStringify(requestBody),
         signal
       });
     }

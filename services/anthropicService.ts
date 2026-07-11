@@ -13,6 +13,7 @@ import {
   appendDocumentAttachments
 } from './shared';
 import { renderToolSchemas, getCommandMode, type CapabilityCall } from './capabilities';
+import { safeTruncate, wellFormedStringify } from './textUtils';
 
 // Detect actual image format from base64 data (magic bytes)
 function detectImageFormat(base64Data: string): string {
@@ -67,7 +68,7 @@ export async function* streamAnthropicReply(
   // 3. Find Last Action
   const myLastMessage = [...visibleMessages].reverse().find(m => m.senderId === agent.id && !m.isSystem);
   const myLastActionContext = myLastMessage
-    ? `You previously said: "${myLastMessage.text.substring(0, 100)}...".`
+    ? `You previously said: "${safeTruncate(myLastMessage.text, 100)}...".`
     : "";
 
   // 4. Build Group Member List
@@ -140,7 +141,7 @@ export async function* streamAnthropicReply(
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);
         if (replyTarget) {
-            textContent = `[Replying to: "${replyTarget.text.substring(0, 50)}..."]\n${textContent}`;
+            textContent = `[Replying to: "${safeTruncate(replyTarget.text, 50)}..."]\n${textContent}`;
         }
     }
 
@@ -306,7 +307,7 @@ export async function* streamAnthropicReply(
                 'anthropic-version': '2023-06-01',
                 'anthropic-dangerous-direct-browser-access': 'true'
             },
-            body: JSON.stringify(body),
+            body: wellFormedStringify(body),
             signal
         });
 

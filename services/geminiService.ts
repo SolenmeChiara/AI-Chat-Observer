@@ -14,6 +14,7 @@ import {
   appendDocumentAttachments
 } from './shared';
 import { renderToolSchemas, getCommandMode, type CapabilityCall } from './capabilities';
+import { safeTruncate } from './textUtils';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -114,7 +115,7 @@ export async function* streamGeminiReply(
   // 3. Find Last Action (Memory Injection)
   const myLastMessage = [...visibleMessages].reverse().find(m => m.senderId === agent.id && !m.isSystem);
   const myLastActionContext = myLastMessage
-    ? `Recall that your LAST message was: "${myLastMessage.text.substring(0, 100)}...". Maintain continuity.`
+    ? `Recall that your LAST message was: "${safeTruncate(myLastMessage.text, 100)}...". Maintain continuity.`
     : "You haven't spoken recently.";
 
   // 4. Build Group Member List for Context
@@ -186,7 +187,7 @@ export async function* streamGeminiReply(
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);
         if (replyTarget) {
-            textContent = `[Replying to ${replyTarget.text.substring(0,20)}...] ` + textContent;
+            textContent = `[Replying to ${safeTruncate(replyTarget.text, 20)}...] ` + textContent;
         }
     }
 
