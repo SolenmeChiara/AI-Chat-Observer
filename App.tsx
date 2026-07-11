@@ -1350,8 +1350,12 @@ const App: React.FC = () => {
       const humanDisguise = activeSession.humanDisguise;
 
       // === IMAGE GENERATION AGENT (standalone path, no {{RESPONSE:}} parsing) ===
-      // Skip standalone path when using Responses API — it handles image gen natively
-      if (isImageGenModel(agent.modelId) && provider.openaiApiMode !== 'responses') {
+      // Pure image models (gpt-image / dall-e) ALWAYS take this path regardless of
+      // the provider's API mode: they are only valid on the Image API
+      // (/images/generations). The Responses API generates images via the
+      // image_generation TOOL on a mainline model (gpt-5+) — a gpt-image model in
+      // the `model` field of /responses is rejected with 404 "Model not found".
+      if (isImageGenModel(agent.modelId)) {
         console.log(`[${agent.name}] 🎨 Image generation agent detected`);
 
         // Build context prompt, truncated to fit API limit (32k chars)
