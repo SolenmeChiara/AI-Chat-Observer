@@ -551,7 +551,9 @@ export async function* streamOpenAIResponsesReply(
 
   // Native track: Responses function tools (top-level `{type:'function', name, ...}` shape),
   // assembled once. Merged with image_generation below so both can be offered together.
-  const nativeTools = commandMode === 'native'
+  // Pure image-gen models (gpt-image / dall-e) are excluded: they don't do function
+  // calling, and sending function tools makes some proxies 404 the model entirely.
+  const nativeTools = commandMode === 'native' && !isImageGenModel(modelId)
     ? renderToolSchemas({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName }, 'openai-responses')
     : [];
 

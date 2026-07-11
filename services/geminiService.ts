@@ -257,7 +257,9 @@ export async function* streamGeminiReply(
       // So: G3 + AI Studio → both tools + flag; anywhere else with both enabled →
       // keep functionDeclarations (the agent's whole capability set rides on them)
       // and drop grounding for this request, with a console.warn.
-      const nativeFnDecls = commandMode === 'native'
+      // Pure image-gen models are excluded from function tools: they don't do
+      // function calling, and offering tools can break the request entirely.
+      const nativeFnDecls = commandMode === 'native' && !isImageModel
         ? renderToolSchemas(
             { agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName },
             'gemini'
