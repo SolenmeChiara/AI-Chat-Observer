@@ -430,7 +430,8 @@ export async function* streamGeminiReply(
       reasoningSignature: capturedThoughtSignature,  // Gemini 3 thought signature
       usage: {
         input: capturedUsage?.promptTokenCount || 0,
-        output: capturedUsage?.candidatesTokenCount || 0
+        // thoughtsTokenCount 是独立字段(不含在 candidatesTokenCount 里),思考 token 按 output 价计费
+        output: (capturedUsage?.candidatesTokenCount || 0) + (capturedUsage?.thoughtsTokenCount || 0)
       }
     };
 
