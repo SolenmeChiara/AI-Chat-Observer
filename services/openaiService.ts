@@ -12,6 +12,7 @@ import {
   formatMessageText,
   appendDocumentAttachments
 } from './shared';
+import { renderToolSchemas, type CapabilityCall } from './capabilities';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -87,6 +88,10 @@ export async function* streamOpenAIReply(
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
+  // Command mode: 'native' opts this agent into native function calling (Phase 2: OpenAI Chat).
+  // Defaults to 'text' so all existing agents/data behave exactly as before.
+  const commandMode = agent.commandMode === 'native' ? 'native' : 'text';
+
   // 1-3. Filter messages by visibility rules
   const visibleMessages = filterVisibleMessages(
     messages, agent, visibilityMode, contextLimit,
@@ -103,10 +108,10 @@ export async function* streamOpenAIReply(
   const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
 
   // 5. Attention / Addressing Logic
-  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
+  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents, commandMode);
 
   // 6-8. Build Protocols (Admin, Search, Entertainment, PM, Split)
-  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
+  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
   const memoryContext = buildMemoryContext(summary, adminNotes);
@@ -115,7 +120,7 @@ export async function* streamOpenAIReply(
   const systemInstruction = buildSystemPrompt(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
-    attentionInstruction, protocols
+    attentionInstruction, protocols, commandMode
   );
 
   const formattedMessages = [
@@ -156,8 +161,15 @@ export async function* streamOpenAIReply(
 
        return { role: 'user', content: textContent };
     }),
-    { role: 'user', content: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` }
+    { role: 'user', content: commandMode === 'native'
+      ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
+      : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` }
   ];
+
+  // Native track: assemble Chat Completions tool schemas once (omitted when empty).
+  const nativeTools = commandMode === 'native'
+    ? renderToolSchemas({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName }, 'openai-chat')
+    : [];
 
   const MAX_RETRIES = 3;
   let response: Response | undefined;
@@ -177,6 +189,12 @@ export async function* streamOpenAIReply(
         stream: true,
         stream_options: { include_usage: true },
       };
+
+      // Native track: attach function tools (default tool_choice 'auto' — model may still
+      // just talk). Omitted entirely in text mode / when no capability is available.
+      if (nativeTools.length > 0) {
+        requestBody.tools = nativeTools;
+      }
 
       // o1/o3/o4 and DeepSeek thinking mode don't support temperature/top_p
       if (!isOpenAIReasoningModel && !isDeepSeekThinking) {
@@ -287,6 +305,13 @@ export async function* streamOpenAIReply(
     let receivedDone = false;
     let hasReceivedContent = false;
 
+    // Native tool_calls accumulation, keyed by delta.tool_calls[].index. `name` usually
+    // arrives once (first fragment) and `arguments` streams as a string we concatenate.
+    // Some relays deliver the whole arguments string in a single (often final) delta —
+    // append-based accumulation handles both. Parsed after the stream ends.
+    const toolCallAccum: Record<number, { name: string; args: string; id: string }> = {};
+    let sawToolCalls = false;
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -362,6 +387,19 @@ export async function* streamOpenAIReply(
                     yield { text: text, isComplete: false };
                 }
              }
+
+             // 3. Native tool call fragments (accumulate; parsed after the stream ends).
+             if (Array.isArray(delta.tool_calls)) {
+                for (const tc of delta.tool_calls) {
+                    const idx = typeof tc.index === 'number' ? tc.index : 0;
+                    if (!toolCallAccum[idx]) toolCallAccum[idx] = { name: '', args: '', id: '' };
+                    const slot = toolCallAccum[idx];
+                    if (tc.id) slot.id = tc.id;
+                    if (tc.function?.name) slot.name = tc.function.name;
+                    if (typeof tc.function?.arguments === 'string') slot.args += tc.function.arguments;
+                    sawToolCalls = true;
+                }
+             }
           }
 
           if (json.usage) {
@@ -381,6 +419,23 @@ export async function* streamOpenAIReply(
           }
         }
       }
+    }
+
+    // Native tool calls: parse each accumulated group and yield as CapabilityCalls.
+    // A group whose arguments fail to JSON.parse warns and is dropped — never throws.
+    if (sawToolCalls) {
+      const calls: CapabilityCall[] = [];
+      for (const idx of Object.keys(toolCallAccum).map(Number).sort((a, b) => a - b)) {
+        const slot = toolCallAccum[idx];
+        if (!slot.name) continue;
+        try {
+          const args = slot.args.trim() ? JSON.parse(slot.args) : {};
+          calls.push({ capability: slot.name, args: (args && typeof args === 'object') ? args as Record<string, unknown> : {} });
+        } catch {
+          console.warn(`[OpenAI] ⚠️ Dropped tool call '${slot.name}' — bad JSON args:`, slot.args);
+        }
+      }
+      if (calls.length > 0) yield { toolCalls: calls, isComplete: false };
     }
 
     // Stream ended without [DONE] - this is an abnormal termination
@@ -431,6 +486,9 @@ export async function* streamOpenAIResponsesReply(
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
+  // Command mode: 'native' opts this agent into native function calling (Phase 2: OpenAI Responses).
+  const commandMode = agent.commandMode === 'native' ? 'native' : 'text';
+
   const visibleMessages = filterVisibleMessages(
     messages, agent, visibilityMode, contextLimit,
     agentVisibility, agentJoinedAt, hidePreJoinMessages
@@ -442,13 +500,13 @@ export async function* streamOpenAIResponsesReply(
     : "";
 
   const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
-  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
-  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
+  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents, commandMode);
+  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
   const memoryContext = buildMemoryContext(summary, adminNotes);
   const systemInstruction = buildSystemPrompt(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
-    attentionInstruction, protocols
+    attentionInstruction, protocols, commandMode
   );
 
   // Build input items (Responses API accepts messages-style input)
@@ -486,8 +544,16 @@ export async function* streamOpenAIResponsesReply(
 
   inputItems.push({
     role: 'user',
-    content: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`
+    content: commandMode === 'native'
+      ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
+      : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`
   });
+
+  // Native track: Responses function tools (top-level `{type:'function', name, ...}` shape),
+  // assembled once. Merged with image_generation below so both can be offered together.
+  const nativeTools = commandMode === 'native'
+    ? renderToolSchemas({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName }, 'openai-responses')
+    : [];
 
   const MAX_RETRIES = 3;
   let response: Response | undefined;
@@ -507,9 +573,15 @@ export async function* streamOpenAIResponsesReply(
         requestBody.max_output_tokens = agent.config.maxTokens;
       }
 
-      // Enable image generation tool for image-capable models
+      // Assemble tools: native function tools (if any) coexist with image_generation
+      // (if this is an image-capable model) in a single array — an image-capable native
+      // agent is offered both.
+      const responsesTools: any[] = [...nativeTools];
       if (isImageGenModel(modelId)) {
-        requestBody.tools = [{ type: 'image_generation', quality: agent.config.imageQuality || 'auto' }];
+        responsesTools.push({ type: 'image_generation', quality: agent.config.imageQuality || 'auto' });
+      }
+      if (responsesTools.length > 0) {
+        requestBody.tools = responsesTools;
       }
 
       // Reasoning config: Responses API supports reasoning on any model (not just o-series)
@@ -592,6 +664,22 @@ export async function* streamOpenAIResponsesReply(
     let capturedUsage = { input: 0, output: 0 };
     let hasReceivedContent = false;
 
+    // Native function-call accumulation, keyed by output_index (falling back to item_id).
+    // Arguments stream as function_call_arguments.delta; finalized on
+    // function_call_arguments.done (authoritative full string), with output_item.done as a
+    // fallback. `finalized` guards against the two finalize points double-emitting.
+    const fnCallAccum: Record<string, { name: string; args: string; finalized: boolean }> = {};
+    const fnKey = (j: any): string => String(j.output_index ?? j.item_id ?? j.item?.id ?? '');
+    const buildFnCall = (name: string, argStr: string): CapabilityCall | null => {
+      try {
+        const parsed = argStr.trim() ? JSON.parse(argStr) : {};
+        return { capability: name, args: (parsed && typeof parsed === 'object') ? parsed as Record<string, unknown> : {} };
+      } catch {
+        console.warn(`[OpenAI Responses] ⚠️ Dropped function call '${name}' — bad JSON args:`, argStr);
+        return null;
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -642,6 +730,44 @@ export async function* streamOpenAIResponsesReply(
             const b64 = json.partial_image_b64;
             if (b64) {
               yield { image: b64, isComplete: false };
+            }
+          }
+
+          // Native function call: output item opens (skeleton with name).
+          if (eventType === 'response.output_item.added' && json.item?.type === 'function_call') {
+            fnCallAccum[fnKey(json)] = { name: json.item.name || '', args: '', finalized: false };
+          }
+
+          // Native function call: arguments stream as string fragments.
+          if (eventType === 'response.function_call_arguments.delta') {
+            const slot = fnCallAccum[fnKey(json)];
+            if (slot && typeof json.delta === 'string') slot.args += json.delta;
+          }
+
+          // Native function call: arguments complete — authoritative full string, finalize.
+          if (eventType === 'response.function_call_arguments.done') {
+            const slot = fnCallAccum[fnKey(json)];
+            if (slot && !slot.finalized) {
+              slot.finalized = true;
+              const call = buildFnCall(slot.name, typeof json.arguments === 'string' ? json.arguments : slot.args);
+              if (call) yield { toolCalls: [call], isComplete: false };
+            }
+          }
+
+          // Native function call: item done — fallback finalize for servers that skip
+          // function_call_arguments.done (or never emitted output_item.added).
+          if (eventType === 'response.output_item.done' && json.item?.type === 'function_call') {
+            const key = fnKey(json);
+            const slot = fnCallAccum[key];
+            const argStr = typeof json.item.arguments === 'string' ? json.item.arguments : (slot?.args || '');
+            if (slot && !slot.finalized) {
+              slot.finalized = true;
+              const call = buildFnCall(slot.name || json.item.name || '', argStr);
+              if (call) yield { toolCalls: [call], isComplete: false };
+            } else if (!slot && json.item.name) {
+              fnCallAccum[key] = { name: json.item.name, args: '', finalized: true };
+              const call = buildFnCall(json.item.name, argStr);
+              if (call) yield { toolCalls: [call], isComplete: false };
             }
           }
 

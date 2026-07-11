@@ -15,8 +15,11 @@ import type { ProtocolStrings } from './shared';
  *     `paramsSchema` — defined here but NOT consumed yet.
  *
  * PASS / REPLY / [SPLIT] are intentionally NOT capabilities (see plan 2.3):
- * pure markers stay on the text track. `set_silence` is taught in the OUTPUT
- * FORMAT block (Phase 1 scope) and is likewise absent here.
+ * pure markers stay on the text track — they carry no structured parameters, so
+ * tool-ifying them buys nothing and the text detection is inherited for free.
+ * `set_silence` DOES take a (structured, constrained) duration, so as of Phase 2
+ * it is a capability and a native tool; only its text teaching lives in the
+ * OUTPUT FORMAT block (shared.ts), suppressed there for native agents.
  */
 
 /**
@@ -43,6 +46,7 @@ export type CapabilityId =
   | 'add_note'
   | 'del_note'
   | 'clear_notes'
+  | 'set_silence'
   | 'send_pm'
   | 'roll_dice'
   | 'draw_tarot';
@@ -78,9 +82,12 @@ const isGroupAdmin = (ctx: CapabilityContext): boolean =>
   ctx.agent.role === AgentRole.ADMIN || !!ctx.groupAdminIds?.includes(ctx.agent.id);
 
 /**
- * The 9 capabilities, in a stable order (matches CapabilityId's declaration
- * order). availability predicates reproduce, one-for-one, the branch
- * conditions of the legacy buildProtocols.
+ * The 10 capabilities, in a stable order (matches CapabilityId's declaration
+ * order — the order also fixes the native tool array, which matters for
+ * Anthropic's prompt-cache prefix). availability predicates reproduce,
+ * one-for-one, the branch conditions of the legacy buildProtocols; `set_silence`
+ * is the one capability with no legacy availability gate — any member may
+ * self-mute (matches the always-taught {{SILENCE}} text marker).
  */
 export const CAPABILITIES: CapabilityDef[] = [
   {
@@ -152,6 +159,18 @@ export const CAPABILITIES: CapabilityDef[] = [
     availability: isGroupAdmin,
   },
   {
+    id: 'set_silence',
+    description: 'Mute yourself and stop participating for a while. Any member may use this. Omit duration for an indefinite self-mute.',
+    paramsSchema: {
+      type: 'object',
+      properties: {
+        duration: { type: 'string', description: 'One of: 10min, 30min, 1h, 1d. Omit to self-mute indefinitely.' },
+      },
+      additionalProperties: false,
+    },
+    availability: () => true,
+  },
+  {
     id: 'send_pm',
     description: 'Send a private message visible only to a single member. Can be combined with a public message.',
     paramsSchema: {
@@ -210,15 +229,26 @@ const ADMIN_CAPABILITY_IDS: CapabilityId[] = ['mute', 'unmute', 'add_note', 'del
 // --- native track (Phase 1) -----------------------------------------------
 
 /**
- * Capabilities that are tool-ified on the native track. Phase 1 wires only
- * `search`; every other capability stays on the text track even for native
- * agents (see renderTextProtocols native branch), so a native agent never
- * loses a capability. This is the single list both consumers reference:
+ * Capabilities that are tool-ified on the native track. Phase 2 extends this to
+ * the FULL set — every registry capability is now a native tool. This is the
+ * single list both consumers reference:
  *   - renderToolSchemas emits exactly this set (∩ availability);
  *   - renderTextProtocols suppresses exactly this set when mode === 'native'.
- * Phase 2 extends this array and both sides follow automatically.
+ * (PASS / REPLY / [SPLIT] are not registry capabilities and never appear here;
+ * they always travel the text track — see plan 2.3.)
  */
-const NATIVE_TOOL_IDS: CapabilityId[] = ['search'];
+const NATIVE_TOOL_IDS: CapabilityId[] = [
+  'search',
+  'mute',
+  'unmute',
+  'add_note',
+  'del_note',
+  'clear_notes',
+  'set_silence',
+  'send_pm',
+  'roll_dice',
+  'draw_tarot',
+];
 
 /** JSON-Schema primitive type name → Gemini OpenAPI `Type` enum member (UPPERCASE). */
 const JSON_TYPE_TO_GEMINI: Record<string, Type> = {
@@ -258,23 +288,54 @@ function toGeminiSchema(node: Record<string, any>): Schema {
   return schema;
 }
 
+/** Provider dialects the native tool schemas can be rendered into. */
+export type ToolSchemaKind = 'gemini' | 'anthropic' | 'openai-chat' | 'openai-responses';
+
 /**
  * Render the native-track tool schemas for a provider `kind`.
  *
- * Phase 1 implements only the Gemini kind. A capability is emitted as a native
- * tool only when it is BOTH native-tool-ified (NATIVE_TOOL_IDS) AND available in
- * this context — so the offered tools match exactly what App.tsx dispatches, and
- * no capability is ever exposed on both the tool track and the text track at once.
+ * A capability is emitted as a native tool only when it is BOTH native-tool-ified
+ * (NATIVE_TOOL_IDS) AND available in this context — so the offered tools match
+ * exactly what App.tsx dispatches, and no capability is ever exposed on both the
+ * tool track and the text track at once. The filtered set is shared across all
+ * dialects; only the per-tool shape differs:
+ *   - gemini:           SDK `FunctionDeclaration` (types mapped, additionalProperties dropped)
+ *   - anthropic:        `{ name, description, input_schema }` (raw JSON Schema)
+ *   - openai-chat:      `{ type:'function', function:{ name, description, parameters } }`
+ *   - openai-responses: `{ type:'function', name, description, parameters }` (top-level, matches image_generation array)
  */
-export function renderToolSchemas(ctx: CapabilityContext, kind: 'gemini'): FunctionDeclaration[] {
-  if (kind !== 'gemini') return [];
-  return CAPABILITIES
-    .filter((cap) => NATIVE_TOOL_IDS.includes(cap.id) && cap.availability(ctx))
-    .map((cap) => ({
-      name: cap.id,
-      description: cap.description,
-      parameters: toGeminiSchema(cap.paramsSchema as Record<string, any>),
-    }));
+export function renderToolSchemas(ctx: CapabilityContext, kind: 'gemini'): FunctionDeclaration[];
+export function renderToolSchemas(ctx: CapabilityContext, kind: 'anthropic' | 'openai-chat' | 'openai-responses'): Record<string, unknown>[];
+export function renderToolSchemas(ctx: CapabilityContext, kind: ToolSchemaKind): FunctionDeclaration[] | Record<string, unknown>[] {
+  const caps = CAPABILITIES.filter((cap) => NATIVE_TOOL_IDS.includes(cap.id) && cap.availability(ctx));
+  switch (kind) {
+    case 'gemini':
+      return caps.map((cap) => ({
+        name: cap.id,
+        description: cap.description,
+        parameters: toGeminiSchema(cap.paramsSchema as Record<string, any>),
+      }));
+    case 'anthropic':
+      return caps.map((cap) => ({
+        name: cap.id,
+        description: cap.description,
+        input_schema: cap.paramsSchema,
+      }));
+    case 'openai-chat':
+      return caps.map((cap) => ({
+        type: 'function',
+        function: { name: cap.id, description: cap.description, parameters: cap.paramsSchema },
+      }));
+    case 'openai-responses':
+      return caps.map((cap) => ({
+        type: 'function',
+        name: cap.id,
+        description: cap.description,
+        parameters: cap.paramsSchema,
+      }));
+    default:
+      return [];
+  }
 }
 
 /**
@@ -286,12 +347,16 @@ export function renderToolSchemas(ctx: CapabilityContext, kind: 'gemini'): Funct
  * not a capability and stays a fixed text segment gated by enableSplit, exactly
  * as before.
  *
- * In `'native'` mode: capabilities in NATIVE_TOOL_IDS (Phase 1: search) are NOT
- * emitted as text — they live in the tool schema instead. The remaining segments
- * (admin / entertainment / pm / split) are still emitted so a native agent keeps
- * every capability, but their wording drops the `{{RESPONSE:}}` wrapper phrasing
- * (there is no wrapper on the native track). The instruction token formats
- * themselves (e.g. `{{MUTE: ...}}`) are unchanged across modes.
+ * In `'native'` mode: capabilities in NATIVE_TOOL_IDS (Phase 2: the full set —
+ * search / admin / entertainment / pm) are NOT emitted as text — their teaching
+ * lives in the tool-schema `description` instead. Only `splitProtocol` survives
+ * on the native track (`[SPLIT]` is a pure display marker, not a capability). The
+ * `nativeToolified` guard on each segment's condition below is what enforces this;
+ * because every registry capability is now tool-ified, native mode yields empty
+ * admin/search/entertainment/pm segments. Text mode is byte-for-byte unaffected
+ * (nativeToolified is always false there), so the internal native/text ternaries
+ * that remain in the entertainment/pm/admin templates are dead on the native
+ * track and always resolve to their text branch on the text track.
  *
  * NOTE ON INDENTATION: the whitespace *inside* the `'text'`-mode backtick
  * templates below is load-bearing — it is part of the emitted string and is
@@ -305,9 +370,9 @@ export function renderTextProtocols(ctx: CapabilityContext, mode: CommandMode = 
   // native agents (its teaching lives in the tool schema). Text agents: unaffected.
   const nativeToolified = (id: CapabilityId): boolean => mode === 'native' && NATIVE_TOOL_IDS.includes(id);
 
-  // --- ADMIN ---
+  // --- ADMIN --- (native track: all five commands tool-ified, so suppressed here)
   let adminProtocol = "";
-  if (ADMIN_CAPABILITY_IDS.some((id) => has(id))) {
+  if (ADMIN_CAPABILITY_IDS.some((id) => has(id) && !nativeToolified(id))) {
     // Only the "where to put it" phrasing differs by mode; the command tokens are identical.
     const adminWhere = mode === 'native'
       ? 'You are a group admin. Available commands (place directly in your reply):'
@@ -331,9 +396,9 @@ export function renderTextProtocols(ctx: CapabilityContext, mode: CommandMode = 
     `;
   }
 
-  // --- ENTERTAINMENT TOOLS (Dice, Tarot) ---
+  // --- ENTERTAINMENT TOOLS (Dice, Tarot) --- (native track: tool-ified, suppressed here)
   let entertainmentProtocol = "";
-  if (has('roll_dice') || has('draw_tarot')) {
+  if ((has('roll_dice') && !nativeToolified('roll_dice')) || (has('draw_tarot') && !nativeToolified('draw_tarot'))) {
     const tools: string[] = [];
 
     if (has('roll_dice')) {
@@ -379,9 +444,9 @@ export function renderTextProtocols(ctx: CapabilityContext, mode: CommandMode = 
     `;
   }
 
-  // --- PM (Private Message) ---
+  // --- PM (Private Message) --- (native track: tool-ified via send_pm, suppressed here)
   let pmProtocol = "";
-  if (has('send_pm')) {
+  if (has('send_pm') && !nativeToolified('send_pm')) {
     const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
     const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
     pmProtocol = mode === 'native' ? `

@@ -19,6 +19,7 @@ import { I18nProvider, useT, t } from './i18n';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
+import { isCapabilityAvailable, type CapabilityContext } from './services/capabilities';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -1515,6 +1516,32 @@ const App: React.FC = () => {
       // PM COMMAND STATE
       let detectedPMTargetId: string | undefined = undefined;
 
+      // NATIVE TOOL BRIDGE STATE (Phase 2): values a native tool call feeds into the
+      // unchanged text-track dispatch. `nativePmContent` carries the send_pm body (free
+      // text — can't be smuggled through a synthetic {{RES_PM_}} marker); dice/tarot specs
+      // ARE constrained, so they are re-emitted as synthetic {{ROLL:}}/{{TAROT:}} markers
+      // appended to accumulatedText after the stream (see below the loop).
+      let nativePmContent: string | undefined = undefined;
+      const nativeDiceSpecs: string[] = [];
+      const nativeTarotCounts: number[] = [];
+      // Shared availability context — the SAME predicates the service used to decide which
+      // tools to offer, so the bridge only honors calls that were legitimately available
+      // (defence-in-depth against a proxy/model returning an unoffered tool call).
+      const capabilityCtx: CapabilityContext = {
+        agent, allAgents: currentSessionMembers, groupAdminIds, hasSearchTool, entertainmentConfig, userName: settings.userName,
+      };
+      // "10min" | "30min" | "1h" | "1d" | "5m" → minutes. Mirrors the text-track SILENCE/MUTE regex.
+      const parseNativeDuration = (raw: string): number | undefined => {
+        const m = raw.match(/(\d+)\s*(min|h|d|m)/i);
+        if (!m) return undefined;
+        const num = parseInt(m[1], 10);
+        const unit = m[2].toLowerCase();
+        if (unit === 'h') return num * 60;
+        if (unit === 'd') return num * 60 * 24;
+        return num; // 'min' or 'm'
+      };
+      const asStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : (v != null ? String(v).trim() : ''));
+
       console.log(`[${agent.name}] 📥 Starting to receive stream...`);
 
       for await (const chunk of streamGenerator) {
@@ -1528,12 +1555,94 @@ const App: React.FC = () => {
         if (chunk.toolCalls && chunk.toolCalls.length > 0) {
           receivedNativeToolCall = true;
           for (const call of chunk.toolCalls) {
-            if (call.capability === 'search' && hasSearchTool && !disableSearch && !detectedSearchQuery) {
+            const cap = call.capability;
+            const args = call.args || {};
+            if (cap === 'search' && hasSearchTool && !disableSearch && !detectedSearchQuery) {
               const rawQuery = call.args?.query;
               const queryStr = typeof rawQuery === 'string'
                 ? rawQuery.trim()
                 : (rawQuery != null ? String(rawQuery).trim() : '');
               if (queryStr) detectedSearchQuery = queryStr;
+            }
+            // SELF-MUTE (set_silence): any agent may self-mute — no admin gate. Mirrors the
+            // {{SILENCE}} text marker: no duration → 0 (indefinite; execution's `|| 30` still
+            // applies, exactly as for text {{SILENCE}}). First admin-style action wins.
+            else if (cap === 'set_silence') {
+              if (!detectedAdminAction) {
+                const durStr = asStr((args as any).duration);
+                const duration = durStr ? (parseNativeDuration(durStr) ?? 0) : 0;
+                detectedAdminAction = { type: 'MUTE', target: agent.name, duration };
+              }
+            }
+            // ADMIN COMMANDS: gated by the SAME availability predicate that offered the tool
+            // (isGroupAdmin). The frozen execution segment has no acting-agent admin check of
+            // its own, so this bridge gate is what prevents an unoffered/hallucinated admin
+            // call from taking effect. First admin action wins; extras are warned + ignored.
+            else if ((cap === 'mute' || cap === 'unmute' || cap === 'add_note' || cap === 'del_note' || cap === 'clear_notes')
+                     && isCapabilityAvailable(cap, capabilityCtx)) {
+              if (detectedAdminAction) {
+                console.warn(`[${agent.name}] ⚠️ Ignoring extra admin tool call '${cap}' (one admin action per turn)`);
+              } else if (cap === 'mute') {
+                const name = asStr((args as any).name);
+                if (name) {
+                  const durStr = asStr((args as any).duration);
+                  detectedAdminAction = { type: 'MUTE', target: name, duration: durStr ? parseNativeDuration(durStr) : undefined };
+                } else console.warn(`[${agent.name}] ⚠️ mute tool call missing 'name'`);
+              } else if (cap === 'unmute') {
+                const name = asStr((args as any).name);
+                if (name) detectedAdminAction = { type: 'UNMUTE', target: name };
+                else console.warn(`[${agent.name}] ⚠️ unmute tool call missing 'name'`);
+              } else if (cap === 'add_note') {
+                const content = asStr((args as any).content);
+                if (content) detectedAdminAction = { type: 'NOTE', target: content };
+                else console.warn(`[${agent.name}] ⚠️ add_note tool call missing 'content'`);
+              } else if (cap === 'del_note') {
+                const keyword = asStr((args as any).keyword);
+                if (keyword) detectedAdminAction = { type: 'DELNOTE', target: keyword };
+                else console.warn(`[${agent.name}] ⚠️ del_note tool call missing 'keyword'`);
+              } else { // clear_notes
+                detectedAdminAction = { type: 'CLEARNOTES', target: '' };
+              }
+            }
+            // PRIVATE MESSAGE (send_pm): resolve target id by name (longest-first, incl. the
+            // human user), like the text-track PM parser. One PM target per turn — extras warned
+            // + ignored. Content is stashed for the PM-extraction step (free text: NOT synthesized).
+            else if (cap === 'send_pm' && isCapabilityAvailable('send_pm', capabilityCtx)) {
+              if (detectedPMTargetId) {
+                console.warn(`[${agent.name}] ⚠️ Ignoring extra send_pm (one PM target per turn)`);
+              } else {
+                const targetName = asStr((args as any).target);
+                const content = asStr((args as any).content);
+                if (targetName && content) {
+                  const uName = settings.userName || 'User';
+                  const pmCandidates = [
+                    ...currentSessionMembers.filter(a => a.id !== agentId),
+                    { id: USER_ID, name: uName },
+                  ].sort((a, b) => b.name.length - a.name.length);
+                  const lowered = targetName.toLowerCase();
+                  const match = pmCandidates.find(c => c.name.toLowerCase() === lowered)
+                             || pmCandidates.find(c => lowered.includes(c.name.toLowerCase()));
+                  if (match) {
+                    detectedPMTargetId = match.id;
+                    nativePmContent = content;
+                  } else console.warn(`[${agent.name}] ⚠️ send_pm target not found: "${targetName}"`);
+                } else console.warn(`[${agent.name}] ⚠️ send_pm tool call missing target/content`);
+              }
+            }
+            // ENTERTAINMENT (roll_dice / draw_tarot): constrained params, so re-emitted as
+            // synthetic {{ROLL:}}/{{TAROT:}} markers appended after the stream (below the loop),
+            // which the existing parseEntertainmentCommands call point then handles unchanged.
+            else if (cap === 'roll_dice' && isCapabilityAvailable('roll_dice', capabilityCtx)) {
+              const spec = asStr((args as any).spec);
+              if (spec) nativeDiceSpecs.push(spec);
+              else console.warn(`[${agent.name}] ⚠️ roll_dice tool call missing 'spec'`);
+            }
+            else if (cap === 'draw_tarot' && isCapabilityAvailable('draw_tarot', capabilityCtx)) {
+              const rawCount = (args as any).count;
+              let count = 1;
+              if (typeof rawCount === 'number' && Number.isFinite(rawCount)) count = Math.floor(rawCount);
+              else if (typeof rawCount === 'string' && rawCount.trim() && Number.isFinite(Number(rawCount))) count = Math.floor(Number(rawCount));
+              nativeTarotCounts.push(count);
             }
           }
         }
@@ -1745,6 +1854,19 @@ const App: React.FC = () => {
         if (chunk.reasoningSignature) capturedSignature = chunk.reasoningSignature;
       }
 
+      // NATIVE ENTERTAINMENT → synthetic text: append the {{ROLL:}}/{{TAROT:}} markers a native
+      // agent requested via tools onto accumulatedText, so the unchanged downstream flow (native
+      // extractedContent = accumulatedText → parseEntertainmentCommands; markers stripped from the
+      // displayed finalText) handles them exactly as if the model had typed them. Safe because dice
+      // specs / tarot counts are constrained values that can never contain a stray `}}`.
+      if (nativeDiceSpecs.length > 0 || nativeTarotCounts.length > 0) {
+        const markers = [
+          ...nativeDiceSpecs.map(s => `{{ROLL: ${s}}}`),
+          ...nativeTarotCounts.map(n => `{{TAROT: ${n}}}`),
+        ].join(' ');
+        accumulatedText = accumulatedText ? `${accumulatedText} ${markers}` : markers;
+      }
+
       console.log(`[${agent.name}] ✅ Stream completed (${chunkCount} chunks, ${accumulatedText.length} chars)`);
       console.log(`[${agent.name}] 📝 Raw output:`, accumulatedText.substring(0, 500) + (accumulatedText.length > 500 ? '...' : ''));
       if (accumulatedReasoning) {
@@ -1835,6 +1957,15 @@ const App: React.FC = () => {
             console.log(`[${agent.name}] 📨 PM detected → ${pmTarget.name}`);
           }
         }
+      }
+
+      // Native track override: a send_pm tool call delivers the PM body out-of-band (there is no
+      // inline {{RES_PM_}} marker to extract, and free text can't be safely synthesized into one).
+      // The tool content is authoritative, so it wins over whatever the regex above may have found.
+      // No-op for text agents and for native agents that didn't call send_pm (nativePmContent stays
+      // undefined) — so the frozen PM-delivery logic downstream is reached with the same variables.
+      if (nativePmContent !== undefined) {
+        extractedPMContent = nativePmContent;
       }
 
       // 2. Extract the reply body.

@@ -135,11 +135,12 @@ export function buildSystemPrompt(
   const { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol } = protocols;
 
   // [OUTPUT FORMAT] differs by track. Native drops the {{RESPONSE:}} wrapper teaching
-  // (the raw reply IS the message); {{PASS}} / {{REPLY}} / {{SILENCE}} stay text markers.
+  // (the raw reply IS the message); {{PASS}} / {{REPLY}} stay text markers on both tracks.
+  // Self-mute is a native tool (set_silence) as of Phase 2, so its {{SILENCE}} text
+  // teaching is removed from the native block — text mode keeps it below.
   const outputFormat = mode === 'native' ? `[OUTPUT FORMAT]
 Write your reply directly — no wrapper. Whatever text you output IS your message.
 - Stay silent: output only {{PASS}}
-- Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
 - Quote old message: start your reply with {{REPLY: message_id}}
 - @mention: use @Name only when directly addressing someone` : `[OUTPUT FORMAT]
 You MUST use one of these formats. Unwrapped text is discarded.

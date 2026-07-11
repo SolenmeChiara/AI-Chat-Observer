@@ -12,6 +12,7 @@ import {
   formatMessageText,
   appendDocumentAttachments
 } from './shared';
+import { renderToolSchemas, type CapabilityCall } from './capabilities';
 
 // Detect actual image format from base64 data (magic bytes)
 function detectImageFormat(base64Data: string): string {
@@ -53,6 +54,10 @@ export async function* streamAnthropicReply(
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
+  // Command mode: 'native' opts this agent into native function calling (Phase 2: Anthropic).
+  // Defaults to 'text' so all existing agents/data behave exactly as before.
+  const commandMode = agent.commandMode === 'native' ? 'native' : 'text';
+
   // 1-3. Filter messages by visibility rules
   const visibleMessages = filterVisibleMessages(
     messages, agent, visibilityMode, contextLimit,
@@ -69,10 +74,10 @@ export async function* streamAnthropicReply(
   const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
 
   // 5. Attention / Addressing Logic
-  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
+  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents, commandMode);
 
   // 6-8. Build Protocols (Admin, Search, Entertainment, PM, Split)
-  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
+  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
   const memoryContext = buildMemoryContext(summary, adminNotes);
@@ -81,7 +86,7 @@ export async function* streamAnthropicReply(
   const systemInstruction = buildSystemPrompt(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
-    attentionInstruction, protocols
+    attentionInstruction, protocols, commandMode
   );
 
   // Anthropic Format Prep
@@ -202,7 +207,10 @@ export async function* streamAnthropicReply(
   }
 
   // Add end-of-log format reminder as the last thing the model sees
-  const endOfLogBlock = { type: "text", text: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` };
+  const endOfLogText = commandMode === 'native'
+    ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
+    : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`;
+  const endOfLogBlock = { type: "text", text: endOfLogText };
   if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
     const lastMsg = formattedMessages[formattedMessages.length - 1];
     if (typeof lastMsg.content === 'string') {
@@ -247,6 +255,12 @@ export async function* streamAnthropicReply(
       }
   }
 
+  // Native track: assemble the tool schemas once (stable order → stable cache prefix).
+  // Empty in text mode or when no capability is available → the `tools` field is omitted.
+  const nativeTools = commandMode === 'native'
+    ? renderToolSchemas({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName }, 'anthropic')
+    : [];
+
   const MAX_RETRIES = 3;
   let response: Response | undefined;
 
@@ -269,6 +283,10 @@ export async function* streamAnthropicReply(
             messages: formattedMessages,
             stream: true
         };
+
+        if (nativeTools.length > 0) {
+            body.tools = nativeTools;
+        }
 
         if (thinkingConfig) {
             body.thinking = thinkingConfig;
@@ -347,6 +365,12 @@ export async function* streamAnthropicReply(
     let capturedSignature: string | undefined;
     let receivedMessageStop = false;
     let hasReceivedContent = false;
+    // Native tool_use accumulation, keyed by content-block index (a reply may carry
+    // several tool_use blocks alongside text/thinking blocks). Each block streams its
+    // arguments as `input_json_delta` fragments that we concatenate, then JSON.parse
+    // on content_block_stop. A parse failure warns and drops that one call — never
+    // throws, so a malformed tool argument can't take down the whole reply.
+    const toolUseBlocks: Record<number, { name: string; id: string; jsonBuf: string }> = {};
 
     while (true) {
       const { done, value } = await reader.read();
@@ -375,6 +399,18 @@ export async function* streamAnthropicReply(
                     }
                 }
 
+                // Native tool_use block opens: record its name/id and open an argument buffer.
+                if (json.type === 'content_block_start' && json.content_block?.type === 'tool_use') {
+                    const idx = json.index;
+                    if (typeof idx === 'number') {
+                        toolUseBlocks[idx] = {
+                            name: json.content_block.name || '',
+                            id: json.content_block.id || '',
+                            jsonBuf: '',
+                        };
+                    }
+                }
+
                 // Parsing Content vs Thinking Delta
                 if (json.type === 'content_block_delta') {
                     if (json.delta?.type === 'text_delta' && json.delta.text) {
@@ -388,6 +424,27 @@ export async function* streamAnthropicReply(
                     // Capture signature delta (Anthropic streams signature in thinking block)
                     if (json.delta?.type === 'signature_delta' && json.delta.signature) {
                         capturedSignature = (capturedSignature || '') + json.delta.signature;
+                    }
+                    // Native tool arguments stream as input_json_delta fragments.
+                    if (json.delta?.type === 'input_json_delta' && typeof json.index === 'number' && toolUseBlocks[json.index]) {
+                        toolUseBlocks[json.index].jsonBuf += (json.delta.partial_json || '');
+                    }
+                }
+
+                // content_block_stop: finalize a native tool_use block if this index is one.
+                if (json.type === 'content_block_stop' && typeof json.index === 'number' && toolUseBlocks[json.index]) {
+                    const block = toolUseBlocks[json.index];
+                    delete toolUseBlocks[json.index];
+                    try {
+                        const args = block.jsonBuf.trim() ? JSON.parse(block.jsonBuf) : {};
+                        const call: CapabilityCall = {
+                            capability: block.name,
+                            args: (args && typeof args === 'object') ? args as Record<string, unknown> : {},
+                        };
+                        hasReceivedContent = true;
+                        yield { toolCalls: [call], isComplete: false };
+                    } catch (e) {
+                        console.warn(`[Anthropic] ⚠️ Dropped tool_use '${block.name}' — bad JSON args:`, block.jsonBuf);
                     }
                 }
 

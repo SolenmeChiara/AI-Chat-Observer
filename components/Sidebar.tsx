@@ -1400,8 +1400,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                        </select>
                      </div>
 
-                     {/* Command Mode — Phase 1: native function calling is Gemini-only */}
-                     {currentProvider?.type === AgentType.GEMINI && (
+                     {/* Command Mode — Phase 2: native function calling supported on all three
+                         provider families (Gemini / Anthropic / OpenAI chat & responses). */}
+                     {currentProvider && (
                        <div className="flex items-center gap-2">
                          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16 shrink-0">{t('指令模式')}</span>
                          <select
