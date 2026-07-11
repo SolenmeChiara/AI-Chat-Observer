@@ -1,7 +1,7 @@
 
 import { Message, Agent, EntertainmentConfig } from '../types';
 import { USER_ID } from '../constants';
-import { renderTextProtocols } from './capabilities';
+import { renderTextProtocols, type CommandMode } from './capabilities';
 
 /**
  * Format a timestamp for display in chat history (e.g., "01-15 14:30")
@@ -44,7 +44,8 @@ export function buildMemberList(
 export function buildAttentionInstruction(
   visibleMessages: Message[],
   agent: Agent,
-  allAgents: Agent[]
+  allAgents: Agent[],
+  mode: CommandMode = 'text'
 ): string {
   if (visibleMessages.length === 0) return "";
 
@@ -74,12 +75,17 @@ export function buildAttentionInstruction(
         Unless you have a critical correction or are explicitly invited to join, you should output "{{PASS}}".
         `;
   } else if (allAgents.length === 1) {
-    return `>>> You are the only AI in this chat. You MUST use {{RESPONSE:}} to respond to the user.`;
+    return mode === 'native'
+      ? `>>> You are the only AI in this chat. You MUST reply directly to the user.`
+      : `>>> You are the only AI in this chat. You MUST use {{RESPONSE:}} to respond to the user.`;
   } else {
+    const ambiguousSpeak = mode === 'native'
+      ? '- If the topic is relevant to your persona, reply directly to speak.'
+      : '- If the topic is relevant to your persona, use {{RESPONSE:}} to speak.';
     return `
         >>> [AMBIGUOUS ADDRESSING]
         The user did not mention anyone specific.
-        - If the topic is relevant to your persona, use {{RESPONSE:}} to speak.
+        ${ambiguousSpeak}
         - If another agent is better suited, output {{PASS}}.
         `;
   }
@@ -105,9 +111,10 @@ export function buildProtocols(
   groupAdminIds?: string[],
   hasSearchTool?: boolean,
   entertainmentConfig?: EntertainmentConfig,
-  userName?: string
+  userName?: string,
+  mode: CommandMode = 'text'
 ): ProtocolStrings {
-  return renderTextProtocols({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName });
+  return renderTextProtocols({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName }, mode);
 }
 
 /**
@@ -122,9 +129,25 @@ export function buildSystemPrompt(
   userPersona: string | undefined,
   myLastActionContext: string,
   attentionInstruction: string,
-  protocols: ProtocolStrings
+  protocols: ProtocolStrings,
+  mode: CommandMode = 'text'
 ): string {
   const { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol } = protocols;
+
+  // [OUTPUT FORMAT] differs by track. Native drops the {{RESPONSE:}} wrapper teaching
+  // (the raw reply IS the message); {{PASS}} / {{REPLY}} / {{SILENCE}} stay text markers.
+  const outputFormat = mode === 'native' ? `[OUTPUT FORMAT]
+Write your reply directly — no wrapper. Whatever text you output IS your message.
+- Stay silent: output only {{PASS}}
+- Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
+- Quote old message: start your reply with {{REPLY: message_id}}
+- @mention: use @Name only when directly addressing someone` : `[OUTPUT FORMAT]
+You MUST use one of these formats. Unwrapped text is discarded.
+- Speak: {{RESPONSE: your message}}
+- Stay silent: {{PASS}}
+- Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
+- Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
+- @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone`;
 
   return `
 ${scenario ? `[SCENARIO]\n${scenario}\n` : ''}
@@ -141,13 +164,7 @@ ${memberList}
 ${myLastActionContext}
 ${attentionInstruction}
 
-[OUTPUT FORMAT]
-You MUST use one of these formats. Unwrapped text is discarded.
-- Speak: {{RESPONSE: your message}}
-- Stay silent: {{PASS}}
-- Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
-- Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
-- @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone
+${outputFormat}
 ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${splitProtocol}
   `;
 }

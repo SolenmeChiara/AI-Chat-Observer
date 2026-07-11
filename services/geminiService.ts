@@ -13,6 +13,7 @@ import {
   formatMessageText,
   appendDocumentAttachments
 } from './shared';
+import { renderToolSchemas, type CapabilityCall } from './capabilities';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -100,6 +101,10 @@ export async function* streamGeminiReply(
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
 
+  // Command mode: 'native' opts this agent into native function calling (Phase 1: Gemini).
+  // Defaults to 'text' so all existing agents/data behave exactly as before.
+  const commandMode = agent.commandMode === 'native' ? 'native' : 'text';
+
   // 1-3. Filter messages by visibility rules
   const visibleMessages = filterVisibleMessages(
     messages, agent, visibilityMode, contextLimit,
@@ -116,10 +121,10 @@ export async function* streamGeminiReply(
   const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
 
   // 5. Attention / Addressing Logic
-  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents);
+  const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents, commandMode);
 
   // 6-8. Build Protocols (Admin, Search, Entertainment, PM, Split)
-  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName);
+  const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
   const memoryContext = buildMemoryContext(summary, adminNotes);
@@ -128,7 +133,7 @@ export async function* streamGeminiReply(
   const systemPrompt = buildSystemPrompt(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
-    attentionInstruction, protocols
+    attentionInstruction, protocols, commandMode
   );
 
   const formattedContents: any[] = [];
@@ -207,9 +212,12 @@ export async function* streamGeminiReply(
   }
 
   // Last turn: The "Trigger"
+  const triggerText = commandMode === 'native'
+    ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
+    : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`;
   formattedContents.push({
     role: 'user',
-    parts: [{ text: `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` }]
+    parts: [{ text: triggerText }]
   });
 
   const MAX_RETRIES = 3;
@@ -238,10 +246,24 @@ export async function* streamGeminiReply(
       // Note: Gemini 3 recommends using default temperature (1.0) for thinking mode
       const effectiveTemp = isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature;
       const isImageModel = isGeminiImageModel(modelId);
+      // Assemble tools: googleSearch grounding (if enabled) plus native functionDeclarations
+      // (if this agent is in native command mode). Per the plan we include BOTH when both
+      // apply and do NOT force them mutually exclusive — if a model rejects the combination,
+      // the error propagates through the retry/catch below (that failure IS the evidence we want).
+      const toolList: any[] = [];
+      if (enableGoogleSearch) toolList.push({ googleSearch: {} });
+      if (commandMode === 'native') {
+        const fnDecls = renderToolSchemas(
+          { agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName },
+          'gemini'
+        );
+        if (fnDecls.length > 0) toolList.push({ functionDeclarations: fnDecls });
+      }
+
       const apiConfig: any = {
         systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
         maxOutputTokens: agent.config.maxTokens,
-        tools: enableGoogleSearch ? [{ googleSearch: {} }] : undefined,
+        tools: toolList.length > 0 ? toolList : undefined,
         ...(isImageModel ? { responseModalities: ['TEXT', 'IMAGE'] } : {}),
       };
       if (effectiveTemp !== null) apiConfig.temperature = effectiveTemp;
@@ -331,6 +353,18 @@ export async function* streamGeminiReply(
               if (!part.thought) {
                 yield { image: part.inlineData.data, isComplete: false };
               }
+              continue;
+            }
+
+            // Native function-call part → CapabilityCall (Phase 1). The SDK delivers args as an
+            // already-parsed object. App.tsx bridges this onto the text-track detected* variables.
+            if (part.functionCall) {
+              const fc = part.functionCall;
+              const call: CapabilityCall = {
+                capability: fc.name || '',
+                args: (fc.args && typeof fc.args === 'object') ? fc.args as Record<string, unknown> : {},
+              };
+              yield { toolCalls: [call], isComplete: false };
               continue;
             }
 

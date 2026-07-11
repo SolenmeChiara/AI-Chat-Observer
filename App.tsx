@@ -1490,6 +1490,9 @@ const App: React.FC = () => {
       let accumulatedUsage = { input: 0, output: 0 };
       let capturedSignature: string | undefined;
       let isPass = false;
+      // Native command mode (Phase 1: Gemini): the model outputs its reply verbatim (no
+      // {{RESPONSE:}} wrapper) and invokes tools natively; text-track parsing is bypassed.
+      const isNativeCommandMode = agent.commandMode === 'native';
       let detectedReplyId: string | undefined = undefined;
       let chunkCount = 0;
       let splitCount = 0;
@@ -1505,6 +1508,9 @@ const App: React.FC = () => {
 
       // SEARCH COMMAND STATE
       let detectedSearchQuery: string | null = null;
+      // NATIVE TOOL STATE: whether any native tool call arrived this turn (Phase 1: search).
+      // Used only in native mode to keep a tool-only turn from being misread as a format-error PASS.
+      let receivedNativeToolCall = false;
 
       // PM COMMAND STATE
       let detectedPMTargetId: string | undefined = undefined;
@@ -1514,6 +1520,23 @@ const App: React.FC = () => {
       for await (const chunk of streamGenerator) {
         chunkCount++;
         if (abortController.signal.aborted) throw new Error("Request aborted");
+
+        // NATIVE TRACK → TEXT TRACK BRIDGE: a native tool call (CapabilityCall) is mapped onto
+        // the same detected* variable the text-protocol regex would have filled, so the
+        // unchanged dispatch logic below drives it. Phase 1 wires only `search`; other
+        // capabilities still travel the text track for native agents. Text agents never emit toolCalls.
+        if (chunk.toolCalls && chunk.toolCalls.length > 0) {
+          receivedNativeToolCall = true;
+          for (const call of chunk.toolCalls) {
+            if (call.capability === 'search' && hasSearchTool && !disableSearch && !detectedSearchQuery) {
+              const rawQuery = call.args?.query;
+              const queryStr = typeof rawQuery === 'string'
+                ? rawQuery.trim()
+                : (rawQuery != null ? String(rawQuery).trim() : '');
+              if (queryStr) detectedSearchQuery = queryStr;
+            }
+          }
+        }
 
         if (chunk.reasoning) {
             accumulatedReasoning += chunk.reasoning;
@@ -1653,13 +1676,15 @@ const App: React.FC = () => {
                 displayText = pmMatch[1] || '';
               }
             }
-          } else {
-            // Try to extract content from partial {{RESPONSE: ...
+          } else if (!isNativeCommandMode) {
+            // Text track: extract content from partial {{RESPONSE: ...
             const partialResponseMatch = accumulatedText.match(/\{\{RESPONSE:\s*([\s\S]*?)(\}\})?$/);
             if (partialResponseMatch) {
               displayText = partialResponseMatch[1] || '';
             }
           }
+          // Native track (no PM): displayText stays = accumulatedText; the cleanup below strips
+          // any stray text markers. There is no {{RESPONSE:}} wrapper to unwrap.
 
           // Clean Text (Remove commands and stray wrapper braces)
           let cleanText = displayText
@@ -1812,12 +1837,11 @@ const App: React.FC = () => {
         }
       }
 
-      // 2. Extract RESPONSE content
-      const responseOpenRegex = /\{\{RESPONSE:\s*/;
-      const responseOpenMatch = responseOpenRegex.exec(accumulatedText);
-      if (responseOpenMatch) {
-        extractedContent = extractBraceContent(accumulatedText, responseOpenMatch.index + responseOpenMatch[0].length);
-        // If PM was nested inside RESPONSE, clean it out of the public content
+      // 2. Extract the reply body.
+      if (isNativeCommandMode) {
+        // Native track: no {{RESPONSE:}} wrapper — the model's raw output IS the reply body.
+        extractedContent = accumulatedText;
+        // If a text-protocol PM marker was nested in the body, strip it from the public content.
         if (extractedPMContent && detectedPMTargetId) {
           const pmTarget = detectedPMTargetId === USER_ID
             ? { id: USER_ID, name: pmUserName }
@@ -1826,6 +1850,24 @@ const App: React.FC = () => {
             const escapedName = pmTarget.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const pmCleanRegex = new RegExp(`\\{\\{RES_PM_${escapedName}:[\\s\\S]*?\\}\\}`, 'i');
             extractedContent = extractedContent.replace(pmCleanRegex, '').trim();
+          }
+        }
+      } else {
+        // Text track: extract content from the {{RESPONSE:...}} wrapper.
+        const responseOpenRegex = /\{\{RESPONSE:\s*/;
+        const responseOpenMatch = responseOpenRegex.exec(accumulatedText);
+        if (responseOpenMatch) {
+          extractedContent = extractBraceContent(accumulatedText, responseOpenMatch.index + responseOpenMatch[0].length);
+          // If PM was nested inside RESPONSE, clean it out of the public content
+          if (extractedPMContent && detectedPMTargetId) {
+            const pmTarget = detectedPMTargetId === USER_ID
+              ? { id: USER_ID, name: pmUserName }
+              : currentSessionMembers.find(a => a.id === detectedPMTargetId);
+            if (pmTarget) {
+              const escapedName = pmTarget.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const pmCleanRegex = new RegExp(`\\{\\{RES_PM_${escapedName}:[\\s\\S]*?\\}\\}`, 'i');
+              extractedContent = extractedContent.replace(pmCleanRegex, '').trim();
+            }
           }
         }
       }
@@ -1843,11 +1885,36 @@ const App: React.FC = () => {
       }
       // If both exist: extractedContent = public, extractedPMContent = PM (saved as separate message below)
 
-      // 记录是否是格式错误导致的 PASS（isPass 此时仍为 false，但没有提取到内容）
-      const isFormatError = !extractedContent && !isPass;
-      // If no valid RESPONSE/PM content found, treat as PASS
-      if (!extractedContent || isPass) {
-        isPass = true;
+      // Decide PASS vs speak, and whether an empty result is a format error.
+      let isFormatError: boolean;
+      if (isNativeCommandMode) {
+        // Native: strip the same instruction markers the finalText cleanup removes (below),
+        // then a turn is a format error ONLY when nothing remains AND there is no {{PASS}}
+        // AND no native tool call. A tool-only turn (e.g. search with no prose) must NOT be
+        // forced to PASS, or the search transaction in the speak branch would never run.
+        const nativeCleanedBody = extractedContent
+          .replace(/^\{\{REPLY:\s*(.+?)\}\}/, '')
+          .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
+          .replace(/\{\{UNMUTE:\s*(.+?)\}\}/, '')
+          .replace(/\{\{NOTE:\s*(.+?)\}\}/, '')
+          .replace(/\{\{DELNOTE:\s*(.+?)\}\}/, '')
+          .replace(/\{\{CLEARNOTES\}\}/, '')
+          .replace(/\{\{SEARCH:\s*(.+?)\}\}/, '')
+          .replace(/\{\{ROLL:\s*[^}]+\}\}/gi, '')
+          .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
+          .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
+          .trim();
+        isFormatError = !nativeCleanedBody && !isPass && !receivedNativeToolCall;
+        if (isFormatError) isPass = true;
+        // When a tool call arrived with empty text, isPass stays false → speak branch →
+        // empty bubble + the search transaction runs (the followup effect re-triggers the reply).
+      } else {
+        // 记录是否是格式错误导致的 PASS（isPass 此时仍为 false，但没有提取到内容）
+        isFormatError = !extractedContent && !isPass;
+        // If no valid RESPONSE/PM content found, treat as PASS
+        if (!extractedContent || isPass) {
+          isPass = true;
+        }
       }
 
       if (isPass) {

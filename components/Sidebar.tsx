@@ -1400,6 +1400,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                        </select>
                      </div>
 
+                     {/* Command Mode — Phase 1: native function calling is Gemini-only */}
+                     {currentProvider?.type === AgentType.GEMINI && (
+                       <div className="flex items-center gap-2">
+                         <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16 shrink-0">{t('指令模式')}</span>
+                         <select
+                           className="flex-1 text-xs bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-700 dark:text-gray-200"
+                           value={editData.commandMode || 'text'}
+                           onChange={(e) => updateDraftAgent(agent.id, { commandMode: e.target.value as 'text' | 'native' })}
+                         >
+                           <option value="text">{t('文本协议(默认)')}</option>
+                           <option value="native">{t('原生工具(需模型支持 function calling)')}</option>
+                         </select>
+                       </div>
+                     )}
+
                      {/* Image Generation Settings (only for image models) */}
                      {isImageGenModel(editData.modelId) && (
                        <div className="border-t border-gray-200 dark:border-zinc-700 pt-3 mt-1 space-y-2">

@@ -1,4 +1,6 @@
 
+import { Type } from '@google/genai';
+import type { FunctionDeclaration, Schema } from '@google/genai';
 import { Agent, AgentRole, EntertainmentConfig } from '../types';
 import type { ProtocolStrings } from './shared';
 
@@ -16,6 +18,23 @@ import type { ProtocolStrings } from './shared';
  * pure markers stay on the text track. `set_silence` is taught in the OUTPUT
  * FORMAT block (Phase 1 scope) and is likewise absent here.
  */
+
+/**
+ * Unified intermediate representation of a native-track tool invocation.
+ *
+ * The native track (Phase 1: Gemini `functionCall` parts) decodes each tool call
+ * into this shape and hands it to App.tsx via `StreamChunk.toolCalls`. App.tsx
+ * then maps it onto the same `detected*` variables the text-track regex parser
+ * fills, so both tracks converge on one unchanged dispatch path. Defined here as
+ * the single source of truth; types.ts re-exports it via `import type`.
+ */
+export interface CapabilityCall {
+  capability: string;
+  args: Record<string, unknown>;
+}
+
+/** Command mode for an agent: legacy text protocol, or native function calling. */
+export type CommandMode = 'text' | 'native';
 
 export type CapabilityId =
   | 'search'
@@ -188,38 +207,123 @@ export function isCapabilityAvailable(id: CapabilityId, ctx: CapabilityContext):
 /** The five admin commands share a single availability gate. */
 const ADMIN_CAPABILITY_IDS: CapabilityId[] = ['mute', 'unmute', 'add_note', 'del_note', 'clear_notes'];
 
+// --- native track (Phase 1) -----------------------------------------------
+
 /**
- * Render the legacy text-track protocol strings.
- *
- * Output is byte-for-byte identical to the legacy `buildProtocols`. Each
- * segment's availability is decided by the registry's `availability`
- * predicates (never re-derived here); splitProtocol is not a capability and
- * stays a fixed text segment gated by enableSplit, exactly as before.
- *
- * NOTE ON INDENTATION: the whitespace *inside* the backtick templates below is
- * load-bearing — it is part of the emitted string and is copied verbatim from
- * the original source. Do not "fix" the alignment; the snapshot test enforces
- * byte equality.
+ * Capabilities that are tool-ified on the native track. Phase 1 wires only
+ * `search`; every other capability stays on the text track even for native
+ * agents (see renderTextProtocols native branch), so a native agent never
+ * loses a capability. This is the single list both consumers reference:
+ *   - renderToolSchemas emits exactly this set (∩ availability);
+ *   - renderTextProtocols suppresses exactly this set when mode === 'native'.
+ * Phase 2 extends this array and both sides follow automatically.
  */
-export function renderTextProtocols(ctx: CapabilityContext): ProtocolStrings {
+const NATIVE_TOOL_IDS: CapabilityId[] = ['search'];
+
+/** JSON-Schema primitive type name → Gemini OpenAPI `Type` enum member (UPPERCASE). */
+const JSON_TYPE_TO_GEMINI: Record<string, Type> = {
+  string: Type.STRING,
+  number: Type.NUMBER,
+  integer: Type.INTEGER,
+  boolean: Type.BOOLEAN,
+  array: Type.ARRAY,
+  object: Type.OBJECT,
+};
+
+/**
+ * Convert a generic JSON Schema (CapabilityDef.paramsSchema) into a Gemini
+ * `Schema` (OpenAPI 3.0 subset). Fields Gemini does not support — notably
+ * `additionalProperties` — are dropped by construction: only the recognised
+ * keys are copied, and `type` is mapped from lowercase JSON-Schema names to the
+ * UPPERCASE `Type` enum the SDK's `.d.ts` requires. Nested object properties and
+ * array items are converted recursively.
+ */
+function toGeminiSchema(node: Record<string, any>): Schema {
+  const schema: Schema = {};
+  if (typeof node.type === 'string') {
+    const mapped = JSON_TYPE_TO_GEMINI[node.type.toLowerCase()];
+    if (mapped) schema.type = mapped;
+  }
+  if (typeof node.description === 'string') schema.description = node.description;
+  if (Array.isArray(node.enum)) schema.enum = node.enum;
+  if (node.properties && typeof node.properties === 'object') {
+    const props: Record<string, Schema> = {};
+    for (const [key, value] of Object.entries(node.properties)) {
+      props[key] = toGeminiSchema(value as Record<string, any>);
+    }
+    schema.properties = props;
+  }
+  if (Array.isArray(node.required)) schema.required = node.required;
+  if (node.items && typeof node.items === 'object') schema.items = toGeminiSchema(node.items as Record<string, any>);
+  return schema;
+}
+
+/**
+ * Render the native-track tool schemas for a provider `kind`.
+ *
+ * Phase 1 implements only the Gemini kind. A capability is emitted as a native
+ * tool only when it is BOTH native-tool-ified (NATIVE_TOOL_IDS) AND available in
+ * this context — so the offered tools match exactly what App.tsx dispatches, and
+ * no capability is ever exposed on both the tool track and the text track at once.
+ */
+export function renderToolSchemas(ctx: CapabilityContext, kind: 'gemini'): FunctionDeclaration[] {
+  if (kind !== 'gemini') return [];
+  return CAPABILITIES
+    .filter((cap) => NATIVE_TOOL_IDS.includes(cap.id) && cap.availability(ctx))
+    .map((cap) => ({
+      name: cap.id,
+      description: cap.description,
+      parameters: toGeminiSchema(cap.paramsSchema as Record<string, any>),
+    }));
+}
+
+/**
+ * Render the text-track protocol strings.
+ *
+ * In the default `'text'` mode the output is byte-for-byte identical to the
+ * legacy `buildProtocols`. Each segment's availability is decided by the
+ * registry's `availability` predicates (never re-derived here); splitProtocol is
+ * not a capability and stays a fixed text segment gated by enableSplit, exactly
+ * as before.
+ *
+ * In `'native'` mode: capabilities in NATIVE_TOOL_IDS (Phase 1: search) are NOT
+ * emitted as text — they live in the tool schema instead. The remaining segments
+ * (admin / entertainment / pm / split) are still emitted so a native agent keeps
+ * every capability, but their wording drops the `{{RESPONSE:}}` wrapper phrasing
+ * (there is no wrapper on the native track). The instruction token formats
+ * themselves (e.g. `{{MUTE: ...}}`) are unchanged across modes.
+ *
+ * NOTE ON INDENTATION: the whitespace *inside* the `'text'`-mode backtick
+ * templates below is load-bearing — it is part of the emitted string and is
+ * copied verbatim from the original source. Do not "fix" the alignment; the
+ * snapshot test enforces byte equality for text mode.
+ */
+export function renderTextProtocols(ctx: CapabilityContext, mode: CommandMode = 'text'): ProtocolStrings {
   const { agent, allAgents, entertainmentConfig, userName } = ctx;
   const has = (id: CapabilityId): boolean => isCapabilityAvailable(id, ctx);
+  // A capability that is tool-ified on the native track is NOT taught as text for
+  // native agents (its teaching lives in the tool schema). Text agents: unaffected.
+  const nativeToolified = (id: CapabilityId): boolean => mode === 'native' && NATIVE_TOOL_IDS.includes(id);
 
   // --- ADMIN ---
   let adminProtocol = "";
   if (ADMIN_CAPABILITY_IDS.some((id) => has(id))) {
+    // Only the "where to put it" phrasing differs by mode; the command tokens are identical.
+    const adminWhere = mode === 'native'
+      ? 'You are a group admin. Available commands (place directly in your reply):'
+      : 'You are a group admin. Available commands (inside {{RESPONSE:}}):';
     adminProtocol = `
       [ADMIN COMMANDS]
-      You are a group admin. Available commands (inside {{RESPONSE:}}):
+      ${adminWhere}
       {{MUTE: Name, Duration}} (10min/30min/1h/1d) | {{UNMUTE: Name}}
       {{NOTE: content}} | {{DELNOTE: keyword}} | {{CLEARNOTES}}
       Never mute the User or other admins.
       `;
   }
 
-  // --- SEARCH TOOL ---
+  // --- SEARCH TOOL --- (native track: tool-ified via NATIVE_TOOL_IDS, so suppressed here)
   let searchToolProtocol = "";
-  if (has('search')) {
+  if (has('search') && !nativeToolified('search')) {
     searchToolProtocol = `
       [SEARCH TOOL]
       Use {{SEARCH: query}} inside {{RESPONSE:}} to search the web. One search per message.
@@ -256,7 +360,15 @@ export function renderTextProtocols(ctx: CapabilityContext): ProtocolStrings {
       Use cases: Divination, plot progression, character fate decisions`);
     }
 
-    entertainmentProtocol = `
+    entertainmentProtocol = mode === 'native' ? `
+    [ENTERTAINMENT TOOLS]
+    This chat has the following entertainment features enabled. Use directly in your reply:
+    ${tools.join('\n')}
+
+    Usage examples:
+    Let me roll the dice {{ROLL: d20}}
+    Drawing a tarot card for you {{TAROT: 1}}
+    ` : `
     [ENTERTAINMENT TOOLS]
     This chat has the following entertainment features enabled. Use inside {{RESPONSE:}}:
     ${tools.join('\n')}
@@ -272,7 +384,13 @@ export function renderTextProtocols(ctx: CapabilityContext): ProtocolStrings {
   if (has('send_pm')) {
     const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
     const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
-    pmProtocol = `
+    pmProtocol = mode === 'native' ? `
+    [PRIVATE MESSAGE]
+    Send a PM visible only to one member: {{RES_PM_Name: message}}
+    Can combine with a public message: write your public text directly, then append {{RES_PM_Name: private text}}
+    Available targets: ${pmTargetNames}
+    One PM target per turn. The {{RES_PM_Name: ...}} marker goes directly in your reply.
+    ` : `
     [PRIVATE MESSAGE]
     Send a PM visible only to one member: {{RES_PM_Name: message}}
     Can combine with public message: {{RESPONSE: public text}}{{RES_PM_Name: private text}}
@@ -282,7 +400,15 @@ export function renderTextProtocols(ctx: CapabilityContext): ProtocolStrings {
   }
 
   // --- SPLIT --- (not a registry capability: pure display marker, plan 2.3)
-  const splitProtocol = entertainmentConfig?.enableSplit ? `
+  let splitProtocol = "";
+  if (entertainmentConfig?.enableSplit) {
+    splitProtocol = mode === 'native' ? `
+- Message split: use [SPLIT] in your reply to send multiple separate chat bubbles, like a real person typing message by message.
+  Put every [SPLIT] marker in your single reply; each segment between markers becomes its own bubble.
+  Example:
+    Hey everyone[SPLIT]Just wanted to say hi[SPLIT]What are we talking about?
+  NOTE: If another member's message looks cut off or incomplete, they may have split their output. Do not ask them to repeat — just continue the conversation naturally.
+` : `
 - Message split: use [SPLIT] inside your {{RESPONSE:}} to send multiple separate chat bubbles, like a real person typing message by message.
   WARNING: You MUST put ALL [SPLIT] markers inside a SINGLE {{RESPONSE:}} block. Using multiple {{RESPONSE:}} blocks will cause all messages after the first to be SILENTLY DISCARDED and lost.
   CORRECT example:
@@ -291,7 +417,8 @@ export function renderTextProtocols(ctx: CapabilityContext): ProtocolStrings {
     {{RESPONSE: Hey}}{{RESPONSE: Hi}}
     {{RESPONSE: Hey}}[SPLIT]{{RESPONSE: Hi}}
   NOTE: If another member's message looks cut off or incomplete, they likely used multiple {{RESPONSE:}} blocks by mistake and lost part of their output. Do not ask them to repeat — just continue the conversation naturally.
-` : '';
+`;
+  }
 
   return { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol };
 }

@@ -1,4 +1,6 @@
 
+import type { CapabilityCall } from './services/capabilities';
+
 export enum AgentType {
   GEMINI = 'GEMINI',
   OPENAI_COMPATIBLE = 'OPENAI_COMPATIBLE',
@@ -89,6 +91,7 @@ export interface Agent {
   voiceProviderId?: string; // TTS provider ID for this agent
   enablePM?: boolean;    // 启用私讯功能 (需群组总开关也开启)
   mentionOnly?: boolean; // Only respond when @mentioned, stay silent otherwise
+  commandMode?: 'text' | 'native'; // 'text' (default) = text protocol; 'native' = native function calling (Phase 1: Gemini only)
 }
 
 export interface Attachment {
@@ -242,6 +245,7 @@ export interface StreamChunk {
   image?: string; // Base64 image data from image generation
   revisedPrompt?: string; // Revised prompt from image generation model
   usage?: { input: number; output: number };
+  toolCalls?: CapabilityCall[]; // Native-track tool invocations (Phase 1: Gemini functionCall parts → CapabilityCall)
   isComplete: boolean;
 }
 
