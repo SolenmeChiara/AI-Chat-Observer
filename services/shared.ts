@@ -1,6 +1,7 @@
 
-import { Message, Agent, AgentRole, EntertainmentConfig } from '../types';
+import { Message, Agent, EntertainmentConfig } from '../types';
 import { USER_ID } from '../constants';
+import { renderTextProtocols } from './capabilities';
 
 /**
  * Format a timestamp for display in chat history (e.g., "01-15 14:30")
@@ -106,96 +107,7 @@ export function buildProtocols(
   entertainmentConfig?: EntertainmentConfig,
   userName?: string
 ): ProtocolStrings {
-  // --- ADMIN ---
-  let adminProtocol = "";
-  const isGroupAdmin = agent.role === AgentRole.ADMIN || groupAdminIds?.includes(agent.id);
-  if (isGroupAdmin) {
-    adminProtocol = `
-      [ADMIN COMMANDS]
-      You are a group admin. Available commands (inside {{RESPONSE:}}):
-      {{MUTE: Name, Duration}} (10min/30min/1h/1d) | {{UNMUTE: Name}}
-      {{NOTE: content}} | {{DELNOTE: keyword}} | {{CLEARNOTES}}
-      Never mute the User or other admins.
-      `;
-  }
-
-  // --- SEARCH TOOL ---
-  let searchToolProtocol = "";
-  if (hasSearchTool) {
-    searchToolProtocol = `
-      [SEARCH TOOL]
-      Use {{SEARCH: query}} inside {{RESPONSE:}} to search the web. One search per message.
-      Example: {{RESPONSE: {{SEARCH: latest AI news}} Let me look that up}}
-    `;
-  }
-
-  // --- ENTERTAINMENT TOOLS (Dice, Tarot) ---
-  let entertainmentProtocol = "";
-  if (entertainmentConfig?.enableDice || entertainmentConfig?.enableTarot) {
-    const tools: string[] = [];
-
-    if (entertainmentConfig.enableDice) {
-      tools.push(`
-      **Dice Roll**
-      Use {{ROLL: expression}} to roll dice. The system will display results automatically.
-      Format: XdY+Z (X dice with Y sides, plus/minus Z modifier)
-      Examples:
-      - {{ROLL: d20}} - Roll a 20-sided die
-      - {{ROLL: 2d6+3}} - Roll two 6-sided dice, add 3 to result
-      - {{ROLL: d100}} - Roll a percentile die
-
-      Use cases: TRPG sessions, skill checks, random decisions`);
-    }
-
-    if (entertainmentConfig.enableTarot) {
-      tools.push(`
-      **Tarot Cards**
-      Use {{TAROT: N}} to draw N tarot cards. System shows upright/reversed positions.
-      Examples:
-      - {{TAROT: 1}} - Draw one card
-      - {{TAROT: 3}} - Draw three cards (Past/Present/Future spread)
-
-      Use cases: Divination, plot progression, character fate decisions`);
-    }
-
-    entertainmentProtocol = `
-    [ENTERTAINMENT TOOLS]
-    This chat has the following entertainment features enabled. Use inside {{RESPONSE:}}:
-    ${tools.join('\n')}
-
-    Usage examples:
-    {{RESPONSE: Let me roll the dice {{ROLL: d20}}}}
-    {{RESPONSE: Drawing a tarot card for you {{TAROT: 1}}}}
-    `;
-  }
-
-  // --- PM (Private Message) ---
-  let pmProtocol = "";
-  if (entertainmentConfig?.enablePM && agent.enablePM) {
-    const otherAgentNames = allAgents.filter(a => a.id !== agent.id).map(a => a.name);
-    const pmTargetNames = [...otherAgentNames, userName || 'User'].join(', ');
-    pmProtocol = `
-    [PRIVATE MESSAGE]
-    Send a PM visible only to one member: {{RES_PM_Name: message}}
-    Can combine with public message: {{RESPONSE: public text}}{{RES_PM_Name: private text}}
-    Available targets: ${pmTargetNames}
-    One PM target per turn. Do NOT wrap PM inside {{RESPONSE:}}.
-    `;
-  }
-
-  // --- SPLIT ---
-  const splitProtocol = entertainmentConfig?.enableSplit ? `
-- Message split: use [SPLIT] inside your {{RESPONSE:}} to send multiple separate chat bubbles, like a real person typing message by message.
-  WARNING: You MUST put ALL [SPLIT] markers inside a SINGLE {{RESPONSE:}} block. Using multiple {{RESPONSE:}} blocks will cause all messages after the first to be SILENTLY DISCARDED and lost.
-  CORRECT example:
-    {{RESPONSE: Hey everyone[SPLIT]Just wanted to say hi[SPLIT]What are we talking about?}}
-  WRONG (messages WILL BE LOST):
-    {{RESPONSE: Hey}}{{RESPONSE: Hi}}
-    {{RESPONSE: Hey}}[SPLIT]{{RESPONSE: Hi}}
-  NOTE: If another member's message looks cut off or incomplete, they likely used multiple {{RESPONSE:}} blocks by mistake and lost part of their output. Do not ask them to repeat — just continue the conversation naturally.
-` : '';
-
-  return { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol };
+  return renderTextProtocols({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName });
 }
 
 /**
