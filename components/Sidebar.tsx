@@ -1406,7 +1406,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                        <div className="flex items-center gap-2">
                          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16 shrink-0">{t('指令模式')}</span>
                          <select
-                           className="flex-1 text-xs bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-700 dark:text-gray-200"
+                           className="flex-1 min-w-0 text-xs bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-700 dark:text-gray-200"
                            value={editData.commandMode || 'text'}
                            onChange={(e) => updateDraftAgent(agent.id, { commandMode: e.target.value as 'text' | 'native' })}
                          >
