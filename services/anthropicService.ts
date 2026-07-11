@@ -207,6 +207,22 @@ export async function* streamAnthropicReply(
     }
   }
 
+  // Second cache breakpoint: tail of the real chat history, placed BEFORE the
+  // [END OF LOG] reminder below. That reminder rides on whatever message is last
+  // and therefore moves every turn — a breakpoint on it could never be reused.
+  // Anchored here, each turn's prefix extends the previous one (quantized window,
+  // see filterVisibleMessages), so Anthropic re-reads prior history at 0.1x and
+  // only writes the delta. Skipped for thinking blocks (not valid breakpoint targets).
+  if (formattedMessages.length > 0) {
+    const tailMsg = formattedMessages[formattedMessages.length - 1];
+    if (Array.isArray(tailMsg.content) && tailMsg.content.length > 0) {
+      const tailBlock = tailMsg.content[tailMsg.content.length - 1];
+      if (tailBlock.type === 'text' || tailBlock.type === 'image') {
+        tailBlock.cache_control = { type: 'ephemeral' };
+      }
+    }
+  }
+
   // Add end-of-log format reminder as the last thing the model sees
   const endOfLogText = commandMode === 'native'
     ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
@@ -268,14 +284,6 @@ export async function* streamAnthropicReply(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
         if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
-        // Add cache breakpoint to the second-to-last message content block
-        if (formattedMessages.length >= 2) {
-          const target = formattedMessages[formattedMessages.length - 2];
-          if (Array.isArray(target.content) && target.content.length > 0) {
-            const lastBlock = target.content[target.content.length - 1];
-            if (!lastBlock.cache_control) lastBlock.cache_control = { type: 'ephemeral' };
-          }
-        }
 
         const body: any = {
             model: modelId,

@@ -243,8 +243,18 @@ export function filterVisibleMessages(
   // 1. Exclude streaming placeholders
   let effectiveMessages = messages.filter(m => !m.isStreaming);
 
-  // 2. Context limit slicing
-  if (contextLimit > 0) effectiveMessages = effectiveMessages.slice(-contextLimit);
+  // 2. Context limit slicing — quantized anchor instead of a per-message sliding
+  // window. A plain slice(-limit) moves the window head on EVERY new message,
+  // which breaks prompt-cache prefix matching (each turn re-reads the whole
+  // history at full price). Here the cut point only advances every STRIDE
+  // messages; between jumps the window head is byte-stable so providers can
+  // serve the shared prefix from cache. Window size floats in [limit, limit+STRIDE).
+  if (contextLimit > 0 && effectiveMessages.length > contextLimit) {
+    const STRIDE = Math.min(10, Math.max(2, Math.floor(contextLimit / 2)));
+    const overflow = effectiveMessages.length - contextLimit;
+    const anchor = Math.floor(overflow / STRIDE) * STRIDE;
+    effectiveMessages = effectiveMessages.slice(anchor);
+  }
 
   // 3. Join-time filtering
   let joinFilteredMessages = effectiveMessages;
