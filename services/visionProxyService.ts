@@ -1,11 +1,11 @@
 
 import { ApiProvider, AgentType } from '../types';
 
-const VISION_PROMPT = `请详细描述这张图片的内容，包括：
-1. 图片的主要元素和场景
-2. 文字内容（如果有）
-3. 重要的细节和特征
-用简洁清晰的语言描述，便于没有看到图片的人理解。`;
+const VISION_PROMPT = `Describe this image in detail, covering:
+1. The main elements and the scene
+2. Any visible text (transcribe it in its original language)
+3. Important details and distinctive features
+Write a clear, concise description so that someone who cannot see the image can understand it.`;
 
 /**
  * Use a vision-capable model to describe an image
@@ -42,7 +42,7 @@ export async function describeImage(
   } catch (error: any) {
     console.error('[VLM] ❌ Vision proxy error:', error);
     console.error('[VLM] ❌ Error details:', error.message, error.stack);
-    return `[图片描述失败: ${error.message || '未知错误'}]`;
+    return `[Image description failed: ${error.message || 'unknown error'}]`;
   }
 }
 
@@ -110,7 +110,7 @@ async function describeWithOpenAI(
 
   const data = await response.json();
   console.log(`[VLM/OpenAI] ✅ Success, content length: ${data.choices?.[0]?.message?.content?.length || 0}`);
-  return data.choices?.[0]?.message?.content || '[无法获取描述]';
+  return data.choices?.[0]?.message?.content || '[No description available]';
 }
 
 async function describeWithAnthropic(
@@ -156,7 +156,7 @@ async function describeWithAnthropic(
   }
 
   const data = await response.json();
-  return data.content?.[0]?.text || '[无法获取描述]';
+  return data.content?.[0]?.text || '[No description available]';
 }
 
 async function describeWithGemini(
@@ -184,5 +184,5 @@ async function describeWithGemini(
     }]
   });
 
-  return response.text || '[无法获取描述]';
+  return response.text || '[No description available]';
 }

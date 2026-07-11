@@ -1285,8 +1285,8 @@ const App: React.FC = () => {
               } catch (err) {
                 console.error(`[VisionProxy] Failed to describe image ${msgId}-${idx}:`, err);
                 const key = `${msgId}-${idx}`;
-                imageDescriptions.set(key, `[${t('图片描述失败')}]`);
-                newDescriptions.set(key, `[${t('图片描述失败')}]`);
+                imageDescriptions.set(key, '[Image description failed]');
+                newDescriptions.set(key, '[Image description failed]');
               }
             }
 
@@ -1323,7 +1323,7 @@ const App: React.FC = () => {
                   return {
                     ...att,
                     type: 'document' as const,
-                    textContent: `[${t('图片')}${idx + 1}${t('内容描述')}]\n${imageDescriptions.get(key)}\n[${t('描述结束')}]`
+                    textContent: `[Image ${idx + 1} description]\n${imageDescriptions.get(key)}\n[End of description]`
                   };
                 }
                 return att;

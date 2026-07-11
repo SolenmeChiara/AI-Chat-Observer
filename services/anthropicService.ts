@@ -104,9 +104,9 @@ export async function* streamAnthropicReply(
     // Convert to user-role recall note instead of assistant, to avoid breaking thinking mode
     if (isSelf && shouldEnableThinking && !hasThinking) {
       const pmNote = m.pmTargetId
-        ? ` (私讯→${m.pmTargetId === USER_ID ? (userName || 'User') : (allAgents.find(a => a.id === m.pmTargetId)?.name || '未知')})`
+        ? ` (PM → ${m.pmTargetId === USER_ID ? (userName || 'User') : (allAgents.find(a => a.id === m.pmTargetId)?.name || 'unknown')})`
         : '';
-      const recallText = `[你之前说过${pmNote}: ${m.text}]`;
+      const recallText = `[You said earlier${pmNote}: ${m.text}]`;
       const recallBlock = [{ type: "text", text: recallText }];
       if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
         (formattedMessages[formattedMessages.length - 1].content as any[]).push(...recallBlock);

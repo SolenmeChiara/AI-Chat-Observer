@@ -164,37 +164,40 @@ export async function performSearch(
 }
 
 // 格式化搜索结果为文本 (供 AI 上下文使用)
+// 注意：骨架必须保持英文——这段文本会进入所有 agent 的上下文，
+// 中文标签会把非中文对话的语言带偏（agent 第一条消息莫名说中文的元凶之一）。
 export function formatSearchResultsForContext(response: SearchResponse): string {
   if (response.error) {
-    return `[搜索错误] ${response.error}`;
+    return `[Search error] ${response.error}`;
   }
 
   if (response.results.length === 0) {
-    return `[搜索结果] 未找到与"${response.query}"相关的内容`;
+    return `[Search results] Nothing found for "${response.query}"`;
   }
 
-  let text = `[搜索结果] 关键词: "${response.query}"\n\n`;
+  let text = `[Search results] Query: "${response.query}"\n\n`;
 
   response.results.forEach((result, index) => {
     text += `${index + 1}. ${result.title}\n`;
-    text += `   链接: ${result.url}\n`;
-    text += `   摘要: ${result.snippet}\n\n`;
+    text += `   URL: ${result.url}\n`;
+    text += `   Summary: ${result.snippet}\n\n`;
   });
 
   return text.trim();
 }
 
-// 格式化搜索结果为 Markdown (供 UI 显示)
+// 格式化搜索结果为 Markdown。落库消息 text 用的是这个版本，
+// 同一份文本既渲染进 UI 气泡、也进所有 agent 的上下文——骨架同样必须英文。
 export function formatSearchResultsForDisplay(response: SearchResponse): string {
   if (response.error) {
-    return `**搜索错误:** ${response.error}`;
+    return `**Search error:** ${response.error}`;
   }
 
   if (response.results.length === 0) {
-    return `未找到与 "${response.query}" 相关的结果`;
+    return `No results found for "${response.query}"`;
   }
 
-  let markdown = `**搜索结果:** "${response.query}"\n\n`;
+  let markdown = `**Search results:** "${response.query}"\n\n`;
 
   response.results.forEach((result, index) => {
     markdown += `${index + 1}. **[${result.title}](${result.url})**\n`;
