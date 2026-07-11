@@ -12,7 +12,7 @@ import {
   formatMessageText,
   appendDocumentAttachments
 } from './shared';
-import { renderToolSchemas, type CapabilityCall } from './capabilities';
+import { renderToolSchemas, getCommandMode, type CapabilityCall } from './capabilities';
 
 // Detect actual image format from base64 data (magic bytes)
 function detectImageFormat(base64Data: string): string {
@@ -54,9 +54,9 @@ export async function* streamAnthropicReply(
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
 
-  // Command mode: 'native' opts this agent into native function calling (Phase 2: Anthropic).
-  // Defaults to 'text' so all existing agents/data behave exactly as before.
-  const commandMode = agent.commandMode === 'native' ? 'native' : 'text';
+  // Command mode: native function calling by default; explicit 'text' opts into
+  // the legacy text protocol (older models / tool-stripping proxies).
+  const commandMode = getCommandMode(agent);
 
   // 1-3. Filter messages by visibility rules
   const visibleMessages = filterVisibleMessages(

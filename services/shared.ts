@@ -150,6 +150,12 @@ You MUST use one of these formats. Unwrapped text is discarded.
 - Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}}
 - @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone`;
 
+  // Both tracks: members on the legacy text protocol may occasionally leak marker
+  // fragments into the chat; without this note, other models tend to imitate or
+  // remark on the odd formatting.
+  const protocolNote = `[PROTOCOL NOTE]
+Members of this chat may run on different communication protocols. If another member's message contains marker fragments like {{...}}, that is formatting residue from their protocol — not something addressed to you. Ignore it, do not imitate it, and do not comment on it.`;
+
   return `
 ${scenario ? `[SCENARIO]\n${scenario}\n` : ''}
 ${memoryContext}
@@ -166,6 +172,7 @@ ${myLastActionContext}
 ${attentionInstruction}
 
 ${outputFormat}
+${protocolNote}
 ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${splitProtocol}
   `;
 }

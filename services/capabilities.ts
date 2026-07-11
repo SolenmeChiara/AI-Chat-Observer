@@ -39,6 +39,16 @@ export interface CapabilityCall {
 /** Command mode for an agent: legacy text protocol, or native function calling. */
 export type CommandMode = 'text' | 'native';
 
+/**
+ * Resolve an agent's effective command mode. Native is the DEFAULT (Sol,
+ * 2026-07-10: few models lack function calling now) — an unset commandMode
+ * means native; only an explicit 'text' opts into the legacy protocol
+ * (for older models / tool-stripping proxies).
+ */
+export function getCommandMode(agent: Pick<Agent, 'commandMode'>): CommandMode {
+  return agent.commandMode === 'text' ? 'text' : 'native';
+}
+
 export type CapabilityId =
   | 'search'
   | 'mute'

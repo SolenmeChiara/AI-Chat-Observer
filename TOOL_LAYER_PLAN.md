@@ -85,7 +85,7 @@ availability 与现有条件一一对应:admin 三件套仅 `role===ADMIN`;searc
 
 ### 2.4 配置与 UI
 
-`Agent` 增加字段 `commandMode?: 'text' | 'native'`(types.ts:75-92),缺省 `'text'`——所有存量 agent 与不支持 tools 的模型零感知。Agent 编辑面板加一个下拉(文本协议 / 原生工具),旁注一句「原生工具需模型支持 function calling」。混合群(一半 text 一半 native)是一等公民场景,必须测试。
+`Agent` 增加字段 `commandMode?: 'text' | 'native'`(types.ts:75-92)。**缺省语义于 2026-07-10 由 Sol 拍板翻转为 `'native'`**(实测通过后:「现在没几个模型不支持 function calling」)——未显式设置的 agent 一律走原生轨,显式选 `'text'` 才走文本协议(旧模型/剥 tools 的中转站用)。归一化统一走 `getCommandMode()`(capabilities.ts),禁止各处自行判断。混合群(一半 text 一半 native)是一等公民场景,必须测试。
 
 ### 2.5 system prompt 的分轨
 
@@ -114,7 +114,7 @@ availability 与现有条件一一对应:admin 三件套仅 `role===ADMIN`;searc
 - 请求:`tools: [{ type:'function', function:{ name, description, parameters } }]`;
 - 响应:`delta.tool_calls[]` 增量流(index / id / function.name / arguments 字符串逐段拼接),在 290-384 的解析里加状态机;`finish_reason: 'tool_calls'`;
 - **坏 JSON 容错**:arguments 拼完 `JSON.parse` 失败时按「无工具调用」处理并 console.warn,绝不让一个坏调用炸掉整条回复;
-- 中转站/本地端点(Ollama、LM Studio)对 tools 支持参差——这正是 commandMode 默认 text 的原因,native 永远是 opt-in。
+- 中转站/本地端点(Ollama、LM Studio)对 tools 支持参差——commandMode 现已默认 native(2026-07-10 翻转),这类端点需手动切回 text;识别静默不支持的方法:让 agent 搜索,只说话不出搜索气泡即端点剥了 tools。
 
 ### OpenAI Responses(裸 fetch,已有 image_generation 先例)
 - 请求:function 工具与现有 `image_generation`(openaiService.ts:511-513)同数组并存,格式为顶层展开 `{ type:'function', name, description, parameters }`;
@@ -159,7 +159,7 @@ tool call 生成期间没有 text delta,占位气泡会像卡死。检测到 too
 | 风险/决策 | 处理 |
 |---|---|
 | Gemini grounding 截胡 search 工具(grounding 是服务端私人搜索,结果不落群聊) | 测试时关 grounding;工具 description 强调「结果全群共享」;API 报错才考虑 UI 互斥 |
-| 中转站剥 tools / 小模型乱调工具 | commandMode 默认 text,native 全程 opt-in |
+| 中转站剥 tools / 小模型乱调工具 | 默认已翻转为 native(2026-07-10);问题端点手动切回 text,静默剥 tools 用「搜索不出气泡」识别 |
 | 模型输出坏 JSON args | try/catch 按无调用处理,console.warn,不炸回复 |
 | tools 破坏 Anthropic prompt cache 前缀 | 能力清单稳定排序,接受开关变动的 cache miss |
 | attention/触发消息里的协议字样漏改 | 2.5 节四处清单,施工 checklist 逐条勾 |

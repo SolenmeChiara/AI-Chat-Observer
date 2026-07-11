@@ -19,7 +19,7 @@ import { I18nProvider, useT, t } from './i18n';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
-import { isCapabilityAvailable, type CapabilityContext } from './services/capabilities';
+import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -1491,9 +1491,10 @@ const App: React.FC = () => {
       let accumulatedUsage = { input: 0, output: 0 };
       let capturedSignature: string | undefined;
       let isPass = false;
-      // Native command mode (Phase 1: Gemini): the model outputs its reply verbatim (no
+      // Native command mode (the default): the model outputs its reply verbatim (no
       // {{RESPONSE:}} wrapper) and invokes tools natively; text-track parsing is bypassed.
-      const isNativeCommandMode = agent.commandMode === 'native';
+      // Explicit commandMode 'text' opts into the legacy protocol.
+      const isNativeCommandMode = getCommandMode(agent) === 'native';
       let detectedReplyId: string | undefined = undefined;
       let chunkCount = 0;
       let splitCount = 0;

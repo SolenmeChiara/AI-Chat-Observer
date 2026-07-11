@@ -1407,11 +1407,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                          <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16 shrink-0">{t('指令模式')}</span>
                          <select
                            className="flex-1 min-w-0 text-xs bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-700 dark:text-gray-200"
-                           value={editData.commandMode || 'text'}
+                           value={editData.commandMode || 'native'}
                            onChange={(e) => updateDraftAgent(agent.id, { commandMode: e.target.value as 'text' | 'native' })}
                          >
-                           <option value="text">{t('文本协议(默认)')}</option>
-                           <option value="native">{t('原生工具(需模型支持 function calling)')}</option>
+                           <option value="native">{t('原生工具(默认)')}</option>
+                           <option value="text">{t('文本协议(旧模型/中转站兼容)')}</option>
                          </select>
                        </div>
                      )}
