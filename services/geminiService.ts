@@ -247,23 +247,38 @@ export async function* streamGeminiReply(
       const effectiveTemp = isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature;
       const isImageModel = isGeminiImageModel(modelId);
       // Assemble tools: googleSearch grounding (if enabled) plus native functionDeclarations
-      // (if this agent is in native command mode). Per the plan we include BOTH when both
-      // apply and do NOT force them mutually exclusive — if a model rejects the combination,
-      // the error propagates through the retry/catch below (that failure IS the evidence we want).
+      // (if this agent is in native command mode).
+      //
+      // Combining built-in tools with function calling requires
+      // toolConfig.includeServerSideToolInvocations (otherwise the API 400s with
+      // "Please enable tool_config.include_server_side_tool_invocations..."), and per
+      // https://ai.google.dev/gemini-api/docs/tool-combination the combination is
+      // Gemini 3 only (Preview) and the flag is not supported on Vertex AI.
+      // So: G3 + AI Studio → both tools + flag; anywhere else with both enabled →
+      // keep functionDeclarations (the agent's whole capability set rides on them)
+      // and drop grounding for this request, with a console.warn.
+      const nativeFnDecls = commandMode === 'native'
+        ? renderToolSchemas(
+            { agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName },
+            'gemini'
+          )
+        : [];
+      const wantsBoth = enableGoogleSearch && nativeFnDecls.length > 0;
+      const canCombine = isGemini3 && geminiConfig.geminiMode !== 'vertex';
+      let includeServerSideToolInvocations = false;
       const toolList: any[] = [];
-      if (enableGoogleSearch) toolList.push({ googleSearch: {} });
-      if (commandMode === 'native') {
-        const fnDecls = renderToolSchemas(
-          { agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName },
-          'gemini'
-        );
-        if (fnDecls.length > 0) toolList.push({ functionDeclarations: fnDecls });
+      if (enableGoogleSearch && (!wantsBoth || canCombine)) toolList.push({ googleSearch: {} });
+      if (nativeFnDecls.length > 0) toolList.push({ functionDeclarations: nativeFnDecls });
+      if (wantsBoth && canCombine) includeServerSideToolInvocations = true;
+      if (wantsBoth && !canCombine) {
+        console.warn(`[${agent.name}] ⚠️ googleSearch grounding + function calling requires Gemini 3 on AI Studio; dropping grounding for this request (model: ${modelId}, mode: ${geminiConfig.geminiMode || 'aistudio'})`);
       }
 
       const apiConfig: any = {
         systemInstruction: supportsSystemInstruction ? systemPrompt : undefined,
         maxOutputTokens: agent.config.maxTokens,
         tools: toolList.length > 0 ? toolList : undefined,
+        ...(includeServerSideToolInvocations ? { toolConfig: { includeServerSideToolInvocations: true } } : {}),
         ...(isImageModel ? { responseModalities: ['TEXT', 'IMAGE'] } : {}),
       };
       if (effectiveTemp !== null) apiConfig.temperature = effectiveTemp;

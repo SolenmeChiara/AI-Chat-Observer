@@ -1645,6 +1645,12 @@ const App: React.FC = () => {
               else if (typeof rawCount === 'string' && rawCount.trim() && Number.isFinite(Number(rawCount))) count = Math.floor(Number(rawCount));
               nativeTarotCounts.push(count);
             }
+            // Unknown capability name: no-op by design. Server-side tool invocations surfaced
+            // by includeServerSideToolInvocations (Gemini grounding etc.) may arrive here with
+            // their internal names — log them so live tests reveal the real shapes.
+            else {
+              console.warn(`[${agent.name}] ℹ️ Unrecognized native tool call ignored: '${cap}'`, args);
+            }
           }
         }
 

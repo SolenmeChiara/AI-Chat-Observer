@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
+    "@google/genai": "^2.11.0",
     "dexie": "^3.2.4",
     "dompurify": "^3.4.11",
     "lucide-react": "^0.344.0",
