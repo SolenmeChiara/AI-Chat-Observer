@@ -85,7 +85,7 @@ const isGroupAdmin = (ctx: CapabilityContext): boolean =>
 export const CAPABILITIES: CapabilityDef[] = [
   {
     id: 'search',
-    description: 'Search the web for up-to-date information. One search per message.',
+    description: 'Search the web for up-to-date information. Results are posted into the group chat for all members to see and discuss. One search per message.',
     paramsSchema: {
       type: 'object',
       properties: { query: { type: 'string', description: 'The search query.' } },

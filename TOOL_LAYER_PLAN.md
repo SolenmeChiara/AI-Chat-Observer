@@ -102,7 +102,8 @@ availability 与现有条件一一对应:admin 三件套仅 `role===ADMIN`;searc
 ### Gemini(最省事,SDK 代劳,建议 pilot)
 - 请求:`config.tools = [{ functionDeclarations: [...] }]`(现有 geminiService.ts:244 处扩展);
 - 响应:`part.functionCall = { name, args }`,args 已是对象,无需手拼 JSON;chunk 循环(325-367)加一个 part 分支;
-- **风险**:`googleSearch` grounding 与 `functionDeclarations` 混用在部分模型上不支持,施工时实测;冲突则在 UI 上令 `enableGoogleSearch` 与 native commandMode 互斥。
+- **grounding 与 search 工具是两种功能,不只是技术共存问题**(Sol 澄清,2026-07-10):`googleSearch` grounding 是 Gemini 服务端内部完成的私人搜索——搜索过程与结果都不回传前端、不落群聊,只有该 agent 自己「知道」,且拿不出来;我们的 search 工具是公开搜索,结果作为消息落地、全群共享、驱动搜索事务。两者共存语义合理(私下查证 vs 公开查资料),但有**截胡风险**:两个都开时,模型很可能用 grounding 私下搜完就作答,根本不调 search 工具,且不报任何错。
+- 由此:测试 native search 工具时必须**关闭该 agent 的 enableGoogleSearch**,否则测不到;若实测发现 API 层面拒绝混用(报错),再考虑 UI 互斥。长期可在 search 工具的 description 里强调「结果会分享给全群」,给模型一个选它而非内部搜索的理由。
 
 ### Anthropic(裸 fetch,手写 SSE)
 - 请求:body 加 `tools: [{ name, description, input_schema }]`(anthropicService.ts:265-271);
@@ -157,7 +158,7 @@ tool call 生成期间没有 text delta,占位气泡会像卡死。检测到 too
 
 | 风险/决策 | 处理 |
 |---|---|
-| Gemini grounding 与 functionDeclarations 冲突 | Phase 1 实测;冲突则 UI 互斥 |
+| Gemini grounding 截胡 search 工具(grounding 是服务端私人搜索,结果不落群聊) | 测试时关 grounding;工具 description 强调「结果全群共享」;API 报错才考虑 UI 互斥 |
 | 中转站剥 tools / 小模型乱调工具 | commandMode 默认 text,native 全程 opt-in |
 | 模型输出坏 JSON args | try/catch 按无调用处理,console.warn,不炸回复 |
 | tools 破坏 Anthropic prompt cache 前缀 | 能力清单稳定排序,接受开关变动的 cache miss |
