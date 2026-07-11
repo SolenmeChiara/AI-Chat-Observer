@@ -104,6 +104,8 @@ availability 与现有条件一一对应:admin 三件套仅 `role===ADMIN`;searc
 - 响应:`part.functionCall = { name, args }`,args 已是对象,无需手拼 JSON;chunk 循环(325-367)加一个 part 分支;
 - **grounding 与 search 工具是两种功能,不只是技术共存问题**(Sol 澄清,2026-07-10):`googleSearch` grounding 是 Gemini 服务端内部完成的私人搜索——搜索过程与结果都不回传前端、不落群聊,只有该 agent 自己「知道」,且拿不出来;我们的 search 工具是公开搜索,结果作为消息落地、全群共享、驱动搜索事务。两者共存语义合理(私下查证 vs 公开查资料),但有**截胡风险**:两个都开时,模型很可能用 grounding 私下搜完就作答,根本不调 search 工具,且不报任何错。
 - 由此:测试 native search 工具时必须**关闭该 agent 的 enableGoogleSearch**,否则测不到;若实测发现 API 层面拒绝混用(报错),再考虑 UI 互斥。长期可在 search 工具的 description 里强调「结果会分享给全群」,给模型一个选它而非内部搜索的理由。
+- **grounding + function calling 混用已实测打通**(2026-07-10,commit `348a10a` + `8f08c7a`):仅 Gemini 3 + AI Studio 支持(Preview,Vertex 不支持),需要 SDK ≥ 2.0。两个硬要求:① `googleSearch` 与 `functionDeclarations` 必须**合并进同一个 Tool 对象**(拆成 tools 数组两个条目会触发 400「Please enable tool_config.include_server_side_tool_invocations」,即使 flag 已带上);② `config.toolConfig.includeServerSideToolInvocations: true`(JS SDK 里在 ToolConfig 下;Python SDK 是 config 顶层,两边形状不同勿混)。开 flag 后流里会出现服务端工具调用的 parts(grounding 过程可见),形状待实测——桥接层的 unknown-capability warn 会把它们打出来。
+- **运维教训(vite)**:npm 升级依赖后必须重启 dev server——vite 只在启动时决定依赖预打包,热更新不会重载 node_modules 里的新版;升级后浏览器可能继续跑 `node_modules/.vite/deps/` 里的旧缓存(错误栈里 `@xxx.js?v=<hash>` 可与 `.vite/deps/_metadata.json` 的 hash 对照确认)。当年 SDK 2.11 升级后 400 不消失,根因即此。
 
 ### Anthropic(裸 fetch,手写 SSE)
 - 请求:body 加 `tools: [{ name, description, input_schema }]`(anthropicService.ts:265-271);
