@@ -1157,6 +1157,14 @@ const App: React.FC = () => {
     // the retry attempt overwrites the map entry and handleStopAll clears it.
     let timedOut = false;
 
+    // Image generation legitimately runs 1-2 minutes (OpenAI: "up to 2 minutes",
+    // /images/edits with reference uploads even longer) and produces no partial
+    // output — a chat-style 30s total timeout aborts every normal render for a
+    // total loss. Image agents get their own generous window.
+    const timeoutMs = isImageGenModel(agent.modelId)
+        ? Math.max(settings.timeoutDuration || 30000, 180000)
+        : (settings.timeoutDuration || 30000);
+
     const timeoutId = setTimeout(() => {
         // Fire only if this attempt still owns its slot (finished/cancelled attempts
         // are cleaned up in finally, and a newer attempt may have replaced us)
@@ -1190,7 +1198,7 @@ const App: React.FC = () => {
                     ...m, isError: true, isStreaming: false,
                     text: partialText
                         ? `${partialText}\n\n[${formatErrorTimestamp()}] [${t('系统: 响应超时，输出被截断')}]`
-                        : `[${formatErrorTimestamp()}] [${t('系统: 响应超时')} (${(settings.timeoutDuration || 30000)/1000}s)]`
+                        : `[${formatErrorTimestamp()}] [${t('系统: 响应超时')} (${timeoutMs/1000}s)]`
                 } : m);
                 // Insert system message to prompt other AIs to continue
                 const recoveryMessage: Message = {
@@ -1205,7 +1213,7 @@ const App: React.FC = () => {
                 return { ...s, messages: [...finalized, recoveryMessage], lastUpdated: Date.now() };
             });
         }
-    }, settings.timeoutDuration || 30000);
+    }, timeoutMs);
 
     try {
       let streamGenerator;
