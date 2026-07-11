@@ -146,6 +146,7 @@ const en: Record<string, string> = {
   '聊天记录导出': 'Chat Export',
   '导出当前会话': 'Export Current Session',
   '导出全部会话': 'Export All Sessions',
+  '导出网页(带图)': 'Export Web Page (with images)',
   '全部会话': 'All Sessions',
   '系统': 'System',
   '用户': 'User',

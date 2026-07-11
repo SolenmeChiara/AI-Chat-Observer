@@ -6,6 +6,7 @@ import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
 import { isImageGenModel } from '../services/openaiService';
+import { formatSessionAsHtml } from '../services/exportHtml';
 import { useT } from '../i18n';
 
 // TTS Settings Panel Component
@@ -2330,8 +2331,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                  return lines.join('\n');
                };
 
-               const downloadFile = (filename: string, content: string) => {
-                 const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+               const downloadFile = (filename: string, content: string, mime: string = 'text/plain;charset=utf-8') => {
+                 const blob = new Blob([content], { type: mime });
                  const url = URL.createObjectURL(blob);
                  const a = document.createElement('a');
                  a.href = url;
@@ -2356,6 +2357,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                  downloadFile(`${activeGroup.name}_${t('全部会话')}.txt`, content);
                };
 
+               const handleExportHtml = () => {
+                 if (!activeSession) return;
+                 const html = formatSessionAsHtml(activeSession, agents, settings.userName || '');
+                 downloadFile(`${activeSession.name}.html`, html, 'text/html;charset=utf-8');
+               };
+
                return (
                  <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                    <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -2375,6 +2382,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                        className="flex-1 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-xs font-medium hover:bg-black dark:hover:bg-gray-100 transition-colors disabled:opacity-40"
                      >
                        {t('导出全部会话')}
+                     </button>
+                     <button
+                       onClick={handleExportHtml}
+                       disabled={!activeSession}
+                       className="flex-1 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-xs font-medium hover:bg-black dark:hover:bg-gray-100 transition-colors disabled:opacity-40"
+                     >
+                       {t('导出网页(带图)')}
                      </button>
                    </div>
                  </div>
