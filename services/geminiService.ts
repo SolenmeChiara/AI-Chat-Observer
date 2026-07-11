@@ -267,9 +267,15 @@ export async function* streamGeminiReply(
       const canCombine = isGemini3 && geminiConfig.geminiMode !== 'vertex';
       let includeServerSideToolInvocations = false;
       const toolList: any[] = [];
-      if (enableGoogleSearch && (!wantsBoth || canCombine)) toolList.push({ googleSearch: {} });
-      if (nativeFnDecls.length > 0) toolList.push({ functionDeclarations: nativeFnDecls });
-      if (wantsBoth && canCombine) includeServerSideToolInvocations = true;
+      if (wantsBoth && canCombine) {
+        // Official docs shape: built-in tool + function declarations merged into ONE
+        // Tool object (separate entries can trip the server-side combination check).
+        toolList.push({ googleSearch: {}, functionDeclarations: nativeFnDecls });
+        includeServerSideToolInvocations = true;
+      } else {
+        if (enableGoogleSearch && !wantsBoth) toolList.push({ googleSearch: {} });
+        if (nativeFnDecls.length > 0) toolList.push({ functionDeclarations: nativeFnDecls });
+      }
       if (wantsBoth && !canCombine) {
         console.warn(`[${agent.name}] ⚠️ googleSearch grounding + function calling requires Gemini 3 on AI Studio; dropping grounding for this request (model: ${modelId}, mode: ${geminiConfig.geminiMode || 'aistudio'})`);
       }
