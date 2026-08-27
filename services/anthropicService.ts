@@ -109,7 +109,9 @@ export async function* streamAnthropicReply(
       const pmNote = m.pmTargetId
         ? ` (PM → ${m.pmTargetId === USER_ID ? (userName || 'User') : (allAgents.find(a => a.id === m.pmTargetId)?.name || 'unknown')})`
         : '';
-      const recallText = `[You said earlier${pmNote}: ${m.text}]`;
+      // Carries the same [ID:]/time header as a normal log line: without it these recalled
+      // turns were the one kind of message the agent could neither date nor {{REPLY:}} to.
+      const recallText = `[ID: ${m.id}] [${formatMessageTime(m.timestamp)}] [You said earlier${pmNote}: ${m.text}]`;
       const recallBlock = [{ type: "text", text: recallText }];
       if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
         (formattedMessages[formattedMessages.length - 1].content as any[]).push(...recallBlock);
@@ -119,9 +121,11 @@ export async function* streamAnthropicReply(
       continue;
     }
 
-    // Search results should appear as system context, not as the agent's own speech
+    // Search results should appear as system context, not as the agent's own speech.
+    // Same [ID:]/time header as a normal log line so the model can date (and quote) them.
     if (m.isSearchResult) {
-      const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+      const searchLabel = `[ID: ${m.id}] [${formatMessageTime(m.timestamp)}] ` +
+        (m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]');
       const block = [{ type: "text", text: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` }];
       if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
         (formattedMessages[formattedMessages.length - 1].content as any[]).push(...block);
@@ -131,13 +135,10 @@ export async function* streamAnthropicReply(
       continue;
     }
 
-    const senderName = m.senderId === USER_ID ? (userName || "User") : (m.senderId === 'SYSTEM' || m.isSystem ? "System" : allAgents.find(a => a.id === m.senderId)?.name || "Unknown");
-
-    const timeStr = formatMessageTime(m.timestamp);
-    const pmLabel = m.pmTargetId ? ' [PM]' : '';
-    const isAI = !m.isSystem && m.senderId !== USER_ID && m.senderId !== 'SYSTEM' && m.senderId !== 'narrator';
-    const wrappedText = isAI && commandMode !== 'native' ? `{{RESPONSE: ${m.text}}}` : m.text;
-    let textContent = isSelf ? wrappedText : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${wrappedText}`;
+    // Single source of truth for the log-line shape (shared.ts). This used to be a
+    // hand-copied duplicate that also dropped the header on self messages — two
+    // maintenance points that had already drifted apart once.
+    let textContent = formatMessageText(m, agent, allAgents, userName, commandMode);
 
     // Handle Reply Reference
     if (m.replyToId) {
@@ -417,11 +418,25 @@ export async function* streamAnthropicReply(
 
                 // Capture usage from message_start
                 if (json.type === 'message_start' && json.message?.usage) {
-                    capturedUsage.input = json.message.usage.input_tokens || 0;
+                    // Anthropic reports the input split three ways: input_tokens counts ONLY
+                    // the uncached remainder, with cache_read_input_tokens and
+                    // cache_creation_input_tokens reported alongside it (unlike OpenAI's
+                    // prompt_tokens / Gemini's promptTokenCount, which are already totals).
+                    // All three are billed input, so all three must be counted — since the
+                    // caching work landed, a typical turn is ~95% cache read and the UI was
+                    // showing a few hundred tokens for a 20k-token prompt.
+                    // The usage channel (StreamChunk.usage / Message.tokens) carries a single
+                    // `input` number and calculateCost multiplies it by one inputPricePer1M,
+                    // so the price tiers are folded in HERE as a weighted token-equivalent:
+                    // read bills at 0.1x, write at 1.25x. The dollar figure (the only thing
+                    // the UI renders — Message.tokens has no render site) comes out accurate;
+                    // the tradeoff is that `input` is no longer a literal token count.
+                    const uncached = json.message.usage.input_tokens || 0;
                     const cacheRead = json.message.usage.cache_read_input_tokens || 0;
                     const cacheWrite = json.message.usage.cache_creation_input_tokens || 0;
+                    capturedUsage.input = uncached + Math.round(cacheRead * 0.1) + Math.round(cacheWrite * 1.25);
                     if (cacheRead > 0 || cacheWrite > 0) {
-                      console.log(`[Anthropic] 💾 Cache: ${cacheRead} read, ${cacheWrite} written, ${capturedUsage.input} uncached`);
+                      console.log(`[Anthropic] 💾 Cache: ${cacheRead} read, ${cacheWrite} written, ${uncached} uncached`);
                     }
                 }
 

@@ -134,14 +134,16 @@ export async function* streamOpenAIReply(
   const formattedMessages = [
     { role: 'system', content: systemInstruction },
     ...visibleMessages.map(m => {
-       // Search results: inject as labeled context, not as a chat message
+       // Search results: inject as labeled context, not as a chat message. Carries the same
+       // [ID:]/time header as a normal log line so the model can date (and quote) them.
        if (m.isSearchResult) {
-         const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+         const searchLabel = `[ID: ${m.id}] [${formatMessageTime(m.timestamp)}] ` +
+           (m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]');
          return { role: 'user' as const, content: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
        }
 
-       // OpenAI: all messages get timestamp (addTimestampToSelf=true)
-       let textContent = formatMessageText(m, agent, allAgents, userName, false, true, commandMode);
+       // Every message gets the full [ID:]/timestamp header
+       let textContent = formatMessageText(m, agent, allAgents, userName, commandMode);
 
        // Handle Quote/Reply
        if (m.replyToId) {
@@ -521,11 +523,12 @@ export async function* streamOpenAIResponsesReply(
   // Build input items (Responses API accepts messages-style input)
   const inputItems: any[] = visibleMessages.map(m => {
     if (m.isSearchResult) {
-      const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+      const searchLabel = `[ID: ${m.id}] [${formatMessageTime(m.timestamp)}] ` +
+        (m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]');
       return { role: 'user', content: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
     }
 
-    let textContent = formatMessageText(m, agent, allAgents, userName, false, true, commandMode);
+    let textContent = formatMessageText(m, agent, allAgents, userName, commandMode);
 
     if (m.replyToId) {
       const replyTarget = messages.find(msg => msg.id === m.replyToId);

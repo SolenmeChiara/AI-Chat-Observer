@@ -161,9 +161,11 @@ export async function* streamGeminiReply(
   );
 
   for (const m of visibleMessages) {
-    // Search results: inject as labeled user context
+    // Search results: inject as labeled user context. Carries the same [ID:]/time header
+    // as a normal log line so the model can tell how stale the results are (and quote them).
     if (m.isSearchResult) {
-      const searchLabel = m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]';
+      const searchLabel = `[ID: ${m.id}] [${formatMessageTime(m.timestamp)}] ` +
+        (m.searchQuery ? `[Search results for "${m.searchQuery}"]` : '[Search results]');
       const lastEntry = formattedContents[formattedContents.length - 1];
       const searchPart = { text: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
       if (lastEntry?.role === 'user') {
@@ -188,8 +190,8 @@ export async function* streamGeminiReply(
       });
     }
 
-    // Text Part WITH ID AND TIMESTAMP INJECTION
-    let textContent = formatMessageText(m, agent, allAgents, userName, isSelf, false, commandMode);
+    // Text Part WITH ID AND TIMESTAMP INJECTION (self messages included — see formatMessageText)
+    let textContent = formatMessageText(m, agent, allAgents, userName, commandMode);
 
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);

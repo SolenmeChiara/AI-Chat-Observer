@@ -162,13 +162,13 @@ export function buildSystemPromptParts(
   const outputFormat = mode === 'native' ? `[OUTPUT FORMAT]
 Write your reply directly — no wrapper. Whatever text you output IS your message.
 - Stay silent: output only {{PASS}}
-- Quote old message: messages in the chat log carry an [ID: ...] label. Copy that exact id string into the marker and START your reply with it, closing braces required. Example — to quote the log line "[ID: 1787985060000-1787984000000] Alice: the budget is too high", begin your reply with: {{REPLY: 1787985060000-1787984000000}} followed by your text. Never write the [ID: ...] label itself in your own output.
+- Quote old message: messages in the chat log carry an [ID: ...] label. Copy that exact id string into the marker and START your reply with it, closing braces required. Example — to quote the log line "[ID: 1787855460000-1787230800000] [08-27 14:31] Alice: the budget is too high", begin your reply with: {{REPLY: 1787855460000-1787230800000}} followed by your text. Every log line begins with a system-added "[ID: ...] [MM-DD HH:mm] Name:" header, your own lines included — never reproduce that header or any part of it in your own output; write only your message body.
 - @mention: use @Name only when directly addressing someone` : `[OUTPUT FORMAT]
 You MUST use one of these formats. Unwrapped text is discarded.
 - Speak: {{RESPONSE: your message}}
 - Stay silent: {{PASS}}
 - Mute yourself: {{SILENCE: 10min}} or {{SILENCE: 1h}} or {{SILENCE}} (permanent)
-- Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}} — message_id is the exact string from that message's [ID: ...] label in the chat log. Never write the [ID: ...] label itself in your own output.
+- Quote old message: {{RESPONSE: {{REPLY: message_id}} your message}} — message_id is the exact string from that message's [ID: ...] label in the chat log. Every log line begins with a system-added "[ID: ...] [MM-DD HH:mm] Name:" header, your own lines included — never reproduce that header or any part of it in your own output; write only your message body.
 - @mention: use @Name inside {{RESPONSE:}} only when directly addressing someone`;
 
   // Both tracks: members on the legacy text protocol may occasionally leak marker
@@ -330,14 +330,22 @@ export function filterVisibleMessages(
 
 /**
  * Format a single message's text content for inclusion in the chat history
- * sent to an AI model. Adds timestamp/ID labels; on the text track, AI messages
+ * sent to an AI model. Adds ID/timestamp labels; on the text track, AI messages
  * are additionally wrapped in {{RESPONSE:}} as a format demonstration. The native
  * track skips the wrapper — those models never emit it, and replaying it in
  * history teaches them to imitate a format the parser no longer expects.
  *
- * @param isSelf - whether this message was sent by the current agent
- * @param addTimestampToSelf - if false, self messages get only the wrapped text (Gemini/Anthropic style);
- *                             if true, all messages get the full timestamp label (OpenAI style)
+ * Line shape: `[ID: <id>] [MM-DD HH:mm][ [PM]] <Sender>: <text>`
+ *
+ * EVERY message carries the full header, the viewing agent's own messages included.
+ * Gemini/Anthropic used to replay self messages as bare text (they ride the model/
+ * assistant role, so the speaker is implicit), but that cost the model the two things
+ * the header exists for: it could not quote its own past message ({{REPLY:}} needs an
+ * id it can only read off the label) and it could not tell how long ago it spoke.
+ * The price is that an id/time header now also appears inside the assistant-role turns,
+ * which invites imitation — countered by the explicit "never reproduce that header"
+ * ban in [OUTPUT FORMAT] and by stripImitatedLogLabel() on the way back in (App.tsx).
+ *
  * @param mode - the viewing agent's command track; 'text' wraps AI messages in {{RESPONSE:}}
  */
 export function formatMessageText(
@@ -345,8 +353,6 @@ export function formatMessageText(
   agent: Agent,
   allAgents: Agent[],
   userName: string | undefined,
-  isSelf: boolean,
-  addTimestampToSelf: boolean,
   mode: CommandMode = 'text'
 ): string {
   const senderName = message.senderId === USER_ID
@@ -360,10 +366,7 @@ export function formatMessageText(
   const isAI = !message.isSystem && message.senderId !== USER_ID && message.senderId !== 'SYSTEM' && message.senderId !== 'narrator';
   const wrappedText = isAI && mode !== 'native' ? `{{RESPONSE: ${message.text}}}` : message.text;
 
-  if (isSelf && !addTimestampToSelf) {
-    return wrappedText;
-  }
-  return `[${timeStr}] [ID: ${message.id}]${pmLabel} ${senderName}: ${wrappedText}`;
+  return `[ID: ${message.id}] [${timeStr}]${pmLabel} ${senderName}: ${wrappedText}`;
 }
 
 /**

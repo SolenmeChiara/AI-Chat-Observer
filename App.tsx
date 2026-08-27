@@ -27,47 +27,97 @@ const formatErrorTimestamp = () => {
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
 };
 
+// 行首伪日志标签的三种 token（都不带 g 标志，test/replace 无 lastIndex 状态）
+const LOG_LABEL_ID = /^\[ID:[^\]\n]*\]\s*/i;
+const LOG_LABEL_TIME = /^\[\d{2}-\d{2} \d{2}:\d{2}\]\s*/;
+const LOG_LABEL_PM = /^\[PM\]\s*/i;
+
 /**
  * 剥掉模型模仿历史行格式、写在自己输出**行首**的伪日志标签。
  *
- * 发给模型的历史行格式是 `[MM-DD HH:mm] [ID: xxx][ [PM]] 名字: 正文`
- * （services/shared.ts formatMessageText）。模型看多了会照抄一份到自己正文开头，
- * 一旦落库，下一轮构造历史时会被再套一层真标签，形成嵌套污染。
+ * 发给模型的历史行格式是 `[ID: xxx] [MM-DD HH:mm][ [PM]] 名字: 正文`
+ * （services/shared.ts formatMessageText）。ID-first 改版后**每条**历史消息都带这个头，
+ * 包括模型自己那些走 assistant/model 角色的消息 —— 模仿概率随之上升；一旦落库，下一轮
+ * 构造历史时会被再套一层真标签，形成嵌套污染。
+ * 旧库里还存着改版前 time-first 的污染（`[MM-DD HH:mm] [ID: xxx] ...`），两种顺序都要认。
  *
- * 保守规则（宁可漏剥，不可误伤）：
- * 1. 必须以时间标签 `[MM-DD HH:mm]` 开头才触发，否则原样返回；
- * 2. 时间标签后紧跟的 `[ID: ...]` / `[PM]` 一并剥（两种顺序都认）；
- * 3. 再紧跟**发言者自己**的名字 + 冒号也剥；别人的名字不剥（那可能是有意的转述/引用）；
- * 4. 正文中部、引号内的类似片段一律不动。
+ * 规则矩阵（宁可漏剥，不可误伤）：
+ * - 触发：去掉前导空白后必须以 `[ID: ...]` / `[MM-DD HH:mm]` / `[PM]` 之一开头，否则原样返回。
+ *         「名字:」单独打头不触发 —— 那是有意的自称/剧本写法。
+ * - 吃取：循环吃行首任意顺序的 [ID:]/[时间]/[PM]，再吃一个**自己的**名字 + 冒号；
+ *         别人的名字不吃（可能是有意的转述/引用）。
+ * - 接受：吃到的 token 里必须含 [ID:] 或 [PM] 或「自己的名字:」之一（强 token）。
+ *         只吃到一个孤零零的时间标签 ⇒ 判定为正文里有意写的时刻（日志体输出），整串原样退回。
  *
- * 幂等性：单次调用最多剥一层，且只匹配字符串开头 —— 流式链每个 chunk 用全量文本重跑，
- * 剥掉的前缀稳定不变（时间标签一旦补全就不会再变短）。
+ * 例：`[ID: a] [08-27 14:31] 我: 正文`  → `正文`         （有 ID，剥）
+ *     `[08-27 14:31] [ID: a] 别人: 正文` → `别人: 正文`   （有 ID，剥；别人的名字留着）
+ *     `[ID: a] 正文`                     → `正文`         （只抄了一半，仍剥）
+ *     `[08-27 14:31] 正文`               → 原样            （孤立时间标签）
+ *     `我: 正文`                          → 原样            （无括号 token，不触发）
+ *
+ * 幂等性：剥完的结果不再以这些 token 开头（模型连写两层的话正好一次吃完）—— 流式链每个
+ * chunk 用全量文本重跑，剥掉的前缀稳定不变（标签一旦补全就不会再变短）。
  */
 const stripImitatedLogLabel = (text: string, selfName?: string): string => {
-  const timeMatch = text.match(/^\s*\[\d{2}-\d{2} \d{2}:\d{2}\]\s*/);
-  if (!timeMatch) return text;
+  let rest = text.replace(/^\s+/, '');
+  if (!LOG_LABEL_ID.test(rest) && !LOG_LABEL_TIME.test(rest) && !LOG_LABEL_PM.test(rest)) return text;
 
-  let rest = text.slice(timeMatch[0].length);
-
-  // [ID: xxx] 与 [PM]，顺序不限（两轮迭代只为兼容 [PM] 在 [ID:] 之前的顺序）
-  for (let i = 0; i < 2; i++) {
+  // 强 token = [ID:] / [PM] / 自己的名字:；只有时间标签不算，见上面的接受条件
+  let sawStrongToken = false;
+  for (let i = 0; i < 4; i++) {
     const before = rest;
-    rest = rest
-      .replace(/^\[ID:[^\]\n]*\]\s*/i, '')
-      .replace(/^\[PM\]\s*/i, '');
+    if (LOG_LABEL_ID.test(rest)) { rest = rest.replace(LOG_LABEL_ID, ''); sawStrongToken = true; }
+    if (LOG_LABEL_TIME.test(rest)) rest = rest.replace(LOG_LABEL_TIME, '');
+    if (LOG_LABEL_PM.test(rest)) { rest = rest.replace(LOG_LABEL_PM, ''); sawStrongToken = true; }
     if (rest === before) break;
   }
 
   // 自己的名字 + 冒号（半角/全角）
   if (selfName) {
     const escaped = selfName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    rest = rest.replace(new RegExp(`^${escaped}[ \\t]*[:：][ \\t]*`), '');
+    const nameRe = new RegExp(`^${escaped}[ \\t]*[:：][ \\t]*`);
+    if (nameRe.test(rest)) { rest = rest.replace(nameRe, ''); sawStrongToken = true; }
   }
 
-  // 真实历史行（shared.ts formatMessageText）时间标签后必跟 [ID:]，摘要行（summaryService）
-  // 必跟「名字:」。三者一个都没命中 ⇒ 这不是伪日志标签，而是正文里有意写的时刻 —— 原样退回。
-  if (rest === text.slice(timeMatch[0].length)) return text;
-  return rest;
+  return sawStrongToken ? rest : text;
+};
+
+/**
+ * 行首「引用预览行」的形态。喂给模型的历史里，被引用消息的上方会多一行
+ * `[Replying to [ID: xxx] 名字: "前 50 字..."]`（services/shared.ts formatReplyPreview）。
+ *
+ * 匹配要点：
+ * - 引文由 safeTruncate 截 50 个编码单元、不做任何转义，所以里面可能有 `"`、`]`、换行；
+ *   收尾用「非贪婪吃到第一个 `"` + 可选空白 + `]`」，跨度上限 300 字符 —— 免得正文里
+ *   恰好出现的引号把大段内容吃进来；
+ * - 前一个分支 `\s*\]` 认 `[Replying to [ID: xxx]]` 这种没抄引文的半成品，放在引文分支
+ *   之前，避免它被引文分支越过去多吃；
+ * - 流式半截（引文还没收尾）不匹配 —— 少剥一轮，下个 chunk 补全后自然生效，不会误吃正文。
+ */
+const IMITATED_REPLY_PREVIEW = /^\s*\[Replying to \[ID:\s*([^\]\s]+)\](?:\s*\]|[\s\S]{0,300}?"\s*\])[ \t]*\r?\n?/;
+
+/**
+ * 宽进：把模型抄进正文开头的引用预览行还原成真引用。
+ *
+ * 实测模型会把整行预览照抄到正文开头当引用语法使 —— 引用意图明确，只是没写 {{REPLY: id}}。
+ * 这里把其中的 ID 提出来交给调用方当 detectedReplyId（等价于模型输出了 {{REPLY: id}}），
+ * 整行从正文剥掉。库里找不到该 ID 时沿用既有的静默行为（replyToId 指向不存在的消息，
+ * 渲染层自然什么都不显示）。
+ *
+ * 与 stripImitatedLogLabel 的先后顺序：模型可能只抄预览、只抄伪标签、或两者叠加，叠加
+ * 顺序两种都可能（真实历史里预览在伪标签**上一行**，但模型未必照抄这个顺序）。所以约定：
+ * 调用方先跑一次 stripImitatedLogLabel（吃掉「伪标签在前」的那层），本函数剥完预览后再跑
+ * 一次（吃掉「预览在前、伪标签在后」的那层）—— 两种顺序都能收敛，且都只多跑一次纯函数。
+ *
+ * 幂等：剥完开头不再是预览行；流式链每个 chunk 用全量文本重跑，结果稳定。
+ */
+const takeImitatedReplyPreview = (text: string, selfName?: string): { text: string; replyId?: string } => {
+  const m = text.match(IMITATED_REPLY_PREVIEW);
+  if (!m) return { text };
+  return {
+    text: stripImitatedLogLabel(text.slice(m[0].length), selfName).trimStart(),
+    replyId: m[1],
+  };
 };
 
 // 辩论模式：将正反方 assignments 展平为交替发言序列
@@ -1890,13 +1940,23 @@ const App: React.FC = () => {
              .trimStart();
           // 剥掉模型模仿历史行格式写在开头的伪日志标签（与落库链 finalText 处的清洗完全一致）
           cleanText = stripImitatedLogLabel(cleanText, agent.name).trimStart();
+          // 宽进：模型把 [Replying to ...] 预览行抄进正文开头 → 当成真引用（见函数注释）。
+          // 分段消费一旦开始就冻结前缀：伪预览引文里若含字面 [SPLIT]，先按段消费、后因预览
+          // 补全整行剥离会让 cleanText 回缩到 splitConsumedLength 之下,偏移溢出丢正文。
+          // 冻结后退化为「漏剥」,无损（审查 N2）。
+          const imitatedQuote = splitConsumedLength === 0
+            ? takeImitatedReplyPreview(cleanText, agent.name)
+            : { text: cleanText, replyId: undefined as string | undefined };
+          cleanText = imitatedQuote.text;
 
           // Lenient: message ids never contain whitespace or '}', so the id is read up to the
           // first whitespace and the closing braces are OPTIONAL — models (esp. native-track)
           // regularly forget to close {{REPLY: long-id}} and the quote used to be lost while
           // the raw fragment leaked into the displayed message.
           const replyMatch = displayText.match(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/);
+          // 显式 {{REPLY:}} 优先；没有它时才用宽进识别出的 ID 兜底（已定下的不覆盖）
           if (replyMatch) detectedReplyId = replyMatch[1];
+          else if (!detectedReplyId && imitatedQuote.replyId) detectedReplyId = imitatedQuote.replyId;
 
           // Real-time [SPLIT]: only check text after what's already been consumed by previous splits
           if (entertainmentConfig?.enableSplit) {
@@ -2197,6 +2257,11 @@ const App: React.FC = () => {
              .trimStart();
         // 剥掉模型模仿历史行格式写在开头的伪日志标签（与流式链 cleanText 处的清洗完全一致）
         finalText = stripImitatedLogLabel(finalText, agent.name).trimStart();
+        // 宽进：同流式链，把抄进正文开头的 [Replying to ...] 预览行还原成真引用。
+        // detectedReplyId 可能已在流式链定下（显式 {{REPLY:}} 或同一预览），不覆盖。
+        const finalImitatedQuote = takeImitatedReplyPreview(finalText, agent.name);
+        finalText = finalImitatedQuote.text;
+        if (!detectedReplyId && finalImitatedQuote.replyId) detectedReplyId = finalImitatedQuote.replyId;
         // When real-time splits happened, streaming already set correct text for all segments.
         // Skip text overwrite to avoid clobbering with potentially incomplete extractBraceContent result.
         // splitConsumedLength 无条件自增而 splitCount 只在段非空时自增：输出以 [SPLIT] 打头时会出现

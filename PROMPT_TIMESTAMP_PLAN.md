@@ -14,22 +14,26 @@ session 重启后从「进行中」一节接续。
 | `e8a1921` | 摘要输入带时间戳;落库前剥离模型模仿的伪日志标签(stripImitatedLogLabel,审查修补×2) |
 | `6554f17` | 每秒变化的 [NOW] 行移出缓存前缀(SystemPromptParts 三层拆分),历史增量缓存真正命中 |
 
-## 进行中(统一标签批次,实施代理在途)
+## 统一标签批次(已完成,与本文档更新同 commit)
 
 Sol 拍板:**每条历史消息统一带 `[ID: xxx] [MM-DD HH:mm]` 头(ID 前、时间后),含
-agent 自己的消息、搜索结果、Anthropic thinking 回忆块**。批次内容:
+agent 自己的消息、搜索结果、Anthropic thinking 回忆块**。已实施(opus 实施 +
+独立 opus 审查 PASS_WITH_NOTES,两条一行修补已采纳):
 
-1. formatMessageText 去 isSelf 裸文本分支,全消息全标签,ID/时间对调;
-   anthropicService 手抄重复实现改调 shared 版(消双维护点);
-2. [OUTPUT FORMAT] 两轨:`[ID:] label` 禁令扩成整头禁令;native 示例行换新格式
-   (毫秒值与时间标签自洽:1787985060000 = 2026-08-27 14:31 UTC+8);
-3. stripImitatedLogLabel 适配 ID-first 新格式(新旧两种顺序都认,守卫精神保留);
-4. `[Replying to [ID: xxx] ...]` 行首宽进:提取 ID 设为 detectedReplyId 再剥掉
-   (实测样本:模型把 formatReplyPreview 格式整行抄进正文);
-5. Anthropic 缓存账目修正:cache_read/cache_creation tokens 入账
-   (审查 N5,缓存修复生效后 UI 用量大幅低报)。
+1. formatMessageText 去 isSelf 裸文本分支,全消息全标签,ID/时间对调,签名去掉
+   isSelf/addTimestampToSelf;anthropicService 手抄重复实现改调 shared 版;
+2. [OUTPUT FORMAT] 两轨整头禁令;native 示例毫秒值 1787855460000 与 08-27 14:31
+   在本机时区(America/New_York)自洽——**换时区跑会轻微失配,仅示例观感**;
+3. stripImitatedLogLabel 适配 ID-first(新旧顺序都认,行为差分零倒退);
+4. `[Replying to [ID: xxx] ...]` 行首宽进 → detectedReplyId(显式 {{REPLY}} 优先);
+   分段消费开始后冻结前缀(审查 N2 修补);
+5. Anthropic 缓存账目:input = uncached + 0.1×read + 1.25×write(加权 token 当量,
+   美元数准确;Message.tokens 无渲染点,字段不再是字面 token 数)。
 
-流程:实施(opus)→ 独立审查(opus)→ 主循环提交推送。
+审查已知项(未修,接手前先读审查报告原文):引文含 `"]` 时预览提前收尾留残渣
+(罕见);[SPLIT] 第 2 段起不做预览剥离(只跑 stripImitatedLogLabel);
+summaryService transcript 仍为 time-first 格式(另一条通道,有意未改);
+formatMessageText 的 agent 形参已是死参。
 
 ## 部署后验证(Sol 实跑)
 
