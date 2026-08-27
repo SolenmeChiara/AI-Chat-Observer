@@ -27,6 +27,49 @@ const formatErrorTimestamp = () => {
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
 };
 
+/**
+ * 剥掉模型模仿历史行格式、写在自己输出**行首**的伪日志标签。
+ *
+ * 发给模型的历史行格式是 `[MM-DD HH:mm] [ID: xxx][ [PM]] 名字: 正文`
+ * （services/shared.ts formatMessageText）。模型看多了会照抄一份到自己正文开头，
+ * 一旦落库，下一轮构造历史时会被再套一层真标签，形成嵌套污染。
+ *
+ * 保守规则（宁可漏剥，不可误伤）：
+ * 1. 必须以时间标签 `[MM-DD HH:mm]` 开头才触发，否则原样返回；
+ * 2. 时间标签后紧跟的 `[ID: ...]` / `[PM]` 一并剥（两种顺序都认）；
+ * 3. 再紧跟**发言者自己**的名字 + 冒号也剥；别人的名字不剥（那可能是有意的转述/引用）；
+ * 4. 正文中部、引号内的类似片段一律不动。
+ *
+ * 幂等性：单次调用最多剥一层，且只匹配字符串开头 —— 流式链每个 chunk 用全量文本重跑，
+ * 剥掉的前缀稳定不变（时间标签一旦补全就不会再变短）。
+ */
+const stripImitatedLogLabel = (text: string, selfName?: string): string => {
+  const timeMatch = text.match(/^\s*\[\d{2}-\d{2} \d{2}:\d{2}\]\s*/);
+  if (!timeMatch) return text;
+
+  let rest = text.slice(timeMatch[0].length);
+
+  // [ID: xxx] 与 [PM]，顺序不限（两轮迭代只为兼容 [PM] 在 [ID:] 之前的顺序）
+  for (let i = 0; i < 2; i++) {
+    const before = rest;
+    rest = rest
+      .replace(/^\[ID:[^\]\n]*\]\s*/i, '')
+      .replace(/^\[PM\]\s*/i, '');
+    if (rest === before) break;
+  }
+
+  // 自己的名字 + 冒号（半角/全角）
+  if (selfName) {
+    const escaped = selfName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    rest = rest.replace(new RegExp(`^${escaped}[ \\t]*[:：][ \\t]*`), '');
+  }
+
+  // 真实历史行（shared.ts formatMessageText）时间标签后必跟 [ID:]，摘要行（summaryService）
+  // 必跟「名字:」。三者一个都没命中 ⇒ 这不是伪日志标签，而是正文里有意写的时刻 —— 原样退回。
+  if (rest === text.slice(timeMatch[0].length)) return text;
+  return rest;
+};
+
 // 辩论模式：将正反方 assignments 展平为交替发言序列
 const buildDebateTurnSequence = (assignments: DebateAssignment[]): DebateAssignment[] => {
   const pro = assignments.filter(a => a.side === 'pro').sort((a, b) => a.order - b.order);
@@ -1845,6 +1888,8 @@ const App: React.FC = () => {
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .replace(/\}\}/g, '')
              .trimStart();
+          // 剥掉模型模仿历史行格式写在开头的伪日志标签（与落库链 finalText 处的清洗完全一致）
+          cleanText = stripImitatedLogLabel(cleanText, agent.name).trimStart();
 
           // Lenient: message ids never contain whitespace or '}', so the id is read up to the
           // first whitespace and the closing braces are OPTIONAL — models (esp. native-track)
@@ -1858,7 +1903,12 @@ const App: React.FC = () => {
             const remaining = cleanText.substring(splitConsumedLength);
             let splitIdx = remaining.search(/\[SPLIT\]/i);
             while (splitIdx >= 0) {
-              const finalized = cleanText.substring(splitConsumedLength, splitConsumedLength + splitIdx).trim();
+              // 第 2 段起是独立落库的消息，段首同样可能被模型套上伪日志标签 —— 同样清洗。
+              // 第 1 段（offset 0）的段首就是 cleanText 的开头，上面已经剥过，不重复剥。
+              const finalizedRaw = cleanText.substring(splitConsumedLength, splitConsumedLength + splitIdx).trim();
+              const finalized = splitConsumedLength > 0
+                ? stripImitatedLogLabel(finalizedRaw, agent.name).trimStart()
+                : finalizedRaw;
               splitConsumedLength += splitIdx + 7;
 
               if (finalized) {
@@ -1881,7 +1931,13 @@ const App: React.FC = () => {
           }
 
           // Show only the text after all consumed splits
-          const currentSegmentText = entertainmentConfig?.enableSplit ? cleanText.substring(splitConsumedLength).replace(/\[SPLIT\]/gi, '') : cleanText;
+          // （第 2 段起做与落库同样的伪日志标签清洗，保证显示与最终入库文本一致）
+          const currentSegmentText = entertainmentConfig?.enableSplit
+            ? (splitConsumedLength > 0
+                ? stripImitatedLogLabel(cleanText.substring(splitConsumedLength).trimStart(), agent.name).trimStart()
+                : cleanText.substring(splitConsumedLength)
+              ).replace(/\[SPLIT\]/gi, '')
+            : cleanText;
 
           // Update streaming message (capture currentSplitId by value to avoid stale closure)
           // replyToId belongs to the FIRST segment only: a {{REPLY:}} marker sits at the head
@@ -2139,9 +2195,13 @@ const App: React.FC = () => {
              .replace(/\{\{TAROT(?::\s*\d+)?\}\}/gi, '')
              .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
              .trimStart();
+        // 剥掉模型模仿历史行格式写在开头的伪日志标签（与流式链 cleanText 处的清洗完全一致）
+        finalText = stripImitatedLogLabel(finalText, agent.name).trimStart();
         // When real-time splits happened, streaming already set correct text for all segments.
         // Skip text overwrite to avoid clobbering with potentially incomplete extractBraceContent result.
-        const skipFinalTextOverwrite = !!(currentGroup?.entertainmentConfig?.enableSplit && splitCount > 0);
+        // splitConsumedLength 无条件自增而 splitCount 只在段非空时自增：输出以 [SPLIT] 打头时会出现
+        // consumed>0 但 count===0，此时流式已按段剥过伪标签，不能再用整串 finalText 覆盖。
+        const skipFinalTextOverwrite = !!(currentGroup?.entertainmentConfig?.enableSplit && (splitCount > 0 || splitConsumedLength > 0));
         if (!skipFinalTextOverwrite && currentGroup?.entertainmentConfig?.enableSplit) {
           finalText = finalText.replace(/\[SPLIT\]/gi, '').trim();
         }

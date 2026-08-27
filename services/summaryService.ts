@@ -2,6 +2,7 @@
 import { ApiProvider, Message, AgentType, GeminiMode } from '../types';
 import { GoogleGenAI } from "@google/genai";
 import { USER_ID } from '../constants';
+import { formatMessageTime } from './shared';
 
 // Helper function for fetch with timeout and retry
 async function fetchWithTimeout(
@@ -281,10 +282,13 @@ export const updateSessionSummary = async (
 ): Promise<string | null> => {
   const outputTokens = maxTokens || 2000;
 
+  // 每行带上时间戳（与发给 agent 的历史行同一格式 MM-DD HH:mm，见 services/shared.ts formatMessageTime）。
+  // 归档 prompt 明确要求 "Chronological Order / clear temporal segments"，若 transcript 零时间信息，
+  // 模型只能凭空编造时间线，而这份摘要会被注入每个 agent 的记忆。
   const transcript = recentMessages.map(m => {
      const sender = allAgents.find((a:any) => a.id === m.senderId);
      const name = sender ? sender.name : (m.senderId === USER_ID ? 'User' : 'System');
-     return `${name}: ${m.text}`;
+     return `[${formatMessageTime(m.timestamp)}] ${name}: ${m.text}`;
   }).join('\n');
 
   const notesText = adminNotes && adminNotes.length > 0 
