@@ -2,6 +2,7 @@
 import { Message, Agent, EntertainmentConfig } from '../types';
 import { USER_ID } from '../constants';
 import { renderTextProtocols, type CommandMode } from './capabilities';
+import { safeTruncate } from './textUtils';
 
 /**
  * Format a timestamp for display in chat history (e.g., "01-15 14:30")
@@ -328,6 +329,21 @@ export function resolveSenderName(
   if (message.senderId === USER_ID) return userName || "User";
   if (message.senderId === 'SYSTEM' || message.isSystem) return "System";
   return allAgents.find(a => a.id === message.senderId)?.name || "Unknown";
+}
+
+/**
+ * Render the quote preview shown above a message that replies to an earlier one.
+ * Carries the target's [ID: ...] label and sender name — without them, models
+ * can't tell WHO is being quoted, and the history never demonstrates what a
+ * {{REPLY: id}} resolves to (or which id to copy when quoting that message).
+ */
+export function formatReplyPreview(
+  replyTarget: Message,
+  allAgents: Agent[],
+  userName?: string
+): string {
+  const senderName = resolveSenderName(replyTarget, allAgents, userName);
+  return `[Replying to [ID: ${replyTarget.id}] ${senderName}: "${safeTruncate(replyTarget.text, 50)}..."]`;
 }
 
 /**

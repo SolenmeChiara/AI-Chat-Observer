@@ -10,6 +10,7 @@ import {
   buildMemoryContext,
   filterVisibleMessages,
   formatMessageText,
+  formatReplyPreview,
   appendDocumentAttachments
 } from './shared';
 import { renderToolSchemas, getCommandMode, type CapabilityCall } from './capabilities';
@@ -141,7 +142,7 @@ export async function* streamAnthropicReply(
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);
         if (replyTarget) {
-            textContent = `[Replying to: "${safeTruncate(replyTarget.text, 50)}..."]\n${textContent}`;
+            textContent = `${formatReplyPreview(replyTarget, allAgents, userName)}\n${textContent}`;
         }
     }
 
