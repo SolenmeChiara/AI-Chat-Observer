@@ -1594,12 +1594,13 @@ const App: React.FC = () => {
               if (queryStr) detectedSearchQuery = queryStr;
             }
             // SELF-MUTE (set_silence): any agent may self-mute — no admin gate. Mirrors the
-            // {{SILENCE}} text marker: no duration → 0 (indefinite; execution's `|| 30` still
-            // applies, exactly as for text {{SILENCE}}). First admin-style action wins.
+            // {{SILENCE}} text marker: no duration → 0 (indefinite). An unparseable duration
+            // string falls back to undefined → execution's `?? 30` default, NOT permanent.
+            // First admin-style action wins.
             else if (cap === 'set_silence') {
               if (!detectedAdminAction) {
                 const durStr = asStr((args as any).duration);
-                const duration = durStr ? (parseNativeDuration(durStr) ?? 0) : 0;
+                const duration = durStr ? parseNativeDuration(durStr) : 0;
                 detectedAdminAction = { type: 'MUTE', target: agent.name, duration };
               }
             }
@@ -1951,7 +1952,9 @@ const App: React.FC = () => {
                  if (targetAgent.role === AgentRole.ADMIN) {
                      // Can't mute another admin
                  } else {
-                     const duration = detectedAdminAction.duration || 30;
+                     // ?? not ||: duration 0 means indefinite and must reach handleMuteAgent's
+                     // permanent branch; only a missing duration falls back to the 30-min default.
+                     const duration = detectedAdminAction.duration ?? 30;
                      handleMuteAgent(targetAgent.id, duration, agent.name);
                  }
              }

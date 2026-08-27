@@ -151,7 +151,7 @@ export function buildSystemPromptParts(
   const outputFormat = mode === 'native' ? `[OUTPUT FORMAT]
 Write your reply directly — no wrapper. Whatever text you output IS your message.
 - Stay silent: output only {{PASS}}
-- Quote old message: messages in the chat log carry an [ID: ...] label. Copy that exact id string into the marker and START your reply with it, closing braces required. Example — to quote the log line "[08-27 14:31] [ID: 1780000000001-1111] Alice: the budget is too high", begin your reply with: {{REPLY: 1780000000001-1111}} followed by your text. Never write the [ID: ...] label itself in your own output.
+- Quote old message: messages in the chat log carry an [ID: ...] label. Copy that exact id string into the marker and START your reply with it, closing braces required. Example — to quote the log line "[ID: 1787985060000-1787984000000] Alice: the budget is too high", begin your reply with: {{REPLY: 1787985060000-1787984000000}} followed by your text. Never write the [ID: ...] label itself in your own output.
 - @mention: use @Name only when directly addressing someone` : `[OUTPUT FORMAT]
 You MUST use one of these formats. Unwrapped text is discarded.
 - Speak: {{RESPONSE: your message}}
