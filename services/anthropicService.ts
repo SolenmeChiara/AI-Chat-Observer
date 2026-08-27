@@ -7,6 +7,7 @@ import {
   buildAttentionInstruction,
   buildProtocols,
   buildSystemPromptParts,
+  buildEndOfLogPrompt,
   buildMemoryContext,
   filterVisibleMessages,
   formatMessageText,
@@ -224,10 +225,12 @@ export async function* streamAnthropicReply(
     }
   }
 
-  // Add end-of-log format reminder as the last thing the model sees
-  const endOfLogText = commandMode === 'native'
-    ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
-    : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`;
+  // Add end-of-log block as the last thing the model sees. It carries the per-turn
+  // volatile context (time / recall / attention) that used to live in the system prompt:
+  // Anthropic's cache prefix order is tools → system → messages, so a system block that
+  // changes every second invalidated breakpoint #2 above on every single call. Here it
+  // sits after the breakpoint, where changing every turn costs nothing.
+  const endOfLogText = buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode);
   const endOfLogBlock = { type: "text", text: endOfLogText };
   if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
     const lastMsg = formattedMessages[formattedMessages.length - 1];
@@ -279,6 +282,19 @@ export async function* streamAnthropicReply(
     ? renderToolSchemas({ agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName }, 'anthropic')
     : [];
 
+  // System blocks: stable (persona/protocols) carries the first cache breakpoint; the
+  // memory block sits AFTER breakpoint #1 but inside breakpoint #2's prefix — it only
+  // changes when the summary is recomputed (or admin notes change), so eating one
+  // breakpoint-#2 miss then is cheaper than a per-turn write surcharge.
+  // Nothing per-turn may appear here (see endOfLogText above). The memory block is
+  // omitted when blank — Anthropic 400s on an empty text block.
+  const systemBlocks: any[] = [
+    { type: 'text', text: systemParts.stable, cache_control: { type: 'ephemeral' } }
+  ];
+  if (systemParts.memory.trim()) {
+    systemBlocks.push({ type: 'text', text: systemParts.memory });
+  }
+
   const MAX_RETRIES = 3;
   let response: Response | undefined;
 
@@ -289,15 +305,7 @@ export async function* streamAnthropicReply(
         const body: any = {
             model: modelId,
             max_tokens: maxTokensConfig,
-            // Prompt caching: breakpoint sits AFTER the stable block (persona/protocols/members),
-            // so it stays byte-identical across turns and gets cache READS (0.1x) instead of
-            // being rewritten (1.25x) every turn. The dynamic block (time/recall/attention)
-            // lives outside the cached prefix — putting it before the breakpoint would bust
-            // the cache every single call (the Time line changes every second).
-            system: [
-                { type: 'text', text: systemParts.stable, cache_control: { type: 'ephemeral' } },
-                { type: 'text', text: systemParts.dynamic }
-            ],
+            system: systemBlocks,
             messages: formattedMessages,
             stream: true
         };

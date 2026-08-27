@@ -119,15 +119,26 @@ export function buildProtocols(
 }
 
 /**
- * System prompt split for prompt caching:
+ * System prompt split for prompt caching. Three tiers, ordered by how often they change:
+ *
  * - stable: persona / members / output format / protocols — byte-identical across
  *   turns as long as group config doesn't change. Safe to put a cache breakpoint after.
- * - dynamic: time / recall / attention / shared memory — changes every turn (the
- *   Time line changes every SECOND), so it must live outside the cached prefix.
+ * - memory: the [SHARED MEMORY] block (summary + admin notes) — only changes when the
+ *   summary is recomputed (every N messages), so it may stay INSIDE the cached prefix:
+ *   one full rewrite per recompute is far cheaper than paying the 1.25x write surcharge
+ *   on every single turn.
+ * - perTurn: time / recall / attention — changes on EVERY request (the Time line changes
+ *   every SECOND). This must sit outside every cache prefix, which means outside the
+ *   system block entirely: Anthropic's prefix order is tools → system → messages, so a
+ *   volatile system block invalidates not just itself but every breakpoint in the message
+ *   history downstream of it. Same for OpenAI/Gemini automatic prefix caching, where the
+ *   system message is the very head of the prefix. Callers append perTurn to the tail
+ *   [END OF LOG] user turn instead — see buildEndOfLogPrompt.
  */
 export interface SystemPromptParts {
   stable: string;
-  dynamic: string;
+  memory: string;
+  perTurn: string;
 }
 
 export function buildSystemPromptParts(
@@ -181,20 +192,57 @@ ${protocolNote}
 ${adminProtocol}${searchToolProtocol}${entertainmentProtocol}${pmProtocol}${splitProtocol}
   `;
 
-  const dynamic = `
-${memoryContext}
-[NOW]
-Time: ${new Date().toLocaleString()}
-${myLastActionContext}
-${attentionInstruction}
-  `;
+  // Memory tier: changes only when the summary/admin notes are recomputed, so it is
+  // allowed to ride inside the cached prefix. Kept verbatim (buildMemoryContext already
+  // supplies its own surrounding whitespace).
+  const memory = memoryContext;
 
-  return { stable, dynamic };
+  // Per-turn tier: the Time line changes every second, so anything in here poisons any
+  // cache prefix it lands in. Empty pieces are dropped so we don't emit blank lines.
+  const perTurn = [
+    `[NOW]\nTime: ${new Date().toLocaleString()}`,
+    myLastActionContext,
+    attentionInstruction,
+  ].filter(s => s && s.trim()).join('\n');
+
+  return { stable, memory, perTurn };
 }
 
 /**
- * Assemble the full system prompt as a single string (stable + dynamic).
- * Providers without an explicit cache-block API use this combined form.
+ * The cacheable head of the system prompt: stable + memory, with the per-turn lines
+ * deliberately left out. Providers without an explicit cache-block API (OpenAI, Gemini)
+ * send exactly this as their system message / systemInstruction, so their automatic
+ * prefix caching can match it byte-for-byte across turns.
+ */
+export function buildCacheableSystemPrompt(parts: SystemPromptParts): string {
+  return parts.memory.trim() ? `${parts.stable}\n${parts.memory}` : parts.stable;
+}
+
+/**
+ * The tail user turn: [END OF LOG] header + per-turn volatile context + trigger sentence.
+ *
+ * Everything here changes every turn by construction, so it must be the LAST thing in the
+ * request and must never sit inside a cached prefix. The trigger sentence stays last so
+ * the output-format reminder remains the instruction closest to the model's own output.
+ */
+export function buildEndOfLogPrompt(
+  perTurn: string,
+  agentName: string,
+  mode: CommandMode = 'text'
+): string {
+  const trigger = mode === 'native'
+    ? `It is now your turn, ${agentName}. Output your reply directly, or output {{PASS}} to stay silent.`
+    : `It is now your turn, ${agentName}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`;
+  return ['[END OF LOG]', perTurn, trigger].filter(s => s && s.trim()).join('\n');
+}
+
+/**
+ * Assemble the full system prompt as one string (stable + memory + perTurn).
+ *
+ * LEGACY — currently unused by the chat path and kept only for compatibility with any
+ * out-of-tree caller. Do NOT use it for a chat request: folding perTurn into the system
+ * block is exactly the bug that made every provider's prompt cache miss on every turn.
+ * Use buildCacheableSystemPrompt for the system block and buildEndOfLogPrompt for the tail.
  */
 export function buildSystemPrompt(
   scenario: string | undefined,
@@ -212,7 +260,7 @@ export function buildSystemPrompt(
     scenario, memoryContext, agent, memberList, userName, userPersona,
     myLastActionContext, attentionInstruction, protocols, mode
   );
-  return `${parts.stable}\n${parts.dynamic}`;
+  return [parts.stable, parts.memory, parts.perTurn].filter(s => s && s.trim()).join('\n');
 }
 
 /**

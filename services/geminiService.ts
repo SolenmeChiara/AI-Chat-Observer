@@ -7,7 +7,9 @@ import {
   buildMemberList,
   buildAttentionInstruction,
   buildProtocols,
-  buildSystemPrompt,
+  buildSystemPromptParts,
+  buildCacheableSystemPrompt,
+  buildEndOfLogPrompt,
   buildMemoryContext,
   filterVisibleMessages,
   formatMessageText,
@@ -131,12 +133,16 @@ export async function* streamGeminiReply(
   // Memory Context
   const memoryContext = buildMemoryContext(summary, adminNotes);
 
-  // System Instruction
-  const systemPrompt = buildSystemPrompt(
+  // System Instruction. Gemini's implicit caching matches on the request prefix
+  // (systemInstruction first, then contents), so only the cacheable tiers go here:
+  // persona/protocols + shared memory. The per-turn lines (time/recall/attention) would
+  // change the very first bytes of that prefix every call, so they ride the trigger turn.
+  const systemParts = buildSystemPromptParts(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
     attentionInstruction, protocols, commandMode
   );
+  const systemPrompt = buildCacheableSystemPrompt(systemParts);
 
   const formattedContents: any[] = [];
 
@@ -213,10 +219,9 @@ export async function* streamGeminiReply(
     formattedContents.push({ role, parts });
   }
 
-  // Last turn: The "Trigger"
-  const triggerText = commandMode === 'native'
-    ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
-    : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`;
+  // Last turn: The "Trigger". Also carries the per-turn volatile context (time / recall /
+  // attention) that used to sit in systemInstruction and broke the cache prefix on every call.
+  const triggerText = buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode);
   formattedContents.push({
     role: 'user',
     parts: [{ text: triggerText }]
@@ -229,7 +234,9 @@ export async function* streamGeminiReply(
   const modelLower = modelId.toLowerCase();
   const supportsSystemInstruction = !modelLower.includes('gemma');
 
-  // If model doesn't support system instruction, prepend it as first user message
+  // If model doesn't support system instruction, prepend it as first user message.
+  // systemPrompt is already the cacheable head only (stable + memory), so this fallback
+  // keeps the prefix byte-stable too — the per-turn lines are down in triggerText.
   const finalContents = supportsSystemInstruction
     ? formattedContents
     : [

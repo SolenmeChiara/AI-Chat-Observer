@@ -6,7 +6,9 @@ import {
   buildMemberList,
   buildAttentionInstruction,
   buildProtocols,
-  buildSystemPrompt,
+  buildSystemPromptParts,
+  buildCacheableSystemPrompt,
+  buildEndOfLogPrompt,
   buildMemoryContext,
   filterVisibleMessages,
   formatMessageText,
@@ -118,12 +120,16 @@ export async function* streamOpenAIReply(
   // Memory Context
   const memoryContext = buildMemoryContext(summary, adminNotes);
 
-  // System Prompt Injection
-  const systemInstruction = buildSystemPrompt(
+  // System Prompt Injection. Only the cacheable tiers (persona/protocols + shared memory)
+  // go in the system message: OpenAI's automatic prefix caching matches from the very
+  // first token, so the per-turn lines (time/recall/attention) would break the match on
+  // every single call. They ride the tail [END OF LOG] turn instead.
+  const systemParts = buildSystemPromptParts(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
     attentionInstruction, protocols, commandMode
   );
+  const systemInstruction = buildCacheableSystemPrompt(systemParts);
 
   const formattedMessages = [
     { role: 'system', content: systemInstruction },
@@ -163,9 +169,7 @@ export async function* streamOpenAIReply(
 
        return { role: 'user', content: textContent };
     }),
-    { role: 'user', content: commandMode === 'native'
-      ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
-      : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.` }
+    { role: 'user', content: buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode) }
   ];
 
   // Native track: assemble Chat Completions tool schemas once (omitted when empty).
@@ -505,11 +509,14 @@ export async function* streamOpenAIResponsesReply(
   const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents, commandMode);
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
   const memoryContext = buildMemoryContext(summary, adminNotes);
-  const systemInstruction = buildSystemPrompt(
+  // `instructions` is the head of the Responses cache prefix — only the cacheable tiers
+  // (persona/protocols + shared memory) belong here. Per-turn lines go on the tail turn.
+  const systemParts = buildSystemPromptParts(
     scenario, memoryContext, agent, memberList,
     userName, userPersona, myLastActionContext,
     attentionInstruction, protocols, commandMode
   );
+  const systemInstruction = buildCacheableSystemPrompt(systemParts);
 
   // Build input items (Responses API accepts messages-style input)
   const inputItems: any[] = visibleMessages.map(m => {
@@ -546,9 +553,7 @@ export async function* streamOpenAIResponsesReply(
 
   inputItems.push({
     role: 'user',
-    content: commandMode === 'native'
-      ? `[END OF LOG]\nIt is now your turn, ${agent.name}. Output your reply directly, or output {{PASS}} to stay silent.`
-      : `[END OF LOG]\nIt is now your turn, ${agent.name}. You MUST wrap your reply in {{RESPONSE: ...}} or use {{PASS}}. Raw text without wrapper will be discarded.`
+    content: buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode)
   });
 
   // Native track: Responses function tools (top-level `{type:'function', name, ...}` shape),
