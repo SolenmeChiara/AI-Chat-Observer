@@ -182,7 +182,7 @@ export async function* streamGeminiReply(
     }
 
     // Text Part WITH ID AND TIMESTAMP INJECTION
-    let textContent = formatMessageText(m, agent, allAgents, userName, isSelf, false);
+    let textContent = formatMessageText(m, agent, allAgents, userName, isSelf, false, commandMode);
 
     if (m.replyToId) {
         const replyTarget = messages.find(msg => msg.id === m.replyToId);

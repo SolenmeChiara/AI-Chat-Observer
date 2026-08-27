@@ -134,7 +134,7 @@ export async function* streamOpenAIReply(
        }
 
        // OpenAI: all messages get timestamp (addTimestampToSelf=true)
-       let textContent = formatMessageText(m, agent, allAgents, userName, false, true);
+       let textContent = formatMessageText(m, agent, allAgents, userName, false, true, commandMode);
 
        // Handle Quote/Reply
        if (m.replyToId) {
@@ -517,7 +517,7 @@ export async function* streamOpenAIResponsesReply(
       return { role: 'user', content: `${searchLabel}\n${m.text}\n[End of search results. Now respond based on the above.]` };
     }
 
-    let textContent = formatMessageText(m, agent, allAgents, userName, false, true);
+    let textContent = formatMessageText(m, agent, allAgents, userName, false, true, commandMode);
 
     if (m.replyToId) {
       const replyTarget = messages.find(msg => msg.id === m.replyToId);

@@ -281,11 +281,15 @@ export function filterVisibleMessages(
 
 /**
  * Format a single message's text content for inclusion in the chat history
- * sent to an AI model. Wraps AI messages in {{RESPONSE:}}, adds timestamp/ID labels.
+ * sent to an AI model. Adds timestamp/ID labels; on the text track, AI messages
+ * are additionally wrapped in {{RESPONSE:}} as a format demonstration. The native
+ * track skips the wrapper — those models never emit it, and replaying it in
+ * history teaches them to imitate a format the parser no longer expects.
  *
  * @param isSelf - whether this message was sent by the current agent
  * @param addTimestampToSelf - if false, self messages get only the wrapped text (Gemini/Anthropic style);
  *                             if true, all messages get the full timestamp label (OpenAI style)
+ * @param mode - the viewing agent's command track; 'text' wraps AI messages in {{RESPONSE:}}
  */
 export function formatMessageText(
   message: Message,
@@ -293,7 +297,8 @@ export function formatMessageText(
   allAgents: Agent[],
   userName: string | undefined,
   isSelf: boolean,
-  addTimestampToSelf: boolean
+  addTimestampToSelf: boolean,
+  mode: CommandMode = 'text'
 ): string {
   const senderName = message.senderId === USER_ID
     ? (userName || "User")
@@ -304,7 +309,7 @@ export function formatMessageText(
   const timeStr = formatMessageTime(message.timestamp);
   const pmLabel = message.pmTargetId ? ' [PM]' : '';
   const isAI = !message.isSystem && message.senderId !== USER_ID && message.senderId !== 'SYSTEM' && message.senderId !== 'narrator';
-  const wrappedText = isAI ? `{{RESPONSE: ${message.text}}}` : message.text;
+  const wrappedText = isAI && mode !== 'native' ? `{{RESPONSE: ${message.text}}}` : message.text;
 
   if (isSelf && !addTimestampToSelf) {
     return wrappedText;

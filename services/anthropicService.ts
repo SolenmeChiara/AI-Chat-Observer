@@ -134,7 +134,7 @@ export async function* streamAnthropicReply(
     const timeStr = formatMessageTime(m.timestamp);
     const pmLabel = m.pmTargetId ? ' [PM]' : '';
     const isAI = !m.isSystem && m.senderId !== USER_ID && m.senderId !== 'SYSTEM' && m.senderId !== 'narrator';
-    const wrappedText = isAI ? `{{RESPONSE: ${m.text}}}` : m.text;
+    const wrappedText = isAI && commandMode !== 'native' ? `{{RESPONSE: ${m.text}}}` : m.text;
     let textContent = isSelf ? wrappedText : `[${timeStr}] [ID: ${m.id}]${pmLabel} ${senderName}: ${wrappedText}`;
 
     // Handle Reply Reference
