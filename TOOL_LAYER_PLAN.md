@@ -45,7 +45,9 @@
 **决策二:原生轨「正文即发言」,PASS 沿用文本标记。**
 原生轨不再需要 `{{RESPONSE:}}` wrapper——模型直接输出的文本就是发言;想沉默就输出 `{{PASS}}`(**不做成工具**,沿用文本标记);空输出视同 PASS(与现有 isFormatError 行为一致,App.tsx:1847)。这样省 token、杜绝 wrapper 泄漏类 bug、输出更自然。三家 API 都支持正文与 tool call 并存(Anthropic text+tool_use blocks / OpenAI content+tool_calls / Gemini text part + functionCall part),所以「发言 + 搜索」同回合仍然成立。
 
-PASS 不工具化的理由(Sol 拍板,2026-07-10):工具的价值在结构化参数,pass 无参数,工具化只有仪式感;而 `{{PASS}}` 的文本检测(含流中提前 break 的优化,App.tsx:1561-1564)在原生轨的流消费循环里零成本继承。由此确立**工具化取舍原则:带结构化参数、有格式出错风险的能力才值得工具化;纯标记类沿用文本**。据此 `{{REPLY: id}}` 同样保留文本标记。
+PASS 不工具化的理由(Sol 拍板,2026-07-10):工具的价值在结构化参数,pass 无参数,工具化只有仪式感;而 `{{PASS}}` 的文本检测(含流中提前 break 的优化,App.tsx:1561-1564)在原生轨的流消费循环里零成本继承。由此确立**工具化取舍原则:带结构化参数、有格式出错风险的能力才值得工具化;纯标记类沿用文本**。
+
+> **2026-08-28 修订(Sol 拍板)**:REPLY 从「纯标记」重新归类为「带结构化参数」并工具化(commit 9573931)。理由:`{{REPLY: id}}` 携带长 opaque id,恰恰属于「有格式出错风险」的一类——小模型写坏标记会把裸花括号漏进可见正文,而工具调用失败只丢引用、正文无损,失败模式不对称(完整论证见 capabilities.ts 头部注释)。原则本身不变,变的是 REPLY 的归类;PASS 维持文本标记。`{{REPLY:}}` 文本解析与 `[Replying to]` 宽进保留作兜底,优先级:显式文本标记 > 工具调用 > 宽进。
 
 **决策三:SEARCH 复用现有搜索事务,不做请求内 loop(Phase 3 再议)。**
 原生轨模型调用 `search` 工具后,本回合正常结束,搜索结果照旧作为系统消息落地,由现有 searchTxnRef 事务(App.tsx:144, 1968-2060, 2489-2517)驱动二次触发。**不存在 tool_use/tool_result 配对问题**:本项目每次请求的历史是从群聊记录重新文本化拼装的(filterVisibleMessages → 群聊 log),上一回合的 tool_use block 根本不会以 API 原生形态进入下一次请求,所以无需回传 tool_result。请求内多轮 loop(同回合拿到结果继续说)留作 Phase 3 增强。
@@ -72,7 +74,7 @@ interface CapabilityDef {
 |---|---|---|---|
 | ~~pass~~ | — | **不工具化**:两轨都用 `{{PASS}}` 文本 | App.tsx:1849-1881(yieldedAgentIds) |
 | `search` | `query: string` | 进搜索事务 | App.tsx:1968-2060 |
-| ~~reply_to~~ | — | **不工具化**:两轨都用 `{{REPLY: id}}` 文本 | replyToId(App.tsx:1716) |
+| `reply` | `message_id: string` | ~~不工具化~~ → **已工具化**(2026-08-28,见决策二修订) | detectedReplyId 桥接;文本标记与宽进保留作兜底 |
 | `set_silence` | `duration?` | 自我禁言 | admin 动作块 1755-1769 |
 | `mute` / `unmute` | `name, duration?` | admin 禁言 | 同上(admin gate 保留) |
 | `add_note` / `del_note` / `clear_notes` | `content` / `keyword` / 无 | 群公告板 | 1732-1754 |
@@ -90,8 +92,8 @@ availability 与现有条件一一对应:admin 三件套仅 `role===ADMIN`;searc
 ### 2.5 system prompt 的分轨
 
 原生轨的 systemPrompt 组装差异(shared.ts:204-241 加分支或平行函数):
-- `[OUTPUT FORMAT]` 段(shared.ts:232-239)去掉 RESPONSE wrapper 教学,换成「直接输出你的发言即可;想保持沉默就只输出 `{{PASS}}`」——PASS/REPLY 的文本教学**保留**(它们两轨通用);
-- 已工具化能力的 protocol 教学文本不拼(工具 schema 的 description 自带教学);PASS/REPLY/`[SPLIT]` 等文本标记的教学照拼;
+- `[OUTPUT FORMAT]` 段(shared.ts:232-239)去掉 RESPONSE wrapper 教学,换成「直接输出你的发言即可;想保持沉默就只输出 `{{PASS}}`」——PASS 的文本教学**保留**(REPLY 教学已随 2026-08-28 工具化撤出 native 轨,教学移入工具 description;text 轨保留);
+- 已工具化能力的 protocol 教学文本不拼(工具 schema 的 description 自带教学);PASS/`[SPLIT]` 等文本标记的教学照拼;
 - `buildAttentionInstruction`(shared.ts:43-85)内嵌的 `{{RESPONSE:}}` 字样按轨换措辞(`{{PASS}}` 字样不用动);
 - 四个 service 末尾硬编码的触发消息「You MUST wrap your reply in {{RESPONSE:…}}」(geminiService.ts:210-213 / anthropicService.ts:205 / openaiService.ts:159, 489)按轨换文案(原生轨:「直接输出发言,或输出 {{PASS}} 保持沉默」)。**这四处最容易漏,施工时逐一核对。**
 
@@ -146,7 +148,7 @@ tool call 生成期间没有 text delta,占位气泡会像卡死。检测到 too
 
 ### Phase 2 — 三家补齐 + 能力补全
 - Anthropic → OpenAI Chat → OpenAI Responses 逐家实现(每家独立 commit);
-- 能力从 {search} 扩到全集(2.3 节映射表,PASS/REPLY 除外——它们永远走文本);
+- 能力从 {search} 扩到全集(2.3 节映射表,PASS 除外——它走文本;REPLY 后于本 Phase 在 2026-08-28 工具化);
 - **验收**:四路 provider 各建一个 native agent 过全能力冒烟;混合群长跑一场无异常。
 
 ### Phase 3 — 增强(按需,不承诺)
@@ -167,6 +169,7 @@ tool call 生成期间没有 text delta,占位气泡会像卡死。检测到 too
 | attention/触发消息里的协议字样漏改 | 2.5 节四处清单,施工 checklist 逐条勾 |
 | 原生轨模型误输出其他 `{{XXX}}` 文本指令 | 现有清洗链(App.tsx:1886-1898)照跑,无害兜底 |
 | PASS/REPLY 不工具化(Sol 拍板 2026-07-10) | 无参数/纯标记类能力工具化收益为零,文本检测零成本继承;确立「带结构化参数才工具化」原则 |
+| REPLY 工具化(Sol 拍板 2026-08-28,推翻上行对 REPLY 的适用;PASS 维持) | id 型参数失败模式不对称:坏标记污染正文,坏工具调用只丢引用;小模型实测抄坏文本标记后此取舍成立(commit 9573931) |
 
 ---
 
