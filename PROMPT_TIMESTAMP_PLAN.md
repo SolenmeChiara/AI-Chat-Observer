@@ -44,7 +44,26 @@ formatMessageText 的 agent 形参已是死参。
 - 观察 RESTRAINT 场景 PASS 率有无异动(attention 指令从 system 移入 user 轮尾部,
   审查 N3,预计中性偏正)。
 
+## 后续批次(2026-08-28)
+
+- **REPLY 工具化**(9573931 + 文档 c74999c):引用回复成为第 11 个 native 工具,
+  quote-only 空正文回合走 PASS。冒烟重点:OpenAI 兼容 native agent 引用时是否吐正文
+  (审查 N1:该系惯例 tool_calls+content:null,引用即哑火+5 条冷却,无 follow-up 兜底,
+  实测普遍空正文再议);被引者是否拿到下一轮;text 轨混群零影响。
+- **Persona 切换修复 + i18n 一帧滞后**(da14997):设置页「设为当前」补写 legacy 三件套,
+  加载时自愈错位库;App 的 tt 改为从 settings.language 直接派生。
+
 ## 暂缓清单(审计发现、Sol 未点名,按价值排序)
+
+- **i18n 硬编码中文批次**(诊断报告 P1/P2):TTS 描述、modelFetcher/searchService/
+  provider 报错文案约百处绕过 i18n;en 表缺 4 个 key(App.tsx 搜索限流两处);
+  exportHtml/Sidebar 硬编码 zh-CN locale;index.html lang/title 不随设置变。体力活,
+  适合 sonnet 批量。
+- **Persona 结构性改造**(诊断修复 3):停用 legacy 三件套作权威源,消费点(约 15 处)
+  改为按 activeProfileId 派生;narrator 回落语义需显式保留。
+- **isFormatError 不跑伪标签清洗**(REPLY 工具化审查 N2,既有缺口):正文只有伪预览行/
+  伪日志头时仍落空气泡(现在还带 replyToId)。修法:nativeCleanedBody 链尾追加两个纯
+  函数,会连带改变纯文本场景行为,单独一批。
 
 - **正向语用教学**(第一轮审计 S1):native 轨全上下文抑制:鼓励 = 6:1,无任何
   「针对具体内容回应」教学。若统一标签批次后 agent 仍「接不上话」,这是下一刀。
