@@ -1631,8 +1631,10 @@ const App: React.FC = () => {
 
       // SEARCH COMMAND STATE
       let detectedSearchQuery: string | null = null;
-      // NATIVE TOOL STATE: whether any native tool call arrived this turn (Phase 1: search).
+      // NATIVE TOOL STATE: whether any *effectful* native tool call arrived this turn.
       // Used only in native mode to keep a tool-only turn from being misread as a format-error PASS.
+      // `reply` is deliberately excluded (it only annotates the message this turn produces —
+      // no effect of its own), so a quote-only turn with no prose still falls through to PASS.
       let receivedNativeToolCall = false;
 
       // PM COMMAND STATE
@@ -1675,10 +1677,15 @@ const App: React.FC = () => {
         // unchanged dispatch logic below drives it. Phase 1 wires only `search`; other
         // capabilities still travel the text track for native agents. Text agents never emit toolCalls.
         if (chunk.toolCalls && chunk.toolCalls.length > 0) {
-          receivedNativeToolCall = true;
           for (const call of chunk.toolCalls) {
             const cap = call.capability;
             const args = call.args || {};
+            // Every tool but `reply` carries a side effect that only the speak branch runs
+            // (search transaction, PM delivery, dice/tarot markers) or an effect already
+            // executed before the branch (admin/self-mute) whose turn is expected to speak.
+            // `reply` alone produces nothing on its own, so it must not keep an empty turn
+            // out of the format-error PASS path — see the isFormatError decision below.
+            if (cap !== 'reply') receivedNativeToolCall = true;
             if (cap === 'search' && hasSearchTool && !disableSearch && !detectedSearchQuery) {
               const rawQuery = call.args?.query;
               const queryStr = typeof rawQuery === 'string'
@@ -1766,6 +1773,33 @@ const App: React.FC = () => {
               if (typeof rawCount === 'number' && Number.isFinite(rawCount)) count = Math.floor(rawCount);
               else if (typeof rawCount === 'string' && rawCount.trim() && Number.isFinite(Number(rawCount))) count = Math.floor(Number(rawCount));
               nativeTarotCounts.push(count);
+            }
+            // QUOTE (reply): a pure annotation — it feeds the SAME detectedReplyId the
+            // text-track {{REPLY: id}} regex fills, so the quote lands through the unchanged
+            // downstream path (stamped onto the first segment's replyToId at finalize time).
+            // No second source of truth is introduced.
+            //
+            // PRECEDENCE, given the two tracks can in principle both fire in one turn:
+            //   1. an explicit {{REPLY: id}} at the head of the body always wins — the
+            //      streaming chain re-derives it from the full accumulated text on EVERY
+            //      text chunk and assigns unconditionally, so it overwrites whatever the
+            //      bridge set, whichever arrived first. Intentional: that marker is visible
+            //      in the model's own output and is stripped from the body either way;
+            //   2. this tool call wins over anything softer — it never overwrites a value
+            //      already set (first-come-first-served against itself: a second reply call
+            //      in the same turn is warned and ignored, one quote per message);
+            //   3. the lenient [Replying to] preview recovery stays a pure fallback in both
+            //      the streaming and the finalize chain (`!detectedReplyId &&` guarded), so
+            //      it can never override an explicit marker or a tool call.
+            else if (cap === 'reply') {
+              const messageId = asStr((args as any).message_id);
+              if (!messageId) {
+                console.warn(`[${agent.name}] ⚠️ reply tool call missing 'message_id'`);
+              } else if (detectedReplyId) {
+                console.warn(`[${agent.name}] ⚠️ Ignoring extra reply tool call (quote already set): '${messageId}'`);
+              } else {
+                detectedReplyId = messageId;
+              }
             }
             // Unknown capability name: no-op by design. Server-side tool invocations surfaced
             // by includeServerSideToolInvocations (Gemini grounding etc.) may arrive here with
@@ -2182,8 +2216,14 @@ const App: React.FC = () => {
       if (isNativeCommandMode) {
         // Native: strip the same instruction markers the finalText cleanup removes (below),
         // then a turn is a format error ONLY when nothing remains AND there is no {{PASS}}
-        // AND no native tool call. A tool-only turn (e.g. search with no prose) must NOT be
-        // forced to PASS, or the search transaction in the speak branch would never run.
+        // AND no effectful native tool call. A tool-only turn (e.g. search with no prose) must
+        // NOT be forced to PASS, or the search transaction in the speak branch would never run.
+        // The one exception is a quote-only turn: `reply` does not set receivedNativeToolCall,
+        // so "called reply, said nothing" lands here as a format error → PASS → the placeholder
+        // is removed. Without that, the speak branch would store an empty message carrying only
+        // a replyToId — a quote bubble with no words. It also keeps the REPLY PRIORITY handoff
+        // honest: that logic reads the LAST STORED message's replyToId, so a turn that stores
+        // nothing cannot hand the next slot to the quoted member.
         const nativeCleanedBody = extractedContent
           .replace(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/, '')
           .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')

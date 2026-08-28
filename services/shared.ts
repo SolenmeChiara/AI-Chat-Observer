@@ -156,13 +156,22 @@ export function buildSystemPromptParts(
   const { adminProtocol, searchToolProtocol, entertainmentProtocol, pmProtocol, splitProtocol } = protocols;
 
   // [OUTPUT FORMAT] differs by track. Native drops the {{RESPONSE:}} wrapper teaching
-  // (the raw reply IS the message); {{PASS}} / {{REPLY}} stay text markers on both tracks.
+  // (the raw reply IS the message); {{PASS}} stays a text marker on both tracks.
   // Self-mute is a native tool (set_silence) as of Phase 2, so its {{SILENCE}} text
   // teaching is removed from the native block — text mode keeps it below.
+  //
+  // Quoting is a native tool too as of 2026-08-27 (`reply`, capabilities.ts), so the
+  // native bullet's {{REPLY: id}} syntax lesson moved into that tool's description.
+  // What could NOT move is the second half of the old bullet — the ban on reproducing
+  // the "[ID: ...] [MM-DD HH:mm] Name:" log header. That ban is about every line the
+  // model writes, not about quoting, and it is the only thing standing between the
+  // id-first history format (dc69336) and models parroting the header back into their
+  // prose. It is kept here verbatim, now on its own bullet. Text mode is untouched:
+  // the text track still teaches {{REPLY:}} in its own bullet below.
   const outputFormat = mode === 'native' ? `[OUTPUT FORMAT]
 Write your reply directly — no wrapper. Whatever text you output IS your message.
 - Stay silent: output only {{PASS}}
-- Quote old message: messages in the chat log carry an [ID: ...] label. Copy that exact id string into the marker and START your reply with it, closing braces required. Example — to quote the log line "[ID: 1787855460000-1787230800000] [08-27 14:31] Alice: the budget is too high", begin your reply with: {{REPLY: 1787855460000-1787230800000}} followed by your text. Every log line begins with a system-added "[ID: ...] [MM-DD HH:mm] Name:" header, your own lines included — never reproduce that header or any part of it in your own output; write only your message body.
+- Log header: Every log line begins with a system-added "[ID: ...] [MM-DD HH:mm] Name:" header, your own lines included — never reproduce that header or any part of it in your own output; write only your message body.
 - @mention: use @Name only when directly addressing someone` : `[OUTPUT FORMAT]
 You MUST use one of these formats. Unwrapped text is discarded.
 - Speak: {{RESPONSE: your message}}

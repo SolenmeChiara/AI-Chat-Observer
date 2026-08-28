@@ -14,12 +14,21 @@ import type { ProtocolStrings } from './shared';
  *   - native track (Phase 1+): tool schemas derived from `description` +
  *     `paramsSchema` — defined here but NOT consumed yet.
  *
- * PASS / REPLY / [SPLIT] are intentionally NOT capabilities (see plan 2.3):
- * pure markers stay on the text track — they carry no structured parameters, so
- * tool-ifying them buys nothing and the text detection is inherited for free.
+ * PASS / [SPLIT] are intentionally NOT capabilities (see plan 2.3): pure markers
+ * stay on the text track — they carry no structured parameters, so tool-ifying
+ * them buys nothing and the text detection is inherited for free.
  * `set_silence` DOES take a (structured, constrained) duration, so as of Phase 2
  * it is a capability and a native tool; only its text teaching lives in the
  * OUTPUT FORMAT block (shared.ts), suppressed there for native agents.
+ *
+ * `reply` joined them later (Sol, 2026-08-27), overriding plan 2.3's "pure marker
+ * → text only" rule for this one case. The rule assumed the failure modes were
+ * symmetric; they are not. `{{REPLY: id}}` carries a long opaque id that small
+ * models routinely mangle — a wrong-shaped marker leaks raw braces into the visible
+ * message body. A failed tool call, by contrast, costs only the quote: the prose is
+ * untouched. The failure mode is strictly better, so the id-carrying half of REPLY
+ * is now a tool. The text marker and the lenient [Replying to] recovery both stay
+ * (native models still write the marker occasionally) — see App.tsx's bridge.
  */
 
 /**
@@ -59,7 +68,8 @@ export type CapabilityId =
   | 'set_silence'
   | 'send_pm'
   | 'roll_dice'
-  | 'draw_tarot';
+  | 'draw_tarot'
+  | 'reply';
 
 /**
  * All inputs the availability predicates need. Mirrors the parameter set of
@@ -92,12 +102,15 @@ const isGroupAdmin = (ctx: CapabilityContext): boolean =>
   ctx.agent.role === AgentRole.ADMIN || !!ctx.groupAdminIds?.includes(ctx.agent.id);
 
 /**
- * The 10 capabilities, in a stable order (matches CapabilityId's declaration
+ * The 11 capabilities, in a stable order (matches CapabilityId's declaration
  * order — the order also fixes the native tool array, which matters for
  * Anthropic's prompt-cache prefix). availability predicates reproduce,
  * one-for-one, the branch conditions of the legacy buildProtocols; `set_silence`
- * is the one capability with no legacy availability gate — any member may
- * self-mute (matches the always-taught {{SILENCE}} text marker).
+ * and `reply` are the two capabilities with no legacy availability gate — any
+ * member may self-mute or quote (matching the always-taught {{SILENCE}} /
+ * {{REPLY:}} text markers). New capabilities are APPENDED, never inserted: the
+ * emitted tool array is a prompt-cache prefix, so appending costs one cache bust
+ * while an insertion would shift every tool after it for no gain.
  */
 export const CAPABILITIES: CapabilityDef[] = [
   {
@@ -215,6 +228,25 @@ export const CAPABILITIES: CapabilityDef[] = [
     },
     availability: (ctx) => !!ctx.entertainmentConfig?.enableTarot,
   },
+  {
+    id: 'reply',
+    // This description IS the teaching — for small models a tool description lands far
+    // better than a paragraph of prose in [OUTPUT FORMAT], which is why the native-track
+    // {{REPLY:}} lesson was moved here (shared.ts keeps only the log-header ban).
+    // "priority to speak next" is the real mechanism, not flattery: App.tsx's REPLY
+    // PRIORITY block picks the quoted message's sender as the next speaker when it is
+    // eligible. Stating it gives the model a reason to reach for the tool.
+    description: 'Quote a specific earlier message so your reply is visibly attached to it. message_id is the exact id string from that message\'s [ID: ...] label at the START of its line in the chat log — copy it verbatim. Call this alongside your reply text: the tool only attaches the quote, it does not speak for you, and a quote with no text is discarded. The member whose message you quote is given priority to speak next.',
+    paramsSchema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'The exact id from the target message\'s [ID: ...] label.' },
+      },
+      required: ['message_id'],
+      additionalProperties: false,
+    },
+    availability: () => true,
+  },
 ];
 
 const CAPABILITY_BY_ID: Record<CapabilityId, CapabilityDef> = CAPABILITIES.reduce(
@@ -244,8 +276,10 @@ const ADMIN_CAPABILITY_IDS: CapabilityId[] = ['mute', 'unmute', 'add_note', 'del
  * single list both consumers reference:
  *   - renderToolSchemas emits exactly this set (∩ availability);
  *   - renderTextProtocols suppresses exactly this set when mode === 'native'.
- * (PASS / REPLY / [SPLIT] are not registry capabilities and never appear here;
- * they always travel the text track — see plan 2.3.)
+ * (PASS / [SPLIT] are not registry capabilities and never appear here; they always
+ * travel the text track — see plan 2.3. `reply` used to be in that group and is now
+ * a tool, but its text marker survives as a bridge-level fallback — see the header
+ * comment and App.tsx.)
  */
 const NATIVE_TOOL_IDS: CapabilityId[] = [
   'search',
@@ -258,6 +292,7 @@ const NATIVE_TOOL_IDS: CapabilityId[] = [
   'send_pm',
   'roll_dice',
   'draw_tarot',
+  'reply',
 ];
 
 /** JSON-Schema primitive type name → Gemini OpenAPI `Type` enum member (UPPERCASE). */
