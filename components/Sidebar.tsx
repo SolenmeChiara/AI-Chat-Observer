@@ -2102,7 +2102,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                             {settings.activeProfileId !== profile.id && (
                               <button
                                 className="flex-1 text-xs py-1.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded hover:opacity-90"
-                                onClick={() => setSettings({ ...settings, activeProfileId: profile.id })}
+                                onClick={() => setSettings({
+                                  // 与 App.tsx onSwitchProfile 的写入保持一致:指针 + legacy 三件套必须
+                                  // 同时写。只写指针的话,右栏身份卡(读指针)立刻变,而喂给模型的
+                                  // userName/userPersona 和气泡名(读 legacy)不变——「名字变了但没实际
+                                  // 生效,重选一次才好」的 bug 即源于此。
+                                  ...settings,
+                                  activeProfileId: profile.id,
+                                  userName: profile.name,
+                                  userAvatar: profile.avatar,
+                                  userPersona: profile.persona
+                                })}
                               >
                                 {t('设为当前')}
                               </button>

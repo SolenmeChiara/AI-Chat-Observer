@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
 import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile, EntertainmentConfig, DebateConfig, DebateAssignment } from './types';
 import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
@@ -15,7 +15,7 @@ import { AgentType } from './types';
 import { parseFile, compressImage, getBase64Size } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings } from './services/db';
 import { describeImage } from './services/visionProxyService';
-import { I18nProvider, useT, t } from './i18n';
+import { I18nProvider, makeT, t } from './i18n';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
@@ -281,7 +281,19 @@ const App: React.FC = () => {
         setGroups(groupsWithMemoryConfig);
         setSessions(data.sessions);
         // Merge with defaults to ensure new fields like enableConcurrency exist
-        setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
+        const mergedSettings = { ...DEFAULT_SETTINGS, ...data.settings };
+        // Self-heal: 「设为当前」按钮曾只写 activeProfileId 不写 legacy 三件套(已修),
+        // 库里可能存着错位的 settings。按指针重新对齐一次。narrator 模式下 legacy 保存
+        // 的是上一个真实身份,不动;指针悬空(档案已删)也跳过,不把 userName 清掉。
+        if (mergedSettings.activeProfileId && mergedSettings.activeProfileId !== 'narrator') {
+          const activeProfile = (mergedSettings.userProfiles || []).find(p => p.id === mergedSettings.activeProfileId);
+          if (activeProfile) {
+            mergedSettings.userName = activeProfile.name;
+            mergedSettings.userAvatar = activeProfile.avatar;
+            mergedSettings.userPersona = activeProfile.persona;
+          }
+        }
+        setSettings(mergedSettings);
 
         // Ensure activeGroupId and activeSessionId are valid
         const firstGroup = data.groups[0];
@@ -3261,7 +3273,11 @@ const App: React.FC = () => {
   }, [isAutoPlay, messages, agents, processingAgents, triggerAgentReply, settings.breathingTime, settings.enableConcurrency, activeSession.mutedAgentIds, activeSession.yieldedAgentIds, activeSession.yieldedAtCount]);
 
 
-  const tt = useT();
+  // NOT useT(): App renders its own I18nProvider, so it is never a consumer of it —
+  // useT() here returns the context default bound to the module-level locale, which
+  // lags one render behind (main chat chrome stayed Chinese while sidebars switched
+  // to English, until the next unrelated re-render). Bind to settings state directly.
+  const tt = useMemo(() => makeT(settings.language || 'zh'), [settings.language]);
 
   if (!isDbLoaded) {
       return <div className="flex h-screen w-full items-center justify-center bg-gray-100 dark:bg-black text-gray-500 dark:text-gray-400">

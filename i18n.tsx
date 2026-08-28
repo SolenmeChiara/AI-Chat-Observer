@@ -392,6 +392,15 @@ export function t(key: string): string {
   return resolve(key);
 }
 
+// Locale-bound resolver for components that sit ABOVE (or outside) I18nProvider —
+// useT() there returns the context default, which reads the module-level
+// currentLocale and lags one render behind the provider (App's own chrome was
+// stuck in Chinese for a frame after switching to English, until the next
+// unrelated re-render). Bind directly to the state the caller owns instead.
+export function makeT(locale: Locale): (key: string) => string {
+  return (key: string) => (locale === 'zh' ? key : (en[key] ?? key));
+}
+
 const I18nContext = createContext<(key: string) => string>(resolve);
 
 export function I18nProvider({ locale, children }: { locale: Locale; children: React.ReactNode }) {
