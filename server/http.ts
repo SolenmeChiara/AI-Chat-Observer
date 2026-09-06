@@ -338,11 +338,15 @@ export async function readJson(filePath: string): Promise<ReadResult> {
 /**
  * 本机所有非 internal 的 IPv4 地址。二维码 / 入口 URL 用。
  * 不用 `server.resolvedUrls`：在 configureServer 里同步读它还是 null。
+ *
+ * 跳过 Windows 上 Hyper-V / WSL 的虚拟交换机（接口名 `vEthernet (…)`，通常是 172.x 段）：
+ * 这些地址手机根本路由不到，扫了只会白扫。只按接口名前缀这一条规则筛，不做网段猜测。
  */
 export function localIPv4Addresses(): string[] {
   const out: string[] = [];
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
+    if (/^vEthernet/i.test(name)) continue;
     for (const info of nets[name] || []) {
       if (info.family === 'IPv4' && !info.internal) out.push(info.address);
     }

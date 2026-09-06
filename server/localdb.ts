@@ -38,9 +38,11 @@ import {
 import {
   handleLiveRequest,
   isLivePath,
+  isBindLoopbackOnly,
   isLoopbackOnlyLivePath,
   onSessionDeleted,
   onSessionWritten,
+  setServerBindAddress,
   setServerPort,
 } from './live';
 
@@ -344,6 +346,15 @@ function printEntryUrls(port: number): void {
   entryUrlsPrinted = true;
 
   const query = `?token=${encodeURIComponent(token)}`;
+
+  // 只绑了回环（dev:tsserve）：直连地址全是死链，横幅里也别列，只指 tailscale serve 那条路
+  if (isBindLoopbackOnly()) {
+    console.log('[aco-live] 手机观看已开启（只监听 127.0.0.1，直连不可用，需经 tailscale serve 反代）：');
+    console.log(`  先执行 tailscale serve https / http://127.0.0.1:${port}，再走 https://<机器名>.<tailnet>.ts.net/viewer${query}`);
+    console.log(`  token 存在 ${path.join(getDataDir(), 'lan-token.txt')}，删掉重启即作废。`);
+    return;
+  }
+
   const ips = localIPv4Addresses();
   const tailscale = ips.filter(isTailscaleIPv4);
   const lan = ips.filter((ip) => !isTailscaleIPv4(ip));
@@ -361,11 +372,13 @@ export function localDbPlugin(): Plugin {
   const middleware = createMiddleware();
 
   // 只用 address()，所以按结构类型收——vite 的 HttpServer 是 http.Server | Http2SecureServer
-  type Addressable = { address(): string | { port: number } | null } | null | undefined;
+  type Addressable = { address(): string | { address?: string; port: number } | null } | null | undefined;
   const onListening = (httpServer: Addressable, fallbackPort?: number): void => {
     const addr = httpServer?.address();
     const port = addr && typeof addr === 'object' ? addr.port : fallbackPort ?? 0;
     if (port) setServerPort(port);
+    // 绑定地址决定 lan-info 里还给不给直连入口：dev:tsserve 只绑 127.0.0.1，直连全是死链
+    if (addr && typeof addr === 'object' && typeof addr.address === 'string') setServerBindAddress(addr.address);
     printEntryUrls(port || fallbackPort || 0);
   };
 

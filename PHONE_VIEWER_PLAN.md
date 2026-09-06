@@ -101,9 +101,11 @@ function resolveRole(req, url): Role | null
 
 ### 3.2 端点
 
-**`GET /api/live/lan-info`** → `{ enabled: boolean, port: number, token: string | null, entries: Array<{ kind: 'tailscale' | 'tailscale-serve' | 'lan', url: string, qrSvg: string, note?: string }> }`
+**`GET /api/live/lan-info`** → `{ enabled: boolean, port: number, token: string | null, entries: Array<{ kind: 'tailscale' | 'tailscale-serve' | 'lan', url: string, qrSvg: string, note?: string }>, bindLoopbackOnly: boolean }`
 - `entries` 按 kind 排序（tailscale 优先）：`tailscale` = `os.networkInterfaces()` 里 100.64.0.0/10 段的 IPv4 → `http://<ip>:<port>/viewer?token=…`；`tailscale-serve` = 若能跑 `tailscale status --json`（PATH 或 `C:\Program Files\Tailscale\tailscale.exe`，2s 超时，失败静默）取 `Self.DNSName`（去尾点）→ `https://<dnsname>/viewer?token=…`，`note` 说明需先执行 `tailscale serve https / http://127.0.0.1:<port>`；`lan` = 其余非内部 IPv4。`qrSvg` 为 `qrcode` 生成的 SVG 字符串。
-- `enabled=false` 时 `entries=[]`、`token=null`，前端提示用 `npm run dev:lan` 启动。
+- `localIPv4Addresses()` 跳过接口名以 `vEthernet` 开头的网卡（Windows Hyper-V / WSL 虚拟交换机，典型 172.x），这些地址手机路由不到，不进 `tailscale` / `lan` 两类入口。
+- `bindLoopbackOnly` = 实际监听地址（`httpServer.address().address`，由 `setServerBindAddress()` 在 `onListening` 里记下）是不是回环。`npm run dev:tsserve`（`--host 127.0.0.1`）下为 `true`，此时只有 `tailscale serve` 反代进得来，服务端**不生成** `tailscale` 与 `lan` 两类直连条目，只保留 `tailscale-serve`；绑 `0.0.0.0` / `::` / 具体网卡地址时为 `false`，行为不变。拿不到绑定地址时按 `false` 处理。`enabled=false` 分支同样带这个字段（照实取值）。
+- `enabled=false` 时 `entries=[]`、`token=null`，前端提示用 `npm run dev:lan` 启动。`enabled=true` 且 `bindLoopbackOnly=true` 时，前端在入口列表上方加一行灰字说明直连入口已隐藏；若这时 `entries` 也为空（连 Tailscale 都没有），空列表分支的文案改说这个原因，不再是「用 npm run dev:lan 启动」那句。
 
 **`POST /api/live/presence`**（body ≤ 64 KB，`application/json`）
 ```ts
@@ -310,7 +312,7 @@ Host 伪造（局域网请求带 `Host: localhost`）403；DNS rebinding（`Host
 - 会话索引首次构建期间，恰好落地的 `PUT`/`DELETE` 可能被这次全量构建的结果覆盖（下一次 `PUT` 会自愈，非永久性）。
 - `npm run build` 里的 `tsc` 不检查 `server/` 目录。
 - 启动横幅会明文打印一次 token。
-- `localIPv4Addresses()` 不过滤虚拟网卡地址——手机观看弹窗里可能出现 `172.26.x.x`（Hyper-V 等虚拟适配器），手机连不上。
+- ~~`localIPv4Addresses()` 不过滤虚拟网卡地址——手机观看弹窗里可能出现 `172.26.x.x`（Hyper-V 等虚拟适配器），手机连不上。~~ **已修**：`localIPv4Addresses()` 跳过接口名以 `vEthernet` 开头的网卡；同一批还加了 `bindLoopbackOnly`（只绑回环时不再给出打不开的直连二维码，见 §3.2）。
 - `desktopOnline` 等价于「是否存在 `role=desktop` 的 SSE 连接」，浏览器 bfcache 场景下可能出现假在线。
 
 **P2（电脑端 / 手机端）：**
@@ -335,11 +337,11 @@ Host 伪造（局域网请求带 `Host: localhost`）403；DNS rebinding（`Host
 - **推荐**：`npm run dev:tsserve`（只监听 `127.0.0.1`）+ 在电脑上执行 `tailscale serve https / http://127.0.0.1:5173` → 手机打开 `https://<机器名>.<tailnet>.ts.net/viewer?token=…`。
 - **次选**：`npm run dev:lan` → 手机打开 `http://100.x.y.z:5173/viewer?token=…`（Tailscale 分配的 IP）；不要在公共 WiFi 上用普通局域网 IP 这条路径。
 - token 存在 `data/lan-token.txt`，删掉这个文件重启服务即可换一把新钥匙。
-- 手机观看弹窗里如果出现 `172.26.x.x` 这类地址，是虚拟网卡（Hyper-V 等），扫了也连不上，忽略即可。
+- 虚拟网卡（Hyper-V / WSL 的 `vEthernet`，典型 `172.26.x.x`）已经在服务端过滤掉，不会再出现在弹窗里。用 `dev:tsserve` 时弹窗也只会给 `tailscale serve` 的 https 入口，直连二维码会被隐藏并附一行说明。
 
 ### 11.7 真机验证清单（Sol 上手前建议按这个顺序过一遍）
 
-1. 用推荐方式起服务，侧栏点「📱 手机观看」，确认二维码和 URL 都显示正常（忽略 `172.x` 那条）。
+1. 用推荐方式起服务，侧栏点「📱 手机观看」，确认二维码和 URL 都显示正常（`dev:tsserve` 下只会有 `tailscale serve` 的 https 那一条）。
 2. 手机扫码打开，确认能看到当前会话的历史消息、图片正常显示。
 3. 电脑端触发一次 AI 回复，观察手机端是否能看到流式打字效果与思考链。
 4. 手机发一条文字消息（含一次 @提及），确认电脑端收到、正常入库，AI 是否接话（取决于自动播放是否开启，这是 v1 设计的预期行为，不是 bug）。

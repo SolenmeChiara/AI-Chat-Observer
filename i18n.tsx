@@ -395,6 +395,8 @@ const en: Record<string, string> = {
   '还没开放局域网': 'Network access is off',
   '当前只监听本机。用下面的命令重新启动，再回来打开这个面板：': 'Currently listening on localhost only. Restart with the command below, then reopen this panel:',
   '没找到可用的网络地址': 'No usable network address found',
+  '当前只监听 127.0.0.1（dev:tsserve 模式），直连入口已隐藏，请用 tailscale serve 的 https 地址；想直连改用 npm run dev:lan。': 'Listening on 127.0.0.1 only (dev:tsserve mode) — direct-connect entries are hidden. Use the https URL from tailscale serve, or restart with npm run dev:lan for direct access.',
+  '服务只监听 127.0.0.1（dev:tsserve 模式），直连入口都用不了；请先装好并登录 Tailscale，再执行 tailscale serve。想走局域网直连就改用 npm run dev:lan 启动。': 'The server listens on 127.0.0.1 only (dev:tsserve mode), so no direct-connect entry can work. Install and sign in to Tailscale, then run tailscale serve — or restart with npm run dev:lan for LAN access.',
   '手机扫码，或直接在手机浏览器里打开下面的地址。': 'Scan with your phone, or open the URL below in your phone browser.',
   '复制': 'Copy',
   '复制失败，请手动选中地址': 'Copy failed — please select the URL manually',

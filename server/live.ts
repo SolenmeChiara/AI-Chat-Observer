@@ -20,6 +20,7 @@ import {
   getLanToken,
   isJsonRequest,
   isLanEnabled,
+  isLoopbackHostname,
   isTailscaleIPv4,
   localIPv4Addresses,
   portFromHostHeader,
@@ -160,6 +161,22 @@ let serverPort = 5173;
 
 export function setServerPort(port: number): void {
   if (Number.isFinite(port) && port > 0) serverPort = port;
+}
+
+/**
+ * 实际监听的绑定地址（`httpServer.address().address`）。空串 = 还没拿到，按「不是只绑回环」处理。
+ * `npm run dev:tsserve` 会绑 `127.0.0.1`，这时候只有 `tailscale serve` 反代能进来，
+ * 直连类入口（tailscale 100.x / 局域网 IP）扫了也打不开，得从 lan-info 里摘掉。
+ */
+let serverBindAddress = '';
+
+export function setServerBindAddress(addr: string): void {
+  if (typeof addr === 'string') serverBindAddress = addr;
+}
+
+/** 监听地址是不是回环（只有本机 + 反代能进）。拿不到地址时按 false 处理，行为与改动前一致。 */
+export function isBindLoopbackOnly(): boolean {
+  return !!serverBindAddress && isLoopbackHostname(serverBindAddress);
 }
 
 // --- SSE ---
@@ -463,9 +480,11 @@ async function handleLanInfo(req: IncomingMessage, res: ServerResponse): Promise
   // 优先用请求自带的端口（最贴近浏览器实际打开的地址），Host 没写端口时退回监听端口
   const port = portFromHostHeader((req.headers.host || '').toString()) ?? serverPort;
   const token = getLanToken();
+  // 只绑了回环时，直连类入口（tailscale 100.x / 局域网 IP）根本连不上，别给出去骗人扫码
+  const bindLoopbackOnly = isBindLoopbackOnly();
 
   if (!isLanEnabled() || !token) {
-    sendJson(res, 200, { enabled: false, port, token: null, entries: [] });
+    sendJson(res, 200, { enabled: false, port, token: null, entries: [], bindLoopbackOnly });
     return;
   }
 
@@ -474,7 +493,7 @@ async function handleLanInfo(req: IncomingMessage, res: ServerResponse): Promise
   const drafts: Array<{ kind: LanEntryKind; url: string; note?: string }> = [];
 
   const dnsName = await tailscaleDnsName();
-  const ips = localIPv4Addresses();
+  const ips = bindLoopbackOnly ? [] : localIPv4Addresses();
   for (const ip of ips) {
     if (isTailscaleIPv4(ip)) drafts.push({ kind: 'tailscale', url: `http://${ip}:${port}/viewer${query}` });
   }
@@ -515,7 +534,7 @@ async function handleLanInfo(req: IncomingMessage, res: ServerResponse): Promise
     entries.push({ ...draft, qrSvg });
   }
 
-  sendJson(res, 200, { enabled: true, port, token, entries });
+  sendJson(res, 200, { enabled: true, port, token, entries, bindLoopbackOnly });
 }
 
 // --- 会话索引 ---

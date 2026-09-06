@@ -7,6 +7,9 @@
 //   1. 接口 404 / 不是 JSON → 服务端还没升级到带 /api/live 的版本
 //   2. enabled=false      → 服务端在跑，但只监听回环，得用 npm run dev:lan 起
 //   3. entries 为空        → 开了，但一个可用地址都没找到（没连 Tailscale 又没有局域网网卡）
+//
+// 另外 `bindLoopbackOnly=true`（dev:tsserve，只绑 127.0.0.1）时服务端会把直连类入口全摘掉，
+// 只可能剩 tailscale-serve 一条；这时候要额外说明一句，否则「怎么只有一条 / 一条都没有」没法解释。
 import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Smartphone, Copy, Check, RefreshCw, ShieldAlert } from 'lucide-react';
@@ -26,6 +29,8 @@ interface LanInfo {
   port: number;
   token: string | null;
   entries: LanEntry[];
+  /** 服务端只绑了回环（dev:tsserve）：直连入口已被服务端摘掉，只可能剩 tailscale-serve 这一条。 */
+  bindLoopbackOnly?: boolean;
 }
 
 // kind → 显示用的标签 key（i18n 的 key 就是中文文案本身）
@@ -64,6 +69,7 @@ const PhoneViewerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         port: data.port,
         token: data.token ?? null,
         entries: Array.isArray(data.entries) ? data.entries : [],
+        bindLoopbackOnly: !!data.bindLoopbackOnly,
       });
       setState('ready');
     } catch (err) {
@@ -136,6 +142,11 @@ const PhoneViewerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       return (
         <div className="py-6 text-center">
           <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">{t('没找到可用的网络地址')}</p>
+          {info.bindLoopbackOnly && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              {t('服务只监听 127.0.0.1（dev:tsserve 模式），直连入口都用不了；请先装好并登录 Tailscale，再执行 tailscale serve。想走局域网直连就改用 npm run dev:lan 启动。')}
+            </p>
+          )}
           <button
             onClick={() => void load()}
             className="mt-2 px-4 py-2 border border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
@@ -151,6 +162,12 @@ const PhoneViewerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <p className="text-xs text-gray-500 dark:text-gray-400">
           {t('手机扫码，或直接在手机浏览器里打开下面的地址。')}
         </p>
+
+        {info.bindLoopbackOnly && (
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
+            {t('当前只监听 127.0.0.1（dev:tsserve 模式），直连入口已隐藏，请用 tailscale serve 的 https 地址；想直连改用 npm run dev:lan。')}
+          </p>
+        )}
 
         {info.entries.map(entry => (
           <div key={entry.url} className="p-3 rounded-xl border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800/60">
