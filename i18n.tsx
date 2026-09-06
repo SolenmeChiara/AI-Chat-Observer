@@ -371,7 +371,6 @@ const en: Record<string, string> = {
   '在': 'Type in',
   '发言... (Enter发送, Shift+Enter换行)': '... (Enter to send, Shift+Enter for new line)',
   '由于网络问题输出被截断。它的未完成输出已显示在上方。请其他成员继续当前话题。': "'s output was truncated due to network issues. The incomplete output is shown above. Other members please continue the current topic.",
-  '这是一个轻松的聊天室。': 'This is a casual chat room.',
   '你是一个乐于助人的群聊参与者。': 'You are a helpful group chat participant.',
   '推理模式': 'Reasoning Mode',
   '指令模式': 'Command Mode',
