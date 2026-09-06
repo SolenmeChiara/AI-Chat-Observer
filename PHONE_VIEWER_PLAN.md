@@ -79,8 +79,13 @@ function resolveRole(req, url): Role | null
 ```
 1. Origin 校验（永远生效，沿用现有逻辑）：有 `Origin` 头则 `new URL(origin).host` 必须等于 `Host` 头，否则 null。
 2. 对端 remoteAddress 回环 **且** Host 主机名回环 → `'loopback'`。
-3. 否则若 LAN 已开启（`config.mode === 'lan'` 或 `ACO_ALLOW_LAN === '1'`）：Host 主机名必须是 IP 字面量（`net.isIP() !== 0`，挡 DNS rebinding）**且** token 校验通过（`Authorization: Bearer <token>` 或 SSE 用 `?token=`，`crypto.timingSafeEqual`）→ `'lan'`。
+3. 否则若 LAN 已开启（`config.mode === 'lan'` 或 `ACO_ALLOW_LAN === '1'`）：Host 主机名必须是 IP 字面量（`net.isIP() !== 0`）**或以 `.ts.net` 结尾**（Tailscale MagicDNS；两者都挡 DNS rebinding——攻击者域名既不是 IP 也拿不到 ts.net 子域）**且** token 校验通过（`Authorization: Bearer <token>` 或 SSE 用 `?token=`，`crypto.timingSafeEqual`）→ `'lan'`。注意这一步不要求对端非回环：`tailscale serve` 反代时请求从 127.0.0.1 进来、Host 是 `xxx.ts.net`，就该落到这里。
 4. 其他 → null → 403 `{ error }`。
+
+**Tailscale 是首选通路（Sol 2026-09-06 指定）**：手机与电脑都装 Tailscale，走 WireGuard 加密隧道，只有 Sol 自己的设备能到达。两种用法都要支持：
+- 直连 Tailscale IP：`http://100.x.y.z:5173/viewer?token=…`（需要 `dev:lan` 绑定所有接口；Host 是 IP 字面量）。
+- `tailscale serve https / http://127.0.0.1:5173`：`https://<机器名>.<tailnet>.ts.net/viewer?token=…`（HTTPS、Vite 可只听回环；Host 是 `.ts.net`）。
+普通局域网 IP 仍然可用，只是不推荐。
 
 授权矩阵：
 
@@ -95,9 +100,9 @@ function resolveRole(req, url): Role | null
 
 ### 3.2 端点
 
-**`GET /api/live/lan-info`** → `{ enabled: boolean, port: number, urls: string[], token: string | null, qrSvg: Record<string, string> }`
-- `urls` = 每个非内部 IPv4 地址一条 `http://<ip>:<port>/viewer?token=<token>`；`qrSvg[url]` 为 `qrcode` 生成的 SVG 字符串。
-- `enabled=false` 时 `urls=[]`、`token=null`，前端提示用 `npm run dev:lan` 启动。
+**`GET /api/live/lan-info`** → `{ enabled: boolean, port: number, token: string | null, entries: Array<{ kind: 'tailscale' | 'tailscale-serve' | 'lan', url: string, qrSvg: string, note?: string }> }`
+- `entries` 按 kind 排序（tailscale 优先）：`tailscale` = `os.networkInterfaces()` 里 100.64.0.0/10 段的 IPv4 → `http://<ip>:<port>/viewer?token=…`；`tailscale-serve` = 若能跑 `tailscale status --json`（PATH 或 `C:\Program Files\Tailscale\tailscale.exe`，2s 超时，失败静默）取 `Self.DNSName`（去尾点）→ `https://<dnsname>/viewer?token=…`，`note` 说明需先执行 `tailscale serve https / http://127.0.0.1:<port>`；`lan` = 其余非内部 IPv4。`qrSvg` 为 `qrcode` 生成的 SVG 字符串。
+- `enabled=false` 时 `entries=[]`、`token=null`，前端提示用 `npm run dev:lan` 启动。
 
 **`POST /api/live/presence`**（body ≤ 64 KB，`application/json`）
 ```ts
@@ -150,7 +155,7 @@ interface PresenceReport { activeGroupId: string; activeSessionId: string; isAut
 
 ### 3.4 LAN 开关与 token
 
-- `package.json` 新增 `"dev:lan": "vite --mode lan"`、`"preview:lan": "vite preview --mode lan"`。插件 `config(config, { mode })` 钩子：`mode === 'lan'` 或 `ACO_ALLOW_LAN === '1'` 时启用 LAN，并在 `server.host` / `preview.host` 未设置时置为 `true`。默认 `npm run dev` 行为不变（只监听回环，局域网一律 403）。
+- `package.json` 新增 `"dev:lan": "vite --mode lan"`、`"preview:lan": "vite preview --mode lan"`。插件 `config(config, { mode })` 钩子：`mode === 'lan'` 或 `ACO_ALLOW_LAN === '1'` 时启用 LAN，在 `server.host` / `preview.host` 未设置时置为 `true`，并把 `'.ts.net'` 加进 `server.allowedHosts` / `preview.allowedHosts`（否则 Vite 自带的 hostCheck 会把 MagicDNS 主机名的 index.html 请求挡掉；纯 IPv4 Host 它本来就放行）。默认 `npm run dev` 行为不变（只监听回环，局域网一律 403）。
 - token：首次以 LAN 模式启动时生成 24 字节随机数（base64url），存 `data/lan-token.txt`；之后复用（二维码稳定）。想作废就删这个文件重启。启动时终端打印一次入口 URL。
 - 现有 `ACO_ALLOW_LAN=1` 语义从「裸放行」改为「按 3.1 走 lan 角色」，不再存在把 key 暴露到局域网的路径。
 
@@ -203,7 +208,7 @@ appendUserMessage(sessionId: string, input: {
 | 恶意网页借用户浏览器打局域网地址（CSRF） | Origin 同源校验永远生效；跨源 GET 没有 CORS 头读不到响应；inbox 只收 `application/json` | §3.1 步骤 1 |
 | DNS rebinding（攻击者域名解析到 192.168.x.x） | loopback 角色要求 Host 是回环名；lan 角色要求 Host 是 IP 字面量——rebinding 请求的 Host 必然是攻击者域名 | §3.1 步骤 2/3 |
 | token 泄漏 | 删 `data/lan-token.txt` 重启即作废；`.gitignore` 已覆盖 `data/` | §3.4 |
-| 明文 HTTP 被同网嗅探 | 接受的风险：家庭 WPA2 网络下需要 WiFi 密码才能解密；不建议在公共/访客网络开 LAN 模式 | §9 |
+| 明文 HTTP 被同网嗅探 | 首选 Tailscale：WireGuard 隧道端到端加密，且只有 Sol 自己 tailnet 里的设备能到达；`tailscale serve` 还能直接给 HTTPS。普通局域网 IP 是退路，不建议在公共/访客网络用 | §3.1 / §9 |
 | 手机滥发消息刷 API 费用 | inbox 限速 20/分钟；只能进电脑当前会话；无远程触发 | §3.2 |
 
 ## 7. 分工与并行施工
@@ -223,7 +228,7 @@ W2/W3 在 W1 未合并时用本文契约自测（W3 可在 worktree 里写一个
 红线：不碰 5173、不碰 `data/`、不 commit/push。临时实例：`ACO_DATA_DIR=<scratch>/data npx vite --port 51xx --mode lan`，用脚本先往临时目录塞 2-3 个合成会话（其中一个含 base64 小图和 `isStreaming` 消息）。
 
 - 静态：`npx tsc --noEmit -p tsconfig.json`、`npx tsc --noEmit -p tsconfig.node.json`、`npx vite build --outDir <scratch>/dist`。
-- 闸门：本机 `curl http://127.0.0.1:51xx/api/db/all` 200；`curl http://<本机局域网IP>:51xx/api/db/all` 403（对端非回环）；带正确 token 打 `/api/view/bootstrap` 200 且响应里 grep 不到 `apiKey` / `systemPrompt`；错 token 403；`Host: evil.example` 403；带跨源 `Origin` 403。
+- 闸门：本机 `curl http://127.0.0.1:51xx/api/db/all` 200；`curl http://<本机局域网IP>:51xx/api/db/all` 403（对端非回环）；带正确 token 打 `/api/view/bootstrap` 200 且响应里 grep 不到 `apiKey` / `systemPrompt`；错 token 403；`Host: evil.example` 403；带跨源 `Origin` 403；模拟 `tailscale serve`：从 127.0.0.1 发、`Host: foo.tail1234.ts.net` + 正确 token → `/api/view/bootstrap` 200 而 `/api/db/all` 403。
 - SSE：node 脚本连 `/api/live/events`，另起 curl PUT 一个会话，脚本收到 `session` 事件；desktop 连接断开 5s 后收到 `presence.desktopOnline=false`。
 - inbox：无 desktop 连接 → 503；desktop 连上、presence 指向会话 A，POST 到 B → 409，到 A → 202 且 desktop 收到 `inbox`。
 - 视图：`?tail=2` 返回最后两条、图片附件 `content` 是 URL、附件端点返回正确 `content-type`；`?from` 越界得空数组。
