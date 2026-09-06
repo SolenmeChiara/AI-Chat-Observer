@@ -122,6 +122,8 @@ Watch the desktop session live from your phone's browser — streaming text, thi
 
 Click **📱 Phone Viewer** in the sidebar for a QR code and the ready-to-use URL for whichever mode is currently active. The access token lives in `data/lan-token.txt` — delete it and restart the server to rotate it.
 
+From the phone you can also start and pause the desktop's auto-play with the button in the status bar (it only works while the desktop is online and on the same session), and pick your own light/dark theme independently of the desktop.
+
 **Security notes**: the server only listens on localhost by default; LAN/Tailscale access must be opted into explicitly (`npm run dev:lan` / `dev:tsserve`). A phone (LAN role) can only view sessions and send messages — it never gets `/api/db/*` or any API key, ever. Every request is checked against the Host header, the Origin header, and the access token (constant-time comparison) before it's served. In the QR modal, ignore addresses like `172.x.x.x` — those are virtual adapters (e.g. Hyper-V) your phone can't actually reach. Your phone also needs outbound access to `cdn.tailwindcss.com` (the app loads Tailwind from that CDN).
 
 ## API Compatibility (CORS)
@@ -229,6 +231,8 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 3. **普通局域网 IP**：同样用 `npm run dev:lan`，手机打开电脑的局域网 IP——只在可信网络下使用，不要在公共/访客 WiFi 上开。
 
 点侧栏的「📱 手机观看」按钮，会显示当前可用方式的二维码和完整 URL，扫码即可。访问 token 存在 `data/lan-token.txt`，删掉这个文件重启服务即可换一把新钥匙。
+
+手机上还能用状态条里的按钮直接开关电脑端的自动播放（需要电脑在线且停在同一个会话），深浅色也可以自己选，不跟着电脑走。
 
 **安全要点**：服务默认只监听本机；局域网/Tailscale 访问需要显式开启（`npm run dev:lan` / `dev:tsserve`）。手机（局域网角色）只能看会话、发消息，永远碰不到 `/api/db/*` 或任何 API key。每个请求都会校验 Host、Origin 与 token（常数时间比较）三重身份。弹窗里如果出现 `172.x.x.x` 之类的地址，那是虚拟网卡（比如 Hyper-V），手机扫不通，忽略即可。手机所在网络还需要能访问 `cdn.tailwindcss.com`（页面样式走这个 CDN 加载）。
 

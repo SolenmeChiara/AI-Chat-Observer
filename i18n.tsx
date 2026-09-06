@@ -264,6 +264,7 @@ const en: Record<string, string> = {
   '未知': 'Unknown',
   '引用': 'Quote',
   '思考过程': 'Thinking process',
+  '正在输入': 'Typing',
   '停止朗读': 'Stop reading',
   '朗读此消息': 'Read aloud',
   '引用回复': 'Quote reply',

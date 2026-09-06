@@ -41,7 +41,7 @@ const SESSION_CACHE_SIZE = 3;
 const SSE_PING_MS = 25_000;
 /** desktop 断开后延迟多久才广播 offline（给 EventSource 自动重连留窗口）。 */
 const DESKTOP_OFFLINE_GRACE_MS = 5_000;
-/** inbox 限速窗口与配额（按连接来源地址）。 */
+/** inbox / control 的限速窗口与配额（按连接来源地址，两个端点各自一个桶）。 */
 const INBOX_WINDOW_MS = 60_000;
 const INBOX_MAX_PER_WINDOW = 20;
 /** inbox 文本长度上限。 */
@@ -152,8 +152,8 @@ let sessionIndexPromise: Promise<Map<string, SessionIndexEntry>> | null = null;
 /** 完整会话 LRU（Map 的插入序即访问序，取的时候 delete+set 移到队尾）。 */
 const sessionCache = new Map<string, StoredSession>();
 
-/** 来源地址 → 最近一分钟内的 inbox 时间戳。 */
-const inboxHits = new Map<string, number[]>();
+/** 限速桶：`<端点>:<来源地址>` → 最近一分钟内的命中时间戳。inbox 与 control 用不同前缀，各限各的。 */
+const rateHits = new Map<string, number[]>();
 
 /** 实际监听端口。Host 头里没带端口时用它兜底（拼入口 URL 用）。 */
 let serverPort = 5173;
@@ -301,13 +301,13 @@ async function handlePresence(req: IncomingMessage, res: ServerResponse): Promis
 
 function rateLimitOk(source: string): boolean {
   const now = Date.now();
-  const hits = (inboxHits.get(source) || []).filter((t) => now - t < INBOX_WINDOW_MS);
+  const hits = (rateHits.get(source) || []).filter((t) => now - t < INBOX_WINDOW_MS);
   if (hits.length >= INBOX_MAX_PER_WINDOW) {
-    inboxHits.set(source, hits);
+    rateHits.set(source, hits);
     return false;
   }
   hits.push(now);
-  inboxHits.set(source, hits);
+  rateHits.set(source, hits);
   return true;
 }
 
@@ -357,6 +357,65 @@ async function handleInbox(req: IncomingMessage, res: ServerResponse): Promise<v
   const payload = { id, sessionId, text, receivedAt: Date.now() };
   // 不落盘：会话文件只有电脑端一个写者，手机的消息由电脑端吸收后走正常保存路径
   broadcast('inbox', payload, (c) => c.isDesktop);
+  sendJson(res, 202, { id });
+}
+
+// --- control ---
+
+/**
+ * 手机遥控电脑端的自动播放开关。
+ *
+ * 和 inbox 同一套形状：只做转发，不落盘、**不改 presenceReport**。生效与否由电脑端说了算——
+ * 它收到 `control` 事件后自己 setIsAutoPlay / handleStopAll，随后照常上报 presence，
+ * 手机端看到 presence 里的 isAutoPlay 翻转才认为遥控成功。这样服务端不会凭空造出一个
+ * 和电脑端真实状态不一致的 presence。
+ */
+async function handleControl(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!isJsonRequest(req)) {
+    sendJson(res, 400, { error: 'expected content-type: application/json' });
+    return;
+  }
+  let raw: string;
+  try {
+    raw = await readBody(req, SMALL_BODY_BYTES);
+  } catch (err: any) {
+    sendJson(res, err?.statusCode === 413 ? 413 : 400, { error: err?.message || 'failed to read request body' });
+    return;
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: any) {
+    sendJson(res, 400, { error: `invalid JSON: ${err?.message || String(err)}` });
+    return;
+  }
+
+  // 校验顺序钉死，与 inbox 一致：400 → 503 → 409 → 429 → 202
+  const action = parsed?.action;
+  const enabled = parsed?.enabled;
+  const sessionId = typeof parsed?.sessionId === 'string' ? parsed.sessionId : '';
+  if (action !== 'autoplay' || typeof enabled !== 'boolean' || !sessionId) {
+    sendJson(res, 400, { error: 'bad-request' });
+    return;
+  }
+  if (countDesktop() === 0) {
+    sendJson(res, 503, { error: 'desktop-offline' });
+    return;
+  }
+  // 手机看的不是电脑当前会话时不许遥控：否则会在一个人根本没在看的会话上开起自动播放
+  if (sessionId !== presenceReport.activeSessionId) {
+    sendJson(res, 409, { error: 'not-active-session' });
+    return;
+  }
+  // 和 inbox 分桶：连着发几条消息不该把「暂停」按钮一起堵死
+  const source = `control:${req.socket?.remoteAddress || 'unknown'}`;
+  if (!rateLimitOk(source)) {
+    sendJson(res, 429, { error: 'rate-limited' });
+    return;
+  }
+
+  const id = `ctl-${Date.now()}-${crypto.randomBytes(4).toString('base64url').slice(0, 6)}`;
+  broadcast('control', { id, action: 'autoplay', enabled, sessionId, receivedAt: Date.now() }, (c) => c.isDesktop);
   sendJson(res, 202, { id });
 }
 
@@ -879,6 +938,15 @@ export async function handleLiveRequest(
       return;
     }
     await handleInbox(req, res);
+    return;
+  }
+
+  if (pathname === '/api/live/control') {
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: `method ${method} not allowed on ${pathname}` });
+      return;
+    }
+    await handleControl(req, res);
     return;
   }
 

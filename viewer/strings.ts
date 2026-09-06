@@ -20,10 +20,16 @@ const en: Record<string, string> = {
 
   // 头部 / 状态条
   '跟随电脑': 'Follow computer',
+  '跟随电脑（已开启）': 'Following the computer (on)',
+  '跟随电脑（已关闭）': 'Following the computer (off)',
+  '切换到浅色': 'Switch to light mode',
+  '切换到深色': 'Switch to dark mode',
   '在线': 'Online',
   '离线': 'Offline',
   '自动播放': 'Auto-play',
   '已暂停': 'Paused',
+  '开启自动播放': 'Start auto-play',
+  '暂停自动播放': 'Pause auto-play',
   '正在生成': 'Generating',
   '选择会话': 'Select session',
   '未命名会话': 'Untitled session',
@@ -49,6 +55,12 @@ const en: Record<string, string> = {
   '消息为空或太长（上限 4000 字）': 'Message is empty or too long (4000 chars max)',
   '访问令牌无效，请重新扫码': 'Invalid token, please scan the QR code again',
   '提及成员 (@)': 'Mention (@)',
+
+  // 遥控自动播放
+  '遥控失败': 'Remote control failed',
+  '电脑端已离线，遥控没生效': 'The computer is offline, the command did not take effect',
+  '电脑端当前不在这个会话，开启「跟随电脑」再试': 'The computer is on another session — turn on "Follow computer" and try again',
+  '操作太频繁，缓一缓再试': 'Too many actions, slow down a bit',
 };
 
 export function makeViewerT(locale: ViewerLocale): (key: string) => string {

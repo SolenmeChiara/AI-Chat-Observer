@@ -156,6 +156,36 @@ export function clearToken(): void {
 }
 
 // ---------------------------------------------------------------------------
+// 主题偏好（手机本地，独立于电脑端）
+// ---------------------------------------------------------------------------
+
+export const THEME_STORAGE_KEY = 'aco-viewer-theme';
+
+export type ViewerTheme = 'light' | 'dark';
+
+/**
+ * 手机自己的深浅色偏好。null = 还没选过，跟随电脑端 settings.darkMode。
+ * 电脑端夜里开深色、手机白天要浅色，这两件事没有理由绑在一起。
+ */
+export function readThemePreference(): ViewerTheme | null {
+  try {
+    const v = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return v === 'light' || v === 'dark' ? v : null;
+  } catch {
+    // 隐私模式下 localStorage 会抛；当作没选过，本次会话仍可在内存里切
+    return null;
+  }
+}
+
+export function writeThemePreference(theme: ViewerTheme): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    /* 存不下就只在本次会话生效，不影响使用 */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // fetch 封装
 // ---------------------------------------------------------------------------
 
@@ -251,6 +281,17 @@ export function sendInbox(sessionId: string, text: string, clientId?: string): P
   return apiFetch<{ id: string }>('/api/live/inbox', {
     method: 'POST',
     body: JSON.stringify({ sessionId, text, clientId }),
+  });
+}
+
+/**
+ * 遥控电脑端的自动播放开关。202 → { id }，错误码与 inbox 同一套（400/409/429/503）。
+ * 202 只代表「指令已转给电脑端」，真正生效要等 presence 事件里的 isAutoPlay 翻转。
+ */
+export function sendControl(sessionId: string, enabled: boolean): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>('/api/live/control', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'autoplay', enabled, sessionId }),
   });
 }
 

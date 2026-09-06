@@ -20,7 +20,7 @@ import { performSearch, formatSearchResultsForContext, formatSearchResultsForDis
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
-import { useLiveBridge, type PresenceReport, type InboxEvent } from './services/liveBridge';
+import { useLiveBridge, type PresenceReport, type InboxEvent, type ControlEvent } from './services/liveBridge';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -2748,10 +2748,30 @@ const App: React.FC = () => {
     if (!ok) console.warn('[live] 手机消息未入流（会话不存在或 id 重复）', m.id, m.sessionId);
   }, []);
 
+  // 手机遥控自动播放。handleStopAll / activeSessionId 都不是 memo 化的，
+  // SSE 回调会锁死旧闭包，所以照 appendUserMessageRef 的老规矩用 ref 取最新一份。
+  const handleStopAllRef = useRef(handleStopAll);
+  handleStopAllRef.current = handleStopAll;
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
+  const handleControlEvent = useCallback((c: ControlEvent) => {
+    // 服务端已经比过一次 activeSessionId，这里是双保险：presence 上报有 200ms 防抖，
+    // 电脑端刚切会话的那一瞬服务端手上还是旧值，指令可能打在上一个会话上。
+    if (c.sessionId !== activeSessionIdRef.current) {
+      console.warn('[live] 遥控指令的会话与当前会话不符，已丢弃', c.sessionId, '≠', activeSessionIdRef.current);
+      return;
+    }
+    // 语义与电脑端那颗播放按钮完全一致：开就是 setIsAutoPlay(true)，关就是硬停
+    if (c.enabled) setIsAutoPlay(true);
+    else handleStopAllRef.current();
+  }, []);
+
   useLiveBridge({
     enabled: liveBridgeEnabled,
     report: livePresenceReport,
-    onInbox: handleInboxMessage
+    onInbox: handleInboxMessage,
+    onControl: handleControlEvent
   });
 
   const handleUserSend = async (e?: React.FormEvent) => {

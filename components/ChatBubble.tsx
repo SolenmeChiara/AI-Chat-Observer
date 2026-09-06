@@ -35,9 +35,15 @@ interface ChatBubbleProps {
   isTTSPlaying?: boolean; // Is TTS currently playing this message
   currentPlayingMessageId?: string; // ID of the message currently being played
   readOnly?: boolean; // 只读观看（手机观众端）：不挂 hover、不渲染操作栏、附件按 http URL 直出
+  // 手机紧凑模式：时间戳并进名字行、气泡铺满列宽、行间距收紧。
+  // 只有 viewer 传 true；为 false / 缺省时渲染结果与电脑端历史版本逐字一致。
+  compact?: boolean;
+  // 本条与上一条是同一发送者的连续消息（分组规则由调用方算，这里只负责渲染）：
+  // 不重复画头像和名字，间距贴紧上一条。只在 compact 下生效。
+  continued?: boolean;
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, onDelete, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId, readOnly }) => {
+const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, onDelete, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId, readOnly, compact, continued }) => {
   const t = useT();
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -57,10 +63,18 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
 
   const isThisMessagePlaying = currentPlayingMessageId === message.id;
 
+  // 外层纵向间距。compact 下改用 margin-top 驱动：连续消息贴紧上一条，新的一组之间留一档。
+  // 用 mt 而不是 mb，是为了让「组间距」跟着组的首条走——调用方只需要给列表首条一个 mt-0
+  // 就不会在列表顶端多出一截空白（viewer/ViewerApp.tsx 的 [&>*:first-child]:mt-0）。
+  // 非 compact 一律还是 HEAD 的 mb-6，电脑端观感零变化。
+  const outerSpacing = compact ? (continued ? 'mt-1.5' : 'mt-4') : 'mb-6';
+  /** compact 下的时间戳文本，跟在名字后面 */
+  const clockText = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
   // 1. System Message Style
   if (message.isSystem) {
     return (
-      <div className="flex w-full mb-6 justify-center group">
+      <div className={`flex w-full ${outerSpacing} justify-center group`}>
         <span className="text-xs bg-gray-100 dark:bg-zinc-900 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-200 dark:border-zinc-700">
            {message.text}
         </span>
@@ -76,7 +90,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   // 2. Search Result Style (Collapsible)
   if (message.isSearchResult) {
     return (
-      <div className="flex w-full mb-6 justify-start">
+      <div className={`flex w-full ${outerSpacing} justify-start`}>
         {sender && (
           <div className="flex flex-col items-center mr-3 space-y-1">
             <img
@@ -179,24 +193,32 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
     return marked.parse(processedText) as string;
   }, [message.text, isStreaming, allAgents, userProfile?.userName]);
 
+  // compact 且是连续消息时不重画头像，但要留出同宽占位，否则整组消息的左边缘会错开
+  const hideIdentity = !!compact && !!continued;
+
   return (
     <div
-      className={`flex w-full mb-6 group ${isUser ? 'justify-end' : 'justify-start'}`}
+      className={`flex w-full ${outerSpacing} group ${isUser ? 'justify-end' : 'justify-start'}`}
       onMouseEnter={readOnly ? undefined : () => setIsHovered(true)}
       onMouseLeave={readOnly ? undefined : () => setIsHovered(false)}
     >
       {!isUser && (
+        hideIdentity ? (
+          <div className="w-10 mr-3 shrink-0" aria-hidden="true" />
+        ) : (
         <div className="flex flex-col items-center mr-3 space-y-1">
-          <img 
+          <img
             src={avatarSrc}
             alt="Avatar"
             className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-700 shadow-sm object-contain bg-white p-0.5 cursor-pointer"
             onClick={() => onMention && sender && onMention(sender.name)}
           />
         </div>
+        )
       )}
-      
-      <div className={`max-w-[85%] sm:max-w-[70%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+
+      <div className={`${compact ? 'flex-1 min-w-0' : 'max-w-[85%] sm:max-w-[70%]'} flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+        {!hideIdentity && (
         <div className="flex items-center gap-2 mb-1 ml-1">
             <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1">
               {displayName}
@@ -211,8 +233,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                 </span>
               )}
             </span>
+            {/* compact 下时间戳并进名字行，气泡下方那一整行就此省掉 */}
+            {compact && <span className="text-[10px] text-gray-400 font-medium shrink-0">· {clockText}</span>}
         </div>
-        
+        )}
+
         {/* Reply Context */}
         {replyToMessage && (
            <div className={`text-xs mb-1 px-3 py-1.5 rounded-lg border-l-2 opacity-80 cursor-pointer
@@ -287,8 +312,18 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           )}
 
           {isStreaming ? (
-            // Plain text during streaming for performance
-            <span className="whitespace-pre-wrap">{message.text}</span>
+            // Plain text during streaming for performance.
+            // 还一个字都没吐出来时（含只出了思考链的那段时间）气泡是个空壳，看着像卡住了，
+            // 所以补一个三点跳动的打字指示。这是唯一一处 compact 之外也会改变的渲染。
+            message.text ? (
+              <span className="whitespace-pre-wrap">{message.text}</span>
+            ) : (
+              <span className="flex items-center gap-1 py-1" role="status" aria-label={t('正在输入')}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60 animate-bounce" />
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:300ms]" />
+              </span>
+            )
           ) : (
             // Markdown rendering after complete (using cached result)
             <div
@@ -298,9 +333,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           )}
         </div>
         
+        {/* compact 下这一整行不渲染：时间戳已经并进名字行，操作栏在 readOnly 下本来就是空的 */}
+        {!compact && (
         <div className="flex items-center gap-2 mt-1 mx-1 h-4">
            <span className="text-[10px] text-gray-400 font-medium">
-             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+             {clockText}
            </span>
 
            {/* Actions —— readOnly 下整条不渲染：触屏没有 hover，opacity-0 的按钮会变成隐形可点区 */}
@@ -332,11 +369,15 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
            </div>
            )}
         </div>
+        )}
 
       </div>
 
       {/* User Avatar on Right */}
       {isUser && (
+        hideIdentity ? (
+          <div className="w-10 ml-3 shrink-0" aria-hidden="true" />
+        ) : (
         <div className="flex flex-col items-center ml-3 space-y-1">
           <img
             src={avatarSrc}
@@ -344,6 +385,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             className="w-10 h-10 rounded-full border border-gray-200 dark:border-zinc-700 shadow-sm object-contain bg-white p-0.5"
           />
         </div>
+        )
       )}
       {/* Image Lightbox */}
       {lightboxSrc && (
@@ -387,6 +429,10 @@ export default React.memo(ChatBubble, (prev, next) => {
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.currentPlayingMessageId !== next.currentPlayingMessageId) return false;
   if (prev.readOnly !== next.readOnly) return false;
+  // 漏了这两条的话，分组结果变化（比如中间插进一条别人的消息）不会触发重渲，
+  // 头像/名字会停在旧的显隐状态上
+  if (prev.compact !== next.compact) return false;
+  if (prev.continued !== next.continued) return false;
   if (prev.sender?.name !== next.sender?.name) return false;
   if (prev.sender?.avatar !== next.sender?.avatar) return false;
   return true;

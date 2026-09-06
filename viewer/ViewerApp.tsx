@@ -16,9 +16,15 @@ import {
   ArrowDown,
   ChevronUp,
   Loader2,
+  LocateFixed,
+  LocateOff,
+  Moon,
+  Pause,
+  Play,
   RefreshCw,
   Send,
   Smartphone,
+  Sun,
   Users,
 } from 'lucide-react';
 import { makeViewerT } from './strings';
@@ -34,6 +40,7 @@ import {
   ViewAgent,
   ViewSessionIndex,
   ViewerHttpError,
+  ViewerTheme,
   clearToken,
   connectLiveEvents,
   fetchBootstrap,
@@ -43,10 +50,33 @@ import {
   initToken,
   mergeMessages,
   nextSyncFrom,
+  readThemePreference,
+  sendControl,
   sendInbox,
+  writeThemePreference,
 } from './viewerClient';
 
 type Phase = 'loading' | 'no-token' | 'denied' | 'error' | 'ready';
+
+/** 同发送者、间隔不超过这个数的消息算一组，只画一次头像和名字 */
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
+/** 遥控发出后最多等多久 presence 回流；超时就把转圈收掉，免得一直卡着 */
+const CONTROL_PENDING_TIMEOUT_MS = 4000;
+
+/** 系统 / 搜索结果消息自成一段，不参与分组（它们走 ChatBubble 的另一条渲染分支） */
+function isStandaloneMessage(m: Message): boolean {
+  return !!m.isSystem || m.senderId === 'SYSTEM' || !!m.isSearchResult;
+}
+
+/** 本条是不是上一条的延续：同一个人、同一个私讯目标、5 分钟以内 */
+function isContinuedMessage(prev: Message | undefined, msg: Message): boolean {
+  if (!prev) return false;
+  if (isStandaloneMessage(prev) || isStandaloneMessage(msg)) return false;
+  if (prev.senderId !== msg.senderId) return false;
+  if ((prev.pmTargetId || '') !== (msg.pmTargetId || '')) return false;
+  return msg.timestamp - prev.timestamp <= GROUP_WINDOW_MS;
+}
 
 /**
  * SSE 的三态，比一个 boolean 多出来的就是「还没连上过」这一档。
@@ -116,6 +146,15 @@ const ViewerApp: React.FC = () => {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string>('');
+
+  // 遥控自动播放：202 只说明指令送到了，真正生效看 presence 里的 isAutoPlay 翻转。
+  // 这中间的空窗期显示转圈并禁点，否则手指会连点好几下。
+  const [controlPending, setControlPending] = useState(false);
+  const controlTargetRef = useRef<boolean | null>(null);
+  const controlTimerRef = useRef<number | null>(null);
+
+  // 手机自己的深浅色偏好（null = 没选过，跟随电脑端）。挂载时读一次 localStorage。
+  const [themeOverride, setThemeOverride] = useState<ViewerTheme | null>(() => readThemePreference());
 
   const [inputText, setInputText] = useState('');
   const [showMentionPopup, setShowMentionPopup] = useState(false);
@@ -199,6 +238,21 @@ const ViewerApp: React.FC = () => {
         return `${t('发送失败')}（HTTP ${err.status}）`;
       }
       return `${t('发送失败')}（${t('网络不通')}）`;
+    },
+    [t]
+  );
+
+  /** 遥控失败的文案。走和 sendInbox 同一条横幅（输入区上方的 sendError），不另起一套提示机制。 */
+  const describeControlError = useCallback(
+    (err: unknown): string => {
+      if (err instanceof ViewerHttpError) {
+        if (err.status === 503 || err.code === 'desktop-offline') return t('电脑端已离线，遥控没生效');
+        if (err.status === 409 || err.code === 'not-active-session') return t('电脑端当前不在这个会话，开启「跟随电脑」再试');
+        if (err.status === 429) return t('操作太频繁，缓一缓再试');
+        if (err.status === 401 || err.status === 403) return t('访问令牌无效，请重新扫码');
+        return `${t('遥控失败')}（HTTP ${err.status}）`;
+      }
+      return `${t('遥控失败')}（${t('网络不通')}）`;
     },
     [t]
   );
@@ -311,13 +365,35 @@ const ViewerApp: React.FC = () => {
 
   // --- SSE ---
 
-  const applyPresence = useCallback((p: PresenceState) => {
-    if (!p) return;
-    setPresence(p);
-    // 「跟随电脑」开着时，电脑切会话手机就跟着切
-    if (followRef.current && p.activeSessionId && p.activeSessionId !== viewingRef.current) {
-      setViewingSessionId(p.activeSessionId);
+  /** 撤掉遥控的等待态（成功回流 / 失败 / 超时都走这里） */
+  const clearControlPending = useCallback(() => {
+    controlTargetRef.current = null;
+    if (controlTimerRef.current !== null) {
+      window.clearTimeout(controlTimerRef.current);
+      controlTimerRef.current = null;
     }
+    setControlPending(false);
+  }, []);
+
+  const applyPresence = useCallback(
+    (p: PresenceState) => {
+      if (!p) return;
+      setPresence(p);
+      // 电脑端已经按遥控翻好了：等待态到此为止
+      if (controlTargetRef.current !== null && p.isAutoPlay === controlTargetRef.current) {
+        clearControlPending();
+      }
+      // 「跟随电脑」开着时，电脑切会话手机就跟着切
+      if (followRef.current && p.activeSessionId && p.activeSessionId !== viewingRef.current) {
+        setViewingSessionId(p.activeSessionId);
+      }
+    },
+    [clearControlPending]
+  );
+
+  // 卸载时把还挂着的超时清掉
+  useEffect(() => () => {
+    if (controlTimerRef.current !== null) window.clearTimeout(controlTimerRef.current);
   }, []);
 
   const blocked = phase === 'no-token' || phase === 'denied';
@@ -361,12 +437,21 @@ const ViewerApp: React.FC = () => {
     if (rest.length !== pending.length) setPending(rest);
   }, [win, pending]);
 
-  // --- 主题：跟随电脑端 settings.darkMode ---
+  // --- 主题：本地偏好优先，没选过才跟随电脑端 settings.darkMode ---
+  // 电脑晚上开深色、手机白天要浅色，这两件事本来就不该绑在一起。
+  // 手机上点过一次深浅色按钮就写进 localStorage，从此不再跟随电脑。
+
+  const isDark = themeOverride ? themeOverride === 'dark' : !!boot?.settings.darkMode;
 
   useEffect(() => {
-    const dark = !!boot?.settings.darkMode;
-    document.documentElement.classList.toggle('dark', dark);
-  }, [boot?.settings.darkMode]);
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [isDark]);
+
+  const handleToggleTheme = useCallback(() => {
+    const next: ViewerTheme = isDark ? 'light' : 'dark';
+    writeThemePreference(next);
+    setThemeOverride(next);
+  }, [isDark]);
 
   // --- 滚动 ---
 
@@ -489,6 +574,33 @@ const ViewerApp: React.FC = () => {
       setSending(false);
     }
   }, [inputText, canSend, sending, describeSendError]);
+
+  // --- 遥控自动播放 ---
+
+  const handleToggleAutoPlay = useCallback(async () => {
+    const sid = viewingRef.current;
+    if (!sid || controlPending || !desktopReachable) return;
+    const target = !presence?.isAutoPlay;
+
+    setSendError('');
+    controlTargetRef.current = target;
+    setControlPending(true);
+    if (controlTimerRef.current !== null) window.clearTimeout(controlTimerRef.current);
+    // presence 回流的兜底：电脑端崩了 / 事件丢了也不能让按钮永远转圈
+    controlTimerRef.current = window.setTimeout(() => {
+      controlTimerRef.current = null;
+      controlTargetRef.current = null;
+      setControlPending(false);
+    }, CONTROL_PENDING_TIMEOUT_MS);
+
+    try {
+      await sendControl(sid, target);
+    } catch (err) {
+      clearControlPending();
+      setSendError(describeControlError(err));
+      if (err instanceof ViewerHttpError && (err.status === 401 || err.status === 403)) setPhase('denied');
+    }
+  }, [controlPending, desktopReachable, presence?.isAutoPlay, clearControlPending, describeControlError]);
 
   // --- @提及 ---
 
@@ -614,9 +726,10 @@ const ViewerApp: React.FC = () => {
   return (
     <I18nProvider locale={lang}>
       <div className="h-screen flex flex-col bg-gray-50 dark:bg-black overflow-hidden relative">
-        {/* 头部 */}
-        <header className="shrink-0 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-3 pt-2 pb-1.5">
-          <div className="flex items-center gap-2">
+        {/* 头部。src/index.css 在 ≤640px 下把所有 button 撑到 44×44，这里的图标按钮
+            用 min-h-0 / min-w-0 覆盖掉（类选择器特异性高于元素选择器），否则头部会白白高一截。 */}
+        <header className="shrink-0 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-3 pt-1 pb-0.5">
+          <div className="flex items-center gap-1.5">
             <select
               value={viewingSessionId || ''}
               onChange={e => {
@@ -625,7 +738,7 @@ const ViewerApp: React.FC = () => {
                 setViewingSessionId(e.target.value);
               }}
               aria-label={t('选择会话')}
-              className="flex-1 min-w-0 bg-transparent text-[15px] font-semibold text-gray-900 dark:text-gray-100 border-0 focus:outline-none truncate py-1"
+              className="flex-1 min-w-0 bg-transparent text-[15px] font-semibold text-gray-900 dark:text-gray-100 border-0 focus:outline-none truncate py-0 leading-tight"
             >
               {groupedSessions.map(({ group, items }) => (
                 <optgroup key={group.id} label={group.name}>
@@ -639,41 +752,73 @@ const ViewerApp: React.FC = () => {
             </select>
 
             <button
+              onClick={handleToggleTheme}
+              aria-label={isDark ? t('切换到浅色') : t('切换到深色')}
+              title={isDark ? t('切换到浅色') : t('切换到深色')}
+              className="shrink-0 w-8 h-8 min-w-0 min-h-0 rounded-full flex items-center justify-center border border-gray-300 dark:border-zinc-700 text-gray-500 dark:text-gray-400 transition-colors"
+            >
+              {isDark ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+
+            <button
               onClick={() => {
                 const next = !followDesktop;
                 setFollowDesktop(next);
                 if (next && presence?.activeSessionId) setViewingSessionId(presence.activeSessionId);
               }}
-              className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+              aria-label={followDesktop ? t('跟随电脑（已开启）') : t('跟随电脑（已关闭）')}
+              title={followDesktop ? t('跟随电脑（已开启）') : t('跟随电脑（已关闭）')}
+              className={`shrink-0 w-8 h-8 min-w-0 min-h-0 rounded-full flex items-center justify-center border transition-colors ${
                 followDesktop
                   ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-transparent'
                   : 'bg-transparent text-gray-500 dark:text-gray-400 border-gray-300 dark:border-zinc-700'
               }`}
             >
-              {t('跟随电脑')}
+              {followDesktop ? <LocateFixed size={15} /> : <LocateOff size={15} />}
             </button>
           </div>
 
-          {/* 状态条 */}
-          <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 flex-wrap">
+          {/* 状态条：在线 · [▶ 自动播放] · 正在生成：xxx，压在一行里 */}
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 overflow-hidden">
             {/* SSE 断了就等于不知道电脑那边什么情况，别再报「在线」；
                 还没握上手的那一小会儿也别急着报「离线」，用中性的「正在连接」占位 */}
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1 shrink-0">
               <span className={`w-1.5 h-1.5 rounded-full ${desktopReachable ? 'bg-emerald-500' : 'bg-gray-400'}`} />
               {desktopReachable ? t('在线') : link === 'connecting' ? t('正在连接...') : t('离线')}
             </span>
-            <span className="text-gray-300 dark:text-zinc-700">·</span>
-            <span>{presence?.isAutoPlay ? t('自动播放') : t('已暂停')}</span>
+            <span className="text-gray-300 dark:text-zinc-700 shrink-0">·</span>
+
+            {/* 自动播放开关：点一下把指令送给电脑端，等 presence 回流才算数 */}
+            <button
+              onClick={() => void handleToggleAutoPlay()}
+              disabled={!desktopReachable || controlPending}
+              aria-label={presence?.isAutoPlay ? t('暂停自动播放') : t('开启自动播放')}
+              className={`shrink-0 min-h-0 min-w-0 h-5 pl-1 pr-1.5 rounded-full border flex items-center gap-1 text-[11px] transition-colors disabled:opacity-50 ${
+                presence?.isAutoPlay
+                  ? 'border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
+                  : 'border-gray-300 dark:border-zinc-700 text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              {controlPending ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : presence?.isAutoPlay ? (
+                <Pause size={10} />
+              ) : (
+                <Play size={10} />
+              )}
+              {presence?.isAutoPlay ? t('自动播放') : t('已暂停')}
+            </button>
+
             {generatingNames.length > 0 && (
               <>
-                <span className="text-gray-300 dark:text-zinc-700">·</span>
-                <span className="text-blue-500 truncate max-w-[45%]">
+                <span className="text-gray-300 dark:text-zinc-700 shrink-0">·</span>
+                <span className="text-blue-500 truncate min-w-0">
                   {t('正在生成')}：{generatingNames.join(', ')}
                 </span>
               </>
             )}
             {linkLost && (
-              <span className="ml-auto text-amber-500 flex items-center gap-1">
+              <span className="ml-auto shrink-0 text-amber-500 flex items-center gap-1">
                 <Loader2 size={10} className="animate-spin" />
                 {t('连接已断开，正在重连...')}
               </span>
@@ -713,24 +858,32 @@ const ViewerApp: React.FC = () => {
               <div className="text-center text-sm text-gray-400 py-16">{t('这个会话还没有消息')}</div>
             )}
 
-            {win.messages.map(msg => (
-              <ChatBubble
-                key={msg.id}
-                message={msg}
-                readOnly
-                sender={boot.agents.find(a => a.id === msg.senderId) as Agent | undefined}
-                allAgents={bubbleAgents}
-                userProfile={bubbleUserProfile}
-                replyToMessage={msg.replyToId ? win.messages.find(m => m.id === msg.replyToId) : undefined}
-                isStreaming={!!msg.isStreaming}
-              />
-            ))}
+            {/* [&>*:first-child]:mt-0 —— compact 下气泡的组间距挂在 margin-top 上，
+                列表第一条不该跟着多出一截顶部空白。包一层 div 才让 :first-child 指的是
+                真正的第一条消息（外面还有「加载更早」按钮之类的兄弟节点）。 */}
+            <div className="[&>*:first-child]:mt-0">
+              {win.messages.map((msg, i) => (
+                <ChatBubble
+                  key={msg.id}
+                  message={msg}
+                  readOnly
+                  compact
+                  continued={isContinuedMessage(win.messages[i - 1], msg)}
+                  sender={boot.agents.find(a => a.id === msg.senderId) as Agent | undefined}
+                  allAgents={bubbleAgents}
+                  userProfile={bubbleUserProfile}
+                  replyToMessage={msg.replyToId ? win.messages.find(m => m.id === msg.replyToId) : undefined}
+                  isStreaming={!!msg.isStreaming}
+                />
+              ))}
+            </div>
 
             {/* 乐观显示的待发消息 */}
             {pending.map(msg => (
               <div key={msg.id} className="opacity-50">
-                <ChatBubble message={msg} readOnly userProfile={bubbleUserProfile} allAgents={bubbleAgents} />
-                <div className="text-[10px] text-gray-400 text-right -mt-4 mb-4 pr-14">{t('发送中')}…</div>
+                <ChatBubble message={msg} readOnly compact userProfile={bubbleUserProfile} allAgents={bubbleAgents} />
+                {/* pr 对齐右侧头像列（w-10 + ml-3 = 52px），compact 下气泡底下已经没有时间戳行了 */}
+                <div className="text-[10px] text-gray-400 text-right mt-1 pr-[52px]">{t('发送中')}…</div>
               </div>
             ))}
 

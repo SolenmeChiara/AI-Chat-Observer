@@ -478,6 +478,7 @@ Desktop browser (App, localhost)              Phone browser (/viewer, ViewerApp)
 | `POST /api/live/presence` | allowed | 403 |
 | `GET /api/live/events` | allowed (`?role=desktop` marks the desktop connection) | allowed |
 | `POST /api/live/inbox` | allowed | allowed |
+| `POST /api/live/control` | allowed | allowed |
 | `GET /api/view/*` | allowed | allowed |
 
 **SSE events** (`GET /api/live/events`, `event:` name + JSON `data:`):
@@ -488,6 +489,9 @@ Desktop browser (App, localhost)              Phone browser (/viewer, ViewerApp)
 | `session` | all | `{ id, groupId, name, total, lastUpdated, deleted?: true }` — fired after every successful session PUT/DELETE |
 | `presence` | all | `{ activeGroupId, activeSessionId, isAutoPlay, processingAgentIds, desktopOnline, updatedAt }` |
 | `inbox` | desktop connection only | `{ id, sessionId, text, receivedAt }` |
+| `control` | desktop connection only | `{ id, action: 'autoplay', enabled, sessionId, receivedAt }` |
+
+**Remote control channel** (`POST /api/live/control`, added in the phase-2 patch — `PHONE_VIEWER_PLAN.md` §12): the phone can toggle desktop auto-play. Same validation order as inbox (`400` -> `503` -> `409` -> `429` -> `202`), a separate rate-limit bucket, and pure forwarding — the server never writes disk and never mutates its own `presence` snapshot. The desktop applies the command (`setIsAutoPlay(true)` / `handleStopAll()`, re-checking `activeSessionId` against a ref) and the resulting `presence` broadcast is what confirms it back to the phone.
 
 **`POST /api/live/inbox` validation order** (each failure short-circuits before the next check): `400` (missing/invalid fields, or text empty/over 4000 chars) -> `503 desktop-offline` (no `role=desktop` SSE connection) -> `409 not-active-session` (`sessionId` doesn't match `presence.activeSessionId`) -> `429` (sliding-window rate limit, 20 requests/minute per source) -> `202 { id }` accepted and forwarded over SSE.
 

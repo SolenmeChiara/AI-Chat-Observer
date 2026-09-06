@@ -96,6 +96,7 @@ function resolveRole(req, url): Role | null
 | `POST /api/live/presence` | ✅ | ❌ |
 | `GET /api/live/events` | ✅（`?role=desktop` 标记电脑端） | ✅ |
 | `POST /api/live/inbox` | ✅ | ✅ |
+| `POST /api/live/control` | ✅ | ✅（二期补丁，§12） |
 | `GET /api/view/*` | ✅ | ✅ |
 
 ### 3.2 端点
@@ -118,6 +119,13 @@ interface PresenceReport { activeGroupId: string; activeSessionId: string; isAut
 ```
 校验顺序与返回：400（字段缺失 / text 空或 > 4000 字符）→ 503 `{ error: 'desktop-offline' }`（无 role=desktop 的 SSE 连接）→ 409 `{ error: 'not-active-session' }`（`sessionId !== presence.activeSessionId`）→ 429（滑动窗口：每连接来源 20 条/分钟）→ 202 `{ id }`。
 `id = 'inbox-' + Date.now() + '-' + 6位随机`。事件只推给 desktop 连接，不落盘。
+
+**`POST /api/live/control`**（`application/json`，body ≤ 64 KB；二期补丁，见 §12）
+```ts
+{ action: 'autoplay'; enabled: boolean; sessionId: string }
+```
+校验顺序与 inbox 同款：400（`action !== 'autoplay'` / `enabled` 非 boolean / `sessionId` 非字符串或空）→ 503 `{ error: 'desktop-offline' }` → 409 `{ error: 'not-active-session' }`（手机看的不是电脑当前会话时不许遥控）→ 429（滑动窗口 20 次/分钟，来源 key `control:<remoteAddress>`，与 inbox 分桶）→ 202 `{ id }`。
+`id = 'ctl-' + Date.now() + '-' + 6位随机`。事件只推给 desktop 连接，**不落盘、不改 presenceReport**——生效与否由电脑端执行后经 presence 回流确认。
 
 **`GET /api/view/bootstrap`**
 ```ts
@@ -150,6 +158,7 @@ interface PresenceReport { activeGroupId: string; activeSessionId: string; isAut
 | `session` | 全部 | `{ id, groupId, name, total, lastUpdated, deleted?: true }`（每次会话 PUT/DELETE 落盘成功后） |
 | `presence` | 全部 | `PresenceState = PresenceReport & { desktopOnline: boolean; updatedAt: number }` |
 | `inbox` | 仅 desktop | `{ id, sessionId, text, receivedAt }` |
+| `control` | 仅 desktop | `{ id, action: 'autoplay', enabled, sessionId, receivedAt }`（二期补丁，§12） |
 
 `desktopOnline` = 存在 `role=desktop` 连接；desktop 连接断开后延迟 5s 再广播 offline（给 EventSource 自动重连留窗口）。
 
@@ -173,9 +182,10 @@ appendUserMessage(sessionId: string, input: {
 - 用 `useCallback` + ref 暴露给 SSE 回调，避免旧闭包。
 - 本地消息 id 保持 `Date.now().toString()` 不动（不改现有行为）；inbox 消息用服务端给的 `inbox-…` id。
 
-**4.2 `services/liveBridge.ts`（新）** — `useLiveBridge({ enabled, report: PresenceReport, onInbox })`
+**4.2 `services/liveBridge.ts`（新）** — `useLiveBridge({ enabled, report: PresenceReport, onInbox, onControl? })`
 - `enabled = isDbLoaded && getStorageMode() === 'file'`。
 - 开 `EventSource('/api/live/events?role=desktop')`；`open` 时立即 POST 一次 presence；`report` 变化 200ms 防抖 POST；`inbox` 事件 → `onInbox`（经 ref 调用最新的 `appendUserMessage`）。
+- `control` 事件 → `onControl`（二期补丁，§12）：App 里 `enabled=true` → `setIsAutoPlay(true)`，`false` → `handleStopAll()`（硬停，与电脑端播放按钮同语义），同样走 ref 拿最新闭包，并再比一次 `activeSessionId`。
 - 不在本 hook 里触发任何 agent。
 - 网络错误只 `console.warn`，绝不影响主流程。
 
@@ -338,3 +348,39 @@ Host 伪造（局域网请求带 `Host: localhost`）403；DNS rebinding（`Host
 7. 电脑端关闭标签页模拟离线，观察手机端多久显示离线、重新打开电脑端后多久恢复。
 8. 尝试在手机上发送 `/roll` 或类似命令，确认目前不会生效（已知限制，见 §11.3）。
 9. 如果方便，额外测一次 `npm run dev:lan` 的 Tailscale IP 或普通局域网 IP 路径，交叉验证。
+
+## 12. 二期补丁：手机端遥控自动播放 + 紧凑布局（2026-09-06）
+
+Sol 的两条实际使用反馈：躺床上看群聊时想停下来，只能爬起来去点电脑；以及手机上一屏放不下几句话。
+
+### 12.1 遥控通道（A）
+
+- 新端点 `POST /api/live/control`（契约见 §3.2）。设计上刻意做成**纯转发**：服务端不落盘、不改 `presenceReport`，只把指令广播给 `role=desktop` 的 SSE 连接。手机端发出后进入「pending」态（转圈 + 禁点），要等电脑端真的翻转并把 presence 报回来才算数，4s 兜底超时。这样服务端永远不会凭空造出一个和电脑端实际状态不符的 presence。
+- 三道会话校验：服务端比一次 `activeSessionId`（409）；电脑端收到事件后用 ref 再比一次（presence 上报有 200ms 防抖，电脑刚切会话的那一瞬服务端手上还是旧值）；手机端 UI 只在 `desktopReachable` 时可点。
+- 限速与 inbox 分桶（来源 key 前缀 `control:` / 无前缀），免得连发几条消息把「暂停」按钮一起堵死。
+- 电脑端语义与那颗播放按钮完全一致：开 = `setIsAutoPlay(true)`，关 = `handleStopAll()`（硬停，中断进行中的生成）。
+
+### 12.2 紧凑布局（B）
+
+- `ChatBubble` 新增 `compact` / `continued` 两个 prop（都进了 `React.memo` 比较器）。`compact` 为假时渲染输出与 HEAD 一致——实测手段见 §12.4。
+  - compact：时间戳并进名字行、气泡下方那一整行不渲染、内容列从 `max-w-[85%] sm:max-w-[70%]` 换成 `flex-1 min-w-0`。
+  - continued：不画头像和名字，用等宽空 div 占位保持左对齐；纵向间距改由 margin-top 驱动（组内 `mt-1.5`，组间 `mt-4`），viewer 那侧用 `[&>*:first-child]:mt-0` 掐掉列表首条的顶部空白。
+- 分组规则在 viewer 侧算：同 `senderId`、同 `pmTargetId`、间隔 ≤ 5 分钟，且两条都不是 system / 搜索结果消息。
+- 流式空气泡改成三点跳动指示（`animate-bounce` + `[animation-delay:150ms|300ms]`）。这是唯一一处 compact 之外也会变的渲染，电脑端同样受益。
+- 头部瘦身：「跟随电脑」黑胶囊 → 32px 圆形图标按钮（`LocateFixed` / `LocateOff`）；状态条里的「自动播放/已暂停」纯文字 → 可点的小胶囊按钮。`src/index.css` 在 ≤640px 下把所有 `button` 撑到 44×44，这些按钮靠 `min-h-0 min-w-0` 覆盖（类选择器特异性高于元素选择器）。
+
+### 12.3 手机主题独立（B5）
+
+Sol 的场景是电脑夜间深色、手机白天浅色，原来「viewer 跟随 `settings.darkMode`」是唯一来源，做不到。改成：本地偏好（`localStorage['aco-viewer-theme']`，值 `'light' | 'dark'`，读写都包 try/catch）优先，没选过才跟随电脑端。header 里加一颗与「跟随电脑」同规格的 32px 图标按钮（当前深色显示 `Sun`，浅色显示 `Moon`），点一次即写入偏好，从此不再跟随电脑；清掉这个 key 就回到跟随。
+
+### 12.4 验证结果
+
+- `tsc --noEmit`（两份 tsconfig）零错误；`npm run build` 通过，viewer 三个 chunk 合计 282 kB（index 145 + ChatBubble 111 + ViewerApp 26），`App` 仍是独立 chunk，没被 viewer 入口拉进来。
+- 服务端 curl 断言（临时端口 5711 + 临时 `ACO_DATA_DIR`，未碰生产 `data/`）：400×4（坏 action / 坏 enabled / 空 sessionId / 非 JSON content-type）、405（GET）、503（无 desktop）、409×2、202（loopback）、403（`.ts.net` Host 无 token）、202（`.ts.net` Host + Bearer）、429（同一分钟第 21 次起）全部符合契约；desktop SSE 收到 2 条 `event: control`，同时在线的 lan 观众 SSE 收到 0 条；control 打满限速后 inbox 仍返回 202（分桶生效）。
+- 端到端（Chrome，两个标签页）：手机点开 → 电脑按钮进入播放态 → presence 回流让手机按钮翻转、pending 转圈消失；再点暂停 → 电脑回到「开始」；电脑端自己点「开始」→ 手机同步显示「自动播放」；关掉电脑标签页 → 手机 5s 后显示离线且按钮禁用。
+- 布局：viewer 头部高度 75.2px → 58.7px（-21.9%，没到设计稿写的 -25%：32px 圆按钮 + 20px 状态条 + 内边距已经是这套结构的下限）；同发送者连续消息只画一次头像/名字；气泡右边缘 313px → 368px（390px 视口）；空流式气泡显示三点。
+- 电脑端观感未变：同一份数据下，消息列表每条气泡的 `outerHTML` 逐条 SHA-256 与 HEAD 完全一致（11/11 相同）。
+
+### 12.5 本次未测
+
+真机与真 `tailscale serve`；手机端 409 / 429 的错误横幅（只测了服务端状态码，UI 分支没在浏览器里触发过）；电脑端的三点打字指示（App 是按 `processingAgents` 判 `isStreaming` 的，磁盘上写死的 `isStreaming:true` 不会触发它，只在 viewer 侧实测到）；390px 是靠把 `html/body` 掐宽 + 手工复刻 ≤640px 那几条 CSS 规则模拟出来的（MCP 的窗口 resize 在这台机器上不生效），不是真实的窄视口。

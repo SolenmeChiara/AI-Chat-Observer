@@ -29,6 +29,18 @@ export interface InboxEvent {
   receivedAt: number;
 }
 
+/**
+ * SSE `control` 事件的 data（只推给 role=desktop 的连接）。
+ * 手机端遥控自动播放开关；服务端只转发，真正的状态翻转由电脑端执行后经 presence 回流确认。
+ */
+export interface ControlEvent {
+  id: string;
+  action: 'autoplay';
+  enabled: boolean;
+  sessionId: string;
+  receivedAt: number;
+}
+
 export interface UseLiveBridgeOptions {
   /** 只有本地文件存储模式才有服务端可言；legacy(IndexedDB) 下整个桥不启动 */
   enabled: boolean;
@@ -36,6 +48,8 @@ export interface UseLiveBridgeOptions {
   report: PresenceReport;
   /** 收到手机消息时回调（内部会用 ref 存最新的一份，不怕旧闭包） */
   onInbox: (msg: InboxEvent) => void;
+  /** 收到手机遥控指令时回调（同样走 ref，不怕旧闭包） */
+  onControl?: (cmd: ControlEvent) => void;
 }
 
 const EVENTS_URL = '/api/live/events?role=desktop';
@@ -53,9 +67,10 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 const reportKey = (r: PresenceReport): string =>
   JSON.stringify([r.activeGroupId, r.activeSessionId, r.isAutoPlay, [...r.processingAgentIds].sort()]);
 
-export function useLiveBridge({ enabled, report, onInbox }: UseLiveBridgeOptions): void {
+export function useLiveBridge({ enabled, report, onInbox, onControl }: UseLiveBridgeOptions): void {
   const reportRef = useRef(report);
   const onInboxRef = useRef(onInbox);
+  const onControlRef = useRef(onControl);
   // 已经上报过的指纹：SSE open 时会立刻发一次，防抖 effect 拿它去重
   const sentKeyRef = useRef<string | null>(null);
   // 各类 warn 上次打印的时间戳，用于节流
@@ -63,6 +78,7 @@ export function useLiveBridge({ enabled, report, onInbox }: UseLiveBridgeOptions
 
   reportRef.current = report;
   onInboxRef.current = onInbox;
+  onControlRef.current = onControl;
 
   // 节流版 console.warn：同一个 tag 30s 内只出一次
   const warn = useRef((tag: string, ...args: unknown[]) => {
@@ -132,6 +148,31 @@ export function useLiveBridge({ enabled, report, onInbox }: UseLiveBridgeOptions
           });
         } catch (err) {
           warn('inbox 事件解析失败', err);
+        }
+      }) as EventListener);
+
+      es.addEventListener('control', ((ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data) as Partial<ControlEvent>;
+          if (
+            !data ||
+            typeof data.id !== 'string' ||
+            data.action !== 'autoplay' ||
+            typeof data.enabled !== 'boolean' ||
+            typeof data.sessionId !== 'string'
+          ) {
+            warn('control 事件字段不完整，已忽略', ev.data);
+            return;
+          }
+          onControlRef.current?.({
+            id: data.id,
+            action: 'autoplay',
+            enabled: data.enabled,
+            sessionId: data.sessionId,
+            receivedAt: typeof data.receivedAt === 'number' ? data.receivedAt : Date.now(),
+          });
+        } catch (err) {
+          warn('control 事件解析失败', err);
         }
       }) as EventListener);
 
