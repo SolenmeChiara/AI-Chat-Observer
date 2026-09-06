@@ -13,7 +13,7 @@ import { streamAnthropicReply } from './services/anthropicService';
 import { generateSessionName, updateSessionSummary } from './services/summaryService';
 import { AgentType } from './types';
 import { parseFile, compressImage, getBase64Size } from './services/fileParser';
-import { initDB, loadAllData, saveCollection, saveSettings } from './services/db';
+import { initDB, loadAllData, saveCollection, saveSettings, exportSnapshot, importSnapshot, getStorageMode } from './services/db';
 import { describeImage } from './services/visionProxyService';
 import { I18nProvider, makeT, t } from './i18n';
 import { performSearch, formatSearchResultsForContext, formatSearchResultsForDisplay } from './services/searchService';
@@ -350,11 +350,18 @@ const App: React.FC = () => {
   }, [activeSessionId]);
 
   // 3. Save Watchers (Debounced for Sessions)
+  // trailing debounce 会被流式输出的高频 setSessions 一直重置，长回复期间可能几分钟不落库。
+  // 加一层 maxWait：距这一批第一次待写超过 3s 就强制存一次，最多丢 3s。
+  const sessionsSaveDeadlineRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isDbLoaded) return;
+    const now = Date.now();
+    if (sessionsSaveDeadlineRef.current === null) sessionsSaveDeadlineRef.current = now + 3000;
+    const wait = Math.max(0, Math.min(1000, sessionsSaveDeadlineRef.current - now)); // Debounce saves to 1s to handle streaming updates
     const timeoutId = setTimeout(() => {
+        sessionsSaveDeadlineRef.current = null;
         saveCollection('sessions', sessions);
-    }, 1000); // Debounce saves to 1s to handle streaming updates
+    }, wait);
     return () => clearTimeout(timeoutId);
   }, [sessions, isDbLoaded]);
 
@@ -3308,6 +3315,10 @@ const App: React.FC = () => {
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-2">{tt('如果是其它标签页阻塞了数据库升级，关掉所有本站标签页后重试即可')}</p>
+                {/* 文件模式下「重置数据库」只清得掉浏览器里的旧 IndexedDB，碰不到磁盘上的 data/ */}
+                {getStorageMode() === 'file' && (
+                  <p className="text-xs text-gray-500">{tt('当前是文件存储模式：「重置数据库」只会清空浏览器里的旧 IndexedDB，data/ 目录请手动处理')}</p>
+                )}
               </>
             ) : (
               <>
@@ -3352,6 +3363,7 @@ const App: React.FC = () => {
         onCreateSession={handleCreateSession} onSwitchSession={handleSwitchSession}
         onDeleteSession={handleDeleteSession} onRenameSession={handleRenameSession}
         onUpdateSummary={handleUpdateSummary}
+        exportSnapshot={exportSnapshot} importSnapshot={importSnapshot}
         isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)}
       />
 

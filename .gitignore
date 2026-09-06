@@ -30,3 +30,6 @@ nul
 
 # Local dev notes
 mofalajidui/
+
+# 本机数据目录（server/localdb.ts）。providers.json 里是明文 API key，绝不能进版本库。
+data/

@@ -7,6 +7,7 @@ import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
 import { isImageGenModel } from '../services/openaiService';
 import { formatSessionAsHtml } from '../services/exportHtml';
+import type { DbSnapshot } from '../services/db';
 import { useT } from '../i18n';
 
 // TTS Settings Panel Component
@@ -474,6 +475,9 @@ interface SidebarProps {
   onRenameSession: (id: string, name: string) => void;
   // Memory
   onUpdateSummary: (sessionId: string, summary: string) => void;
+  // 数据备份：JSON 全量导出 / 导入（services/db.ts）
+  exportSnapshot: () => Promise<DbSnapshot>;
+  importSnapshot: (snapshot: unknown) => Promise<void>;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -488,6 +492,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   sessions, activeSessionId,
   onCreateSession, onSwitchSession, onDeleteSession, onRenameSession,
   onUpdateSummary,
+  exportSnapshot, importSnapshot,
   isOpen, onClose
 }) => {
   const t = useT();
@@ -495,6 +500,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isFetching, setIsFetching] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const agentAvatarInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null); // JSON 全量备份的导入文件选择器
   const [editingAgentAvatar, setEditingAgentAvatar] = useState<string | null>(null);
 
   // Agent card collapse state
@@ -2373,6 +2379,29 @@ const Sidebar: React.FC<SidebarProps> = ({
                  downloadFile(`${activeSession.name}.html`, html, 'text/html;charset=utf-8');
                };
 
+               // 全量 JSON 备份：上面三个导出都是有损的展示格式，这个才是能还原回去的那份
+               const handleExportBackup = async () => {
+                 try {
+                   const snapshot = await exportSnapshot();
+                   const date = new Date().toISOString().slice(0, 10);
+                   downloadFile(`aco-backup-${date}.json`, JSON.stringify(snapshot, null, 2), 'application/json;charset=utf-8');
+                 } catch (err: any) {
+                   alert(`${t('导出备份失败')}: ${err?.message || String(err)}`);
+                 }
+               };
+
+               const handleImportBackupFile = async (file: File) => {
+                 try {
+                   const snapshot = JSON.parse(await file.text());
+                   if (!confirm(t('导入备份会覆盖当前的角色、供应商、群组、会话和设置，确定继续吗？'))) return;
+                   await importSnapshot(snapshot);
+                   // 导入直接改的是存储层，内存里的 state 已经全是旧的，只能整页重来
+                   location.reload();
+                 } catch (err: any) {
+                   alert(`${t('导入备份失败')}: ${err?.message || String(err)}`);
+                 }
+               };
+
                return (
                  <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                    <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -2400,6 +2429,35 @@ const Sidebar: React.FC<SidebarProps> = ({
                      >
                        {t('导出网页(带图)')}
                      </button>
+                   </div>
+
+                   <div className="mt-4 pt-4 border-t border-gray-200 dark:border-zinc-700">
+                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('完整数据备份（可原样还原）')}</p>
+                     <div className="flex gap-2">
+                       <button
+                         onClick={handleExportBackup}
+                         className="flex-1 py-2 border border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+                       >
+                         {t('导出 JSON 备份')}
+                       </button>
+                       <button
+                         onClick={() => backupInputRef.current?.click()}
+                         className="flex-1 py-2 border border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+                       >
+                         {t('导入 JSON 备份')}
+                       </button>
+                     </div>
+                     <input
+                       ref={backupInputRef}
+                       type="file"
+                       accept="application/json,.json"
+                       className="hidden"
+                       onChange={(e) => {
+                         const file = e.target.files?.[0];
+                         e.target.value = ''; // 清空，同一个文件再选一次也能触发 change
+                         if (file) void handleImportBackupFile(file);
+                       }}
+                     />
                    </div>
                  </div>
                );
