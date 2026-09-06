@@ -253,6 +253,10 @@ function handleEvents(req: IncomingMessage, res: ServerResponse, url: URL, role:
   };
   req.on('close', cleanup);
   res.on('close', cleanup);
+  // 长连接活得久，手机走出 WiFi 覆盖这类断法会让 res 异步 emit('error')；
+  // stream 的 'error' 没人听就是未捕获异常，会把整个 dev server 带走。收掉即可，close 负责清理。
+  res.on('error', cleanup);
+  req.on('error', cleanup);
 }
 
 // --- presence ---
@@ -429,14 +433,25 @@ async function handleLanInfo(req: IncomingMessage, res: ServerResponse): Promise
   const order: Record<LanEntryKind, number> = { tailscale: 0, 'tailscale-serve': 1, lan: 2 };
   drafts.sort((a, b) => order[a.kind] - order[b.kind]);
 
-  const { toString: qrToString } = await import('qrcode');
+  // 二维码是锦上添花：qrcode 没装 / 载不进来时也要把文字链接给出去，
+  // 否则整个「手机观看」面板会因为一个可选依赖而变成 500。
+  type QrToString = (text: string, options: { type: 'svg'; margin: number }) => Promise<string>;
+  let qrToString: QrToString | null = null;
+  try {
+    const mod = await import('qrcode');
+    qrToString = mod.toString as unknown as QrToString;
+  } catch (err: any) {
+    console.warn(`[aco-live] 载入 qrcode 失败，只给出文字链接：${err?.message || String(err)}`);
+  }
   const entries: LanEntry[] = [];
   for (const draft of drafts) {
     let qrSvg = '';
-    try {
-      qrSvg = await qrToString(draft.url, { type: 'svg', margin: 1 });
-    } catch (err: any) {
-      console.warn(`[aco-live] 生成二维码失败（${draft.url}）：${err?.message || String(err)}`);
+    if (qrToString) {
+      try {
+        qrSvg = await qrToString(draft.url, { type: 'svg', margin: 1 });
+      } catch (err: any) {
+        console.warn(`[aco-live] 生成二维码失败（${draft.url}）：${err?.message || String(err)}`);
+      }
     }
     entries.push({ ...draft, qrSvg });
   }
@@ -801,6 +816,8 @@ async function handleAttachment(
   res.setHeader('content-length', String(buf.length));
   // 消息 id 固定则内容固定，可以放心让手机浏览器缓存一天；private 挡住中间代理
   res.setHeader('cache-control', 'private, max-age=86400');
+  // 字节是用户当初拖进来的任意文件，mimeType 也是文件自带的，不让浏览器再自己嗅探一遍
+  res.setHeader('x-content-type-options', 'nosniff');
   res.end(buf);
 }
 

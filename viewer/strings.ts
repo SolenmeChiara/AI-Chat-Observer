@@ -7,7 +7,6 @@ export type ViewerLocale = 'zh' | 'en';
 
 const en: Record<string, string> = {
   // 引导页 / 连接
-  '手机观众模式': 'Phone Viewer',
   '需要访问令牌': 'Access token required',
   '请在电脑端点开「📱 手机观看」，用手机扫那个二维码进来。': 'On your computer, open "📱 Phone Viewer" and scan the QR code with your phone.',
   '令牌无效或已过期': 'Invalid or expired token',
@@ -50,8 +49,6 @@ const en: Record<string, string> = {
   '消息为空或太长（上限 4000 字）': 'Message is empty or too long (4000 chars max)',
   '访问令牌无效，请重新扫码': 'Invalid token, please scan the QR code again',
   '提及成员 (@)': 'Mention (@)',
-  '全体成员': 'Everyone',
-  '随机顺序': 'random order',
 };
 
 export function makeViewerT(locale: ViewerLocale): (key: string) => string {

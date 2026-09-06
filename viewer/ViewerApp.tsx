@@ -39,6 +39,7 @@ import {
   fetchBootstrap,
   fetchSessionRange,
   fetchSessionTail,
+  getToken,
   initToken,
   mergeMessages,
   nextSyncFrom,
@@ -46,6 +47,15 @@ import {
 } from './viewerClient';
 
 type Phase = 'loading' | 'no-token' | 'denied' | 'error' | 'ready';
+
+/**
+ * SSE 的三态，比一个 boolean 多出来的就是「还没连上过」这一档。
+ * 首次加载时 bootstrap（一次 fetch）可能比 SSE 的 open 事件先到，此时 UI 已经渲染而
+ * connected 还是 false；只用 boolean 的话开局会闪一下「离线 + 输入框禁用」再跳回可用。
+ * 'connecting' 只活到第一次 open 或第一次 error 为止——正常握手不会先发 error，
+ * 所以真连不上（403 / 电脑关机）时会立刻落到 'offline'，不会赖在中性态里。
+ */
+type LinkState = 'connecting' | 'online' | 'offline';
 
 /** 把会话事件并回索引；内容没变就原样返回旧数组，免得白刷一轮渲染 */
 function applySessionEvent(list: ViewSessionIndex[], evt: SessionEventData): ViewSessionIndex[] {
@@ -84,14 +94,18 @@ const Gate: React.FC<{ title: string; body: string; children?: React.ReactNode }
 );
 
 const ViewerApp: React.FC = () => {
-  // token 只在挂载时解析一次：initToken 会顺手把 URL 上的 ?token= 抹掉
+  // token 只在挂载时解析一次：initToken 会顺手把 URL 上的 ?token= 抹掉。
+  // 没 token 不代表进不去：回环来源 + 回环 Host 在服务端就是全权的 loopback 角色
+  // （server/http.ts:216，不校验 token），Sol 在电脑上开 localhost/viewer 预览手机版
+  // 不该被要求手工粘 token。所以一律先试一次 bootstrap + SSE，只有真被 401/403 拒了
+  // 才落引导页——局域网来源没 token 必然被拒，那条路径的观感和以前一样。
   const [token, setToken] = useState<string | null>(() => initToken());
-  const [phase, setPhase] = useState<Phase>(() => (token ? 'loading' : 'no-token'));
+  const [phase, setPhase] = useState<Phase>('loading');
   const [fatalMessage, setFatalMessage] = useState<string>('');
 
   const [boot, setBoot] = useState<BootstrapData | null>(null);
   const [presence, setPresence] = useState<PresenceState | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [link, setLink] = useState<LinkState>('connecting');
 
   const [followDesktop, setFollowDesktop] = useState(true);
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
@@ -205,7 +219,9 @@ const ViewerApp: React.FC = () => {
       });
     } catch (err) {
       if (err instanceof ViewerHttpError && (err.status === 401 || err.status === 403)) {
-        setPhase('denied');
+        // 手上有 token 却被拒 = 令牌坏了；压根没 token = 还没扫码。两种文案不一样。
+        // 读 getToken() 而不是 token state：这里在 useCallback([]) 里，闭包会锁死旧值。
+        setPhase(getToken() ? 'denied' : 'no-token');
         return;
       }
       console.warn('[viewer] bootstrap 失败', err);
@@ -217,9 +233,8 @@ const ViewerApp: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
     void loadBootstrap();
-  }, [token, loadBootstrap]);
+  }, [loadBootstrap]);
 
   // --- 增量同步 ---
 
@@ -307,10 +322,12 @@ const ViewerApp: React.FC = () => {
 
   const blocked = phase === 'no-token' || phase === 'denied';
 
+  // token 在依赖里是有意义的：清掉令牌后要用「没有凭证」重新握一次手，不是继续用旧连接。
   useEffect(() => {
-    if (!token || blocked) return;
+    if (blocked) return;
+    setLink('connecting');
     const close = connectLiveEvents({
-      onStatusChange: setConnected,
+      onStatusChange: up => setLink(up ? 'online' : 'offline'),
       onHello: data => applyPresence(data.presence),
       onPresence: applyPresence,
       onSession: data => {
@@ -425,13 +442,24 @@ const ViewerApp: React.FC = () => {
 
   // --- 发送 ---
 
-  const canSend = !!presence?.desktopOnline && !!viewingSessionId && viewingSessionId === presence?.activeSessionId;
+  // SSE 断了 = presence 是一份不知道多旧的快照，desktopOnline / activeSessionId 都不能再信，
+  // 所以连接掉了就一并禁掉发送（否则顶部写着「离线」输入框却照样能敲，提示语还是空的）。
+  // 只拦 'offline' 不拦 'connecting'：后者是首次握手那几百毫秒，presence 刚从 bootstrap
+  // 拿到、是新鲜的，拦了只会让开局闪一下禁用态。
+  const linkLost = link === 'offline';
+  /** 状态点：得是 SSE 通着 **且** 电脑端在线才算「在线」 */
+  const desktopReachable = link === 'online' && !!presence?.desktopOnline;
+  const canSend =
+    !linkLost && !!presence?.desktopOnline && !!viewingSessionId && viewingSessionId === presence?.activeSessionId;
   const sendBlockedReason = useMemo(() => {
-    if (!presence) return t('加载中...');
+    if (link === 'offline') return t('连接已断开，正在重连...');
+    if (!presence) return t('正在连接...');
     if (!presence.desktopOnline) return t('电脑端已离线，暂时发不出消息');
     if (viewingSessionId !== presence.activeSessionId) return t('只能给电脑端当前打开的会话发消息');
+    // 有 presence 但 SSE 还没握上手：能发，只是先说一声，别让人以为界面卡住了
+    if (link === 'connecting') return t('正在连接...');
     return '';
-  }, [presence, viewingSessionId, t]);
+  }, [link, presence, viewingSessionId, t]);
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
@@ -628,12 +656,11 @@ const ViewerApp: React.FC = () => {
 
           {/* 状态条 */}
           <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 flex-wrap">
-            {/* SSE 断了就等于不知道电脑那边什么情况，别再报「在线」 */}
+            {/* SSE 断了就等于不知道电脑那边什么情况，别再报「在线」；
+                还没握上手的那一小会儿也别急着报「离线」，用中性的「正在连接」占位 */}
             <span className="flex items-center gap-1">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${connected && presence?.desktopOnline ? 'bg-emerald-500' : 'bg-gray-400'}`}
-              />
-              {connected && presence?.desktopOnline ? t('在线') : t('离线')}
+              <span className={`w-1.5 h-1.5 rounded-full ${desktopReachable ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+              {desktopReachable ? t('在线') : link === 'connecting' ? t('正在连接...') : t('离线')}
             </span>
             <span className="text-gray-300 dark:text-zinc-700">·</span>
             <span>{presence?.isAutoPlay ? t('自动播放') : t('已暂停')}</span>
@@ -645,7 +672,7 @@ const ViewerApp: React.FC = () => {
                 </span>
               </>
             )}
-            {!connected && (
+            {linkLost && (
               <span className="ml-auto text-amber-500 flex items-center gap-1">
                 <Loader2 size={10} className="animate-spin" />
                 {t('连接已断开，正在重连...')}

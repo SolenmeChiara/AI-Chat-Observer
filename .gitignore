@@ -37,3 +37,6 @@ data/
 # 侧栏「导出 JSON 备份」的产物，同样含明文 API key。文件名由 db.ts exportSnapshot 决定。
 aco-backups/
 aco-backup-*.json
+
+# tsc --build 的增量缓存
+*.tsbuildinfo

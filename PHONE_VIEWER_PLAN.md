@@ -1,6 +1,6 @@
 # PHONE_VIEWER_PLAN — 手机观众模式（局域网实时观看 + 发消息）
 
-状态：设计定稿，施工中（2026-09-06）
+状态：已实现并通过独立审查（2026-09-06）；待 Sol 真机验证
 前置：LOCAL_STORAGE_PLAN.md 已上线（数据在 `data/`，所有会话写入经 `server/localdb.ts` 收敛）。
 不引入新进程；新增依赖仅 `qrcode`（服务端生成二维码 SVG）。
 
@@ -242,3 +242,99 @@ W2/W3 在 W1 未合并时用本文契约自测（W3 可在 worktree 里写一个
 - Tailwind 本地化（补 `postcss.config.js`，删 CDN；要过一轮视觉回归）——无外网的局域网场景才需要。
 - HTTPS / 局域网域名（Vite `allowedHosts`）。
 - 已知：电脑端要用 `localhost` 打开；从本机用局域网 IP 打开会被当作 lan 角色，主界面拿不到 `/api/db/*`。
+
+## 10. 实施纪要
+
+三个 opus 实现员各自 worktree 并行施工（分工同 §7），主循环整合后交独立审查员复核，未回退任何一处契约。
+
+### 10.1 分工与产出
+
+| 工位 | 产出文件 |
+|---|---|
+| W1 服务端 | `server/http.ts`（新，§3.1 角色判定 + token + 响应/请求体工具收敛于此）、`server/live.ts`（新，§3.2/§3.3 全部端点）、`server/localdb.ts`（改，接入 `resolveRole`）、`package.json`（`dev:lan` / `preview:lan`、`qrcode` 依赖）、`tsconfig.node.json`（`include` 加 `server/**/*.ts`；HEAD 上这条本来就是 TS6307 红，顺手修正） |
+| W2 电脑端 | `App.tsx`（新增 `appendUserMessage` + `appendUserMessageRef`，`handleUserSend` 改调它并传 `parseCommands: true`；4 处闭包式 `setSessions` 改函数式；接入 `useLiveBridge({ enabled: isDbLoaded && getStorageMode() === 'file', ... })`）、`services/liveBridge.ts`（新）、`components/PhoneViewerModal.tsx`（新）、`components/Sidebar.tsx`（📱 手机观看按钮）、`i18n.tsx` |
+| W3 手机端 | `viewer/viewerClient.ts`、`viewer/ViewerApp.tsx`、`viewer/strings.ts`（均新）、`src/main.tsx`（`/viewer` 分流）、`components/ChatBubble.tsx`（新增 `readOnly` prop） |
+| 主循环整合 | `viewerClient` 里附件 URL 已带 `token=` 时不再重复拼接（服务端对 `lan` 角色的 `/api/view` 响应已经拼好 `?token=`）；`package.json` 加 `dev:tsserve = vite --mode lan --host 127.0.0.1`；`.gitignore` 加 `*.tsbuildinfo` |
+
+### 10.2 与设计稿的偏离
+
+逐条列出，均已过审查（未标注的即视为审查确认合理，无需回退）：
+
+1. **附件 URL 只有 `lan` 角色带 `?token=`，`loopback` 不带**——`<img src>` 发不出 `Authorization` 头，只能走 query string；同机浏览器不需要这层。
+2. **`presence` / `inbox` 非 `application/json` 一律 400**——设计稿未明确要求，实现中作为 CSRF 纵深防御的一环补上。
+3. **`server/live.ts` 对 `types.ts` 里的 `Attachment`/`Message`/`ChatSession`/`Agent`/`ChatGroup` 用手抄的类型子集**，而非 `import type`——避免把整个前端模块图拖进 `tsconfig.node.json` 的 composite 编译单元；审查逐字段核对过与 `types.ts` 一致，代价是前端改字段名时这里要跟着手动改。
+4. **`liveBridge` 的 SSE 重连策略**：`EventSource` 遇 404（服务端未升级 / 未开 LAN）会永久关闭连接而不会自动重连，设计稿未覆盖这一情形；补了有限次数的慢速重连（15s 间隔 × 最多 10 次）+ 30s 节流的 `console.warn`，避免服务端晚就绪导致手机功能永久失效，也避免控制台被刷屏。
+5. **`PhoneViewerModal` 用 `createPortal`** 挂载，规避 Sidebar 现有层叠上下文限制，纯实现细节。
+6. **`src/main.tsx` 里 `App` 分支也改成动态 `import()`**（设计稿只要求 `/viewer` 分支懒加载）——否则 4.4 MB 的 App chunk 仍会被打进公共入口，即使 `/viewer` 访客用不到。构建实测：手机端总下载量 ≈273 kB（gzip ≈95 kB），`App-*.js`（4469 kB）确认不在 `/viewer` 的加载路径里。
+7. **手机端 UI 细节三处**：@提及弹窗不响应 Enter 键（避免与虚拟键盘的换行/确认冲突）；消息列表滚动用 `instant` 而非 `smooth`（`smooth` 的滚动过程会让 `isNearBottom` 判断读到中间值，误判为「已离开底部」）；断线时状态点显式显示「离线」而非停留在最后已知状态。
+8. **`ChatBubbleUserProfile` 改了结构接口**——bootstrap 返回的 `settings.userProfiles` 没有 `persona` 字段（视图端点的白名单裁剪，见 §3.2 `/api/view/bootstrap`），`ChatBubble` 原有的 prop 类型要求放宽。
+
+## 11. 审查纪要与遗留
+
+两轮独立审查，结论均为 **PASS_WITH_NOTES**：服务端一轮，电脑端 + 手机端 + 端到端联测一轮。以下按主循环整理的纪要转述，不代表实现方自评，未测路径按审查员原话如实列出。
+
+### 11.1 审查阶段修的问题（4 处，均在 `server/`）
+
+1. `qrcode` 动态 `import` 失败时，不再让 `/api/live/lan-info` 整个请求跟着 500（降级为该条 entry 缺失）。
+2. `run().catch` 补上 `headersSent` 判断——原来响应已发出后再抛错，会在 `catch` 里变成 unhandled rejection，Node 22 下会直接杀掉整个 dev server 进程，Vite 没有兜底。
+3. SSE 的 `res` / `req` 补挂 `'error'` 监听，避免连接异常断开时抛出未捕获异常。
+4. 附件响应加 `X-Content-Type-Options: nosniff` 响应头。
+
+### 11.2 安全实测覆盖（服务端，167 条断言全绿）
+
+Host 伪造（局域网请求带 `Host: localhost`）403；DNS rebinding（`Host: evil.example` 解析到内网地址）403；裸后缀 `ts.net` / `evilts.net`（非真实 MagicDNS 域）403；跨源 `Origin` 及 `Origin: null` 403；token 错误/过短/带多余后缀 403（`timingSafeEqual` 常数时间比较）；路径穿越 `..%2f` 400；`/api/live/../db/all` 路径归一化后仍判 403；附件请求越界索引/非图片类型/负数/非数字一律 404；`lan` 角色能拿到的 `bootstrap` 与 `/api/view/*` 响应全文 grep 确认不含 `apiKey`/`systemPrompt`/`persona`/`providerId`/`modelId`/`baseUrl`/`scenario`/`summary`/`adminNotes`/`textContent`/`visionDescription`/`reasoningSignature`；旧版 `ACO_ALLOW_LAN=1` 的裸放行语义已收敛为按角色矩阵走 `lan`，相对旧版是安全提升而非削弱；inbox 超 70 KB → 413；`tailscale status` 子进程无 shell、参数硬编码、2 秒超时、失败静默降级为 `null`。
+
+### 11.3 遗留问题清单
+
+**P1（建议尽快跟进）：**
+- viewer 的“能否发送”判断不看 SSE 实际连接状态——手机锁屏或离开 WiFi 时，顶部状态条已显示离线，但输入框仍可点发送（会先卡在请求失败）。
+
+**P2（服务端）：**
+- 附件 URL 带 `token=` 明文出现在 DOM/浏览器历史里（见 §10.2 第 1 条），后续可考虑换 HttpOnly cookie 或一次性 id。
+- `presence` 的 5 秒离线宽限与 `inbox` 的实时 503 判定不一致——规格本身不自洽（一个有宽限一个没有），手机端已经把 503 的提示文案写清楚，暂不需要动代码。
+- `inboxHits`（限速用的时间戳表）不做清理，理论上界 <1MB，量级上不值得修；`tailscale serve` 反代下所有手机共享同一个 `127.0.0.1` 限速桶。
+- 首次 `bootstrap` 请求要同步解析全部会话文件建索引，本机 60MB 量级下会卡事件循环几秒。
+- 每次请求 `/api/live/lan-info` 都会重新 spawn 一次 `tailscale status`。
+- SVG 附件被当作图片直接返回，顶层打开时浏览器可能执行其中脚本（建议后续加 CSP sandbox 响应头）。
+- SSE 连接数没有上限。
+- 会话索引首次构建期间，恰好落地的 `PUT`/`DELETE` 可能被这次全量构建的结果覆盖（下一次 `PUT` 会自愈，非永久性）。
+- `npm run build` 里的 `tsc` 不检查 `server/` 目录。
+- 启动横幅会明文打印一次 token。
+- `localIPv4Addresses()` 不过滤虚拟网卡地址——手机观看弹窗里可能出现 `172.26.x.x`（Hyper-V 等虚拟适配器），手机连不上。
+- `desktopOnline` 等价于「是否存在 `role=desktop` 的 SSE 连接」，浏览器 bfcache 场景下可能出现假在线。
+
+**P2（电脑端 / 手机端）：**
+- `/viewer` 路径本机无 token 直接访问进不去——按设计 `loopback` 角色本可拥有全部权限，当前实现未对 `/viewer` 页面本身做角色豁免。
+- 上面提到的 bfcache 假在线，会导致手机在此期间发送的消息静默丢失（服务端误判 desktop 在线，实际标签页已冻结）。
+- 消息去重比较（`sameRendered`）不比较 `attachments` 字段。
+- 手机端发送的消息 `parseCommands` 默认 `false`，`/roll` `/tarot` 这类命令会静默失效（不报错，也不生效）。
+- `ChatBubble` 的 `React.memo` 比较器不看 `replyToMessage`（HEAD 既有问题，非本次引入）。
+- `main.tsx` 里两个分支的动态 `import()` 都没有 `.catch`，网络异常等失败会导致白屏而非降级提示。
+- `viewer/strings.ts` 里有 4 条未被任何地方引用的多余 key。
+
+### 11.4 既存 bug（核实但另案处理，不在本次改动范围）
+
+`index.html:12-16` 的 Tailwind Play CDN 就绪守卫判断的是 `typeof tailwindcss !== 'undefined'`，但 CDN 脚本实际挂载的全局对象是 `window.tailwind`——条件永远为假，`darkMode: 'class'` 配置从未真正生效，页面深浅色一直跟随系统偏好，`App.tsx` 里手动切换 `documentElement.classList` 的逻辑因此是死代码；手机端「跟随电脑主题」也因此不生效。现网 `data/settings.json` 里 `darkMode` 存的是 `false`，如果系统偏好是深色，直接修好这个判断条件会让电脑端界面从深色直接翻成浅色——影响面超出本次工程范围，留待单独立项处理。
+
+### 11.5 未测路径（两位审查员如实列出，非本次遗漏，而是环境/风险约束下未覆盖）
+
+真实手机设备与真实 `tailscale serve` 反代（仅用构造的 `Host: *.ts.net` 请求头模拟角色判定）；真实分段流式回复在手机端的观感（联测用占位 API key，请求秒失败）；24MB 级真实会话首次建索引的耗时与内存占用；viewer 端的 `onReconnect` 分支；「服务端未升级」时 `PhoneViewerModal` 的降级提示分支；`vite preview` 模式未在端到端联测中跑过；旁白消息/私信/引用回复/附件在 `appendUserMessage` 新路径下的真实运行时行为（仅做了与 HEAD 的逐行代码对照，未实跑）；429 时手机端的具体 UI 文案；`qrcode` 包真正缺失时的降级路径；IPv6 局域网环境；SSE 慢客户端的背压处理。
+
+### 11.6 部署方式（给 Sol）
+
+- **推荐**：`npm run dev:tsserve`（只监听 `127.0.0.1`）+ 在电脑上执行 `tailscale serve https / http://127.0.0.1:5173` → 手机打开 `https://<机器名>.<tailnet>.ts.net/viewer?token=…`。
+- **次选**：`npm run dev:lan` → 手机打开 `http://100.x.y.z:5173/viewer?token=…`（Tailscale 分配的 IP）；不要在公共 WiFi 上用普通局域网 IP 这条路径。
+- token 存在 `data/lan-token.txt`，删掉这个文件重启服务即可换一把新钥匙。
+- 手机观看弹窗里如果出现 `172.26.x.x` 这类地址，是虚拟网卡（Hyper-V 等），扫了也连不上，忽略即可。
+
+### 11.7 真机验证清单（Sol 上手前建议按这个顺序过一遍）
+
+1. 用推荐方式起服务，侧栏点「📱 手机观看」，确认二维码和 URL 都显示正常（忽略 `172.x` 那条）。
+2. 手机扫码打开，确认能看到当前会话的历史消息、图片正常显示。
+3. 电脑端触发一次 AI 回复，观察手机端是否能看到流式打字效果与思考链。
+4. 手机发一条文字消息（含一次 @提及），确认电脑端收到、正常入库，AI 是否接话（取决于自动播放是否开启，这是 v1 设计的预期行为，不是 bug）。
+5. 手机切到另一个会话观察是否变为只读浏览态；点「跟随电脑」切回。
+6. 手机锁屏或切到后台几十秒再回来，观察状态条是否准确（已知：可能出现假在线，见 §11.3 bfcache 项）。
+7. 电脑端关闭标签页模拟离线，观察手机端多久显示离线、重新打开电脑端后多久恢复。
+8. 尝试在手机上发送 `/roll` 或类似命令，确认目前不会生效（已知限制，见 §11.3）。
+9. 如果方便，额外测一次 `npm run dev:lan` 的 Tailscale IP 或普通局域网 IP 路径，交叉验证。

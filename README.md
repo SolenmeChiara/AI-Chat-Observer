@@ -38,6 +38,8 @@ Unlike other platforms, this project has **Zero Backend**. All data—API keys, 
 
 - **Multi-Model Matrix**: Native support for **Gemini**, **Claude**, and all **OpenAI-compatible** providers (DeepSeek, OpenRouter, SiliconFlow, etc.).
 - **Local-First Architecture**: Powered by Dexie.js (IndexedDB). Your data never leaves your device except to reach the AI API provider.
+- **Local File Storage**: Data is also persisted to human-readable JSON files under `data/` — survives IndexedDB clears, browser switches, and port changes. One-click JSON backup export/import. See [Storage](#storage) below.
+- **Phone Viewer Mode**: Watch the desktop session live from your phone's browser (streaming text, thinking chains, images) and send text messages back, over Tailscale or your LAN, protected by a shared access token. See [Phone Viewer](#phone-viewer) below.
 - **AI Governance System**:
   - Assign agents as **ADMINS**.
   - Admins can issue commands like `{{MUTE: AgentName}}` to silence toxic or looping bots.
@@ -92,11 +94,35 @@ Unlike other platforms, this project has **Zero Backend**. All data—API keys, 
 4. **Open Browser**
    Visit `http://localhost:5173`.
 
+<a name="storage"></a>
+
+### Storage
+
+Your data lives in the `data/` directory next to the project (override with the `ACO_DATA_DIR` environment variable), as plain JSON files — one file per chat session, plus `agents.json`, `providers.json`, `groups.json`, and `settings.json`. `providers.json` contains your API keys in plaintext, so `data/` is already listed in `.gitignore` — never commit it or share it as-is.
+
+On first launch, any existing IndexedDB data is automatically migrated into `data/` (IndexedDB itself is left untouched as a fallback). Use the **Export JSON Backup** button in the sidebar any time to save a full snapshot you can restore later or store outside git.
+
 ## Configuration
 
 1. **Add Providers**: Go to the **Providers** tab in the sidebar. Enter your API Keys (Gemini/OpenAI/Anthropic).
 2. **Create Agents**: Define personas (e.g., "A grumpy chef").
 3. **Start Chat**: Create a session, set a scenario, and watch the magic happen.
+
+<a name="phone-viewer"></a>
+
+## Phone Viewer
+
+Watch the desktop session live from your phone's browser — streaming text, thinking chains, and images — and send text messages back into the active session.
+
+**Start it one of three ways:**
+
+1. **Recommended — Tailscale + HTTPS**: run `npm run dev:tsserve` (binds only to `127.0.0.1`), then on the desktop run `tailscale serve https / http://127.0.0.1:5173`. Open `https://<machine>.<tailnet>.ts.net/viewer?token=...` on your phone.
+2. **Tailscale IP**: run `npm run dev:lan` and open `http://100.x.y.z:5173/viewer?token=...` using the desktop's Tailscale IP.
+3. **Plain LAN IP**: also via `npm run dev:lan`, using the desktop's regular LAN IP — only do this on a network you trust (never on public/guest Wi-Fi).
+
+Click **📱 Phone Viewer** in the sidebar for a QR code and the ready-to-use URL for whichever mode is currently active. The access token lives in `data/lan-token.txt` — delete it and restart the server to rotate it.
+
+**Security notes**: the server only listens on localhost by default; LAN/Tailscale access must be opted into explicitly (`npm run dev:lan` / `dev:tsserve`). A phone (LAN role) can only view sessions and send messages — it never gets `/api/db/*` or any API key, ever. Every request is checked against the Host header, the Origin header, and the access token (constant-time comparison) before it's served. In the QR modal, ignore addresses like `172.x.x.x` — those are virtual adapters (e.g. Hyper-V) your phone can't actually reach. Your phone also needs outbound access to `cdn.tailwindcss.com` (the app loads Tailwind from that CDN).
 
 ## API Compatibility (CORS)
 
@@ -131,6 +157,8 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 
 - **全模型支持**: 原生支持 **Gemini**、**Claude**，以及所有兼容 **OpenAI 格式** 的接口（DeepSeek, OpenRouter, 硅基流动等）。
 - **本地优先架构**: 基于 Dexie.js。刷新页面数据不丢失，隐私数据不上云。
+- **本地文件存储**: 数据同时落盘到 `data/` 目录下的 JSON 文件，换浏览器、清站点数据、端口漂移都不再丢数据；支持一键导出/导入 JSON 备份。详见下方[数据存放](#数据存放)。
+- **手机观众模式**: 通过 Tailscale 或局域网，在手机浏览器上实时观看电脑端会话并发消息，访问受共享 token 保护。详见下方[手机观看](#手机观看)。
 - **AI 治理系统**:
   - **AI 管理员**: 可以将角色设为 Admin。
   - **权限管控**: 管理员可通过文本指令 `{{MUTE: 名字}}` 禁言违规 AI，或使用 `{{NOTE: 内容}}` 记录重点。
@@ -183,6 +211,26 @@ This is a **pure frontend application**. Some API providers have CORS restrictio
 
 4. **访问**
    打开浏览器访问终端显示的地址（通常是 `http://localhost:5173`）。
+
+### 数据存放
+
+数据保存在项目旁的 `data/` 目录（可用环境变量 `ACO_DATA_DIR` 改到别处），是人类可读的 JSON 文件——每个会话一个文件，另有 `agents.json`、`providers.json`、`groups.json`、`settings.json`。`providers.json` 里是明文 API key，`data/` 已加入 `.gitignore`，千万不要提交或原样分享给别人。
+
+首次启动会自动把已有的 IndexedDB 数据搬到 `data/`（IndexedDB 本身原样保留作为回退）。侧栏的「导出 JSON 备份」按钮可以随时导出一份完整快照，方便恢复或存到 git 之外的地方。
+
+## 手机观看
+
+在手机浏览器上实时观看电脑端正在跑的会话——包括流式打字机效果、思考链、图片——还能发文字消息进当前会话。
+
+**三种启动方式：**
+
+1. **推荐：Tailscale + HTTPS**：电脑执行 `npm run dev:tsserve`（只监听 `127.0.0.1`），再执行 `tailscale serve https / http://127.0.0.1:5173`；手机打开 `https://<机器名>.<tailnet>.ts.net/viewer?token=…`。
+2. **Tailscale IP 直连**：电脑执行 `npm run dev:lan`，手机打开 `http://100.x.y.z:5173/viewer?token=…`（Tailscale 分配的 IP）。
+3. **普通局域网 IP**：同样用 `npm run dev:lan`，手机打开电脑的局域网 IP——只在可信网络下使用，不要在公共/访客 WiFi 上开。
+
+点侧栏的「📱 手机观看」按钮，会显示当前可用方式的二维码和完整 URL，扫码即可。访问 token 存在 `data/lan-token.txt`，删掉这个文件重启服务即可换一把新钥匙。
+
+**安全要点**：服务默认只监听本机；局域网/Tailscale 访问需要显式开启（`npm run dev:lan` / `dev:tsserve`）。手机（局域网角色）只能看会话、发消息，永远碰不到 `/api/db/*` 或任何 API key。每个请求都会校验 Host、Origin 与 token（常数时间比较）三重身份。弹窗里如果出现 `172.x.x.x` 之类的地址，那是虚拟网卡（比如 Hyper-V），手机扫不通，忽略即可。手机所在网络还需要能访问 `cdn.tailwindcss.com`（页面样式走这个 CDN 加载）。
 
 ## API 兼容性 (CORS 跨域)
 

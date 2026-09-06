@@ -316,7 +316,10 @@ function createMiddleware(): Middleware {
     };
 
     run().catch((err) => {
-      if (res.writableEnded) return;
+      // headersSent 也要挡：SSE / 附件这类已经写过响应头的路径上再调 sendJson 会抛
+      // ERR_HTTP_HEADERS_SENT，而这里已经在 .catch 里，抛出去就是 unhandled rejection——
+      // Node 22 默认 --unhandled-rejections=throw，且 vite 没装全局兜底，会直接把 dev server 带走。
+      if (res.writableEnded || res.headersSent) return;
       sendJson(res, 500, { error: err?.message || String(err) });
     });
   };

@@ -222,7 +222,8 @@ function decorateAttachmentUrls(page: SessionPage): SessionPage {
     if (!m.attachments || m.attachments.length === 0) return m;
     let localTouched = false;
     const attachments = m.attachments.map(att => {
-      if (!att.content || !att.content.startsWith('/api/view/')) return att;
+      // 服务端对 lan 角色已经把 ?token= 拼进去了（W1 偏离点），只给没带的补。
+      if (!att.content || !att.content.startsWith('/api/view/') || att.content.includes('token=')) return att;
       localTouched = true;
       const sep = att.content.includes('?') ? '&' : '?';
       return { ...att, content: `${att.content}${sep}token=${encodeURIComponent(token)}` };

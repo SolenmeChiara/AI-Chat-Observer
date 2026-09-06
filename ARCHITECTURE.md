@@ -1,6 +1,12 @@
 # Project Architecture
 
-This document describes in detail the code structure, data flow, and design philosophy of **AI Chat Observer (V5.5)**. It is intended to help developers quickly understand the system and provide guidance for future integration of **Vector DB**, **Long-term Memory**, or **Backend Services**.
+This document describes in detail the code structure, data flow, and design philosophy of **AI Chat Observer (V6.1)**. It is intended to help developers quickly understand the system and provide guidance for future integration of **Vector DB**, **Long-term Memory**, or **Backend Services**.
+
+**V6.1 New Features:**
+- Phone Viewer / Live Bridge: watch the desktop session live and send text messages from a phone browser over the LAN or Tailscale, gated by role-based access control and a shared token (§4.13)
+
+**V6.0 New Features:**
+- Local File Storage: data is persisted to human-readable JSON files under `data/` via a Vite dev/preview plugin, instead of relying solely on browser IndexedDB; includes automatic first-run migration and JSON backup export/import (§4.12)
 
 **V5.5 New Features:**
 - Private Message (PM) system: Both AI and humans can send PMs, visible only to the target member and the human user
@@ -68,9 +74,23 @@ src/
 ├── types.ts             # TypeScript type definitions (data contracts)
 ├── constants.ts         # Constants, defaults, logo mappings
 ├── App.tsx              # Main controller (Controller)
-├── main.tsx             # Entry point
+├── main.tsx             # Real entry point (root-level index.tsx is dead code)
 └── index.css            # Tailwind style imports
+
+server/                  # Vite plugin middleware — dev/preview only, never client-bundled
+├── http.ts              # Shared: resolveRole() (role/auth), sendJson, readBody, LAN token — see §4.12/§4.13
+├── localdb.ts           # Vite plugin registering /api/db/* (local file storage, §4.12)
+└── live.ts              # /api/live/* and /api/view/* (phone viewer live bridge, §4.13)
+
+viewer/                  # Phone Viewer client — lazy-loaded only when the URL is /viewer
+├── ViewerApp.tsx        # UI (reuses ChatBubble in readOnly mode)
+├── viewerClient.ts      # Token handling, fetch/SSE, message merge logic
+└── strings.ts           # Standalone zh/en dictionary, does not touch i18n.tsx
+
+data/                    # Local storage root (gitignored). ACO_DATA_DIR overrides the path — see §4.12
 ```
+
+`src/main.tsx` branches on `location.pathname === '/viewer'`, dynamically importing `viewer/ViewerApp.tsx` for phone visitors and `App.tsx` for everyone else, so the desktop app's multi-megabyte bundle is never shipped to `/viewer`.
 
 ---
 
@@ -410,6 +430,77 @@ Supports private communication between AI and humans, as well as session-level v
 *   Prevents "poisoning": once thinking is accidentally disabled, it won't be permanently unrecoverable due to old messages
 *   `shouldEnableThinking` only checks agent configuration, no longer inspecting historical completeness
 
+### 4.12 Local File Storage (V6.0)
+Persists all data to human-readable JSON files under `data/` instead of relying solely on the browser's IndexedDB — no new process, no new dependency, just a Vite dev/preview-server plugin.
+
+**Server side (`server/localdb.ts`, a Vite plugin):**
+*   Registers on both `configureServer` and `configurePreviewServer`, ahead of Vite's built-in middleware, so it can intercept `/api/db/*` before the SPA fallback (dev) or the response-compression stage (`preview`) ever sees it.
+*   `GET /api/db/all` returns `{ meta, agents, providers, groups, settings, sessions, missing }` in one call. A file that fails to read or parse is always a **500**, never silently coerced into a default value or an empty result — the whole design exists to prevent a "read failure -> default value -> overwrite" data-loss path.
+*   `PUT /api/db/agents|providers|groups|settings|meta`; `PUT`/`DELETE /api/db/sessions/:id` (one file per session, so a streaming reply only rewrites the session currently talking); `GET /api/db/sessions` lists session ids without content (added during review so a single corrupted session file can't block the id listing that Import Backup needs to compute deletions).
+*   Session ids are restricted to `[A-Za-z0-9_-]` to block path traversal; request bodies are capped (over-limit bytes are drained rather than the socket being destroyed, so the client still receives a proper `413` instead of a bare connection reset).
+*   Writes are atomic (`<file>.tmp-<random>` then `fs.rename`), and writes to the same path are chained through a promise queue to prevent interleaving.
+*   Access is gated by `resolveRole()` from `server/http.ts` (§4.13) — `/api/db/*` is `loopback`-only, unconditionally; `providers.json` (plaintext API keys) has no code path that can reach a LAN client.
+
+**Client side (`services/db.ts`):**
+*   Public surface is unchanged: `initDB` / `loadAllData` / `saveCollection` / `saveSettings`. New exports: `exportSnapshot()` / `importSnapshot()` / `flushPendingWrites()` / `getStorageMode()`.
+*   On boot it probes `GET /api/db/all`; success switches to `file` mode, a network error or 404 falls back to the original Dexie implementation (kept intact, renamed `legacy*`, never deleted).
+*   **Reference-based dirty tracking** for sessions: a `Map<id, ChatSession>` records the last-saved object reference per session. `saveCollection('sessions', items)` only PUTs an id whose object reference actually changed, and DELETEs an id that dropped out of `items`. This is safe because every session/message update anywhere in the codebase produces a new object rather than mutating one in place (audited line-by-line; see `LOCAL_STORAGE_PLAN.md` Appendix A) — a single missed in-place mutation would silently stop that session from ever being saved again.
+*   **Write scheduler**: keyed by table name or `sessions/<id>`, 300 ms trailing debounce with a 2 s `maxWait` ceiling; writes to the same key serialize (a write already in flight absorbs newer payloads rather than firing a second request concurrently). `pagehide` / `visibilitychange=hidden` force an immediate `flushPendingWrites()`; small bodies (measured in real UTF-8 bytes, not JS string length) go out via `fetch(..., { keepalive: true })` so they survive tab close.
+*   **IndexedDB migration**: on first boot (`meta` missing), if IndexedDB already has data it is copied into `data/` file-by-file; if not, `data/` is seeded from `INITIAL_*`/`DEFAULT_SETTINGS`. IndexedDB itself is never deleted or modified, and a failed migration never writes `meta.json`, so the next launch retries from scratch instead of quietly re-seeding over real data.
+*   **Backup**: `exportSnapshot()` / `importSnapshot()` back the sidebar's "Export/Import JSON Backup" buttons, producing files matched by the `aco-backup-*.json` pattern in `.gitignore` (see also the `aco-backups/` directory). Import overwrites matching ids and deletes sessions absent from the backup, but falls back to overwrite-only (with a console error) if computing that deletion set fails — a failed cleanup step must never abort an otherwise-successful restore.
+
+Known limits: up to ~2 s of the very latest edits can be lost on a hard crash or power loss (the debounce/maxWait window); a failed PUT stays flagged dirty and is only retried on the next unrelated state change (no background retry queue); concurrent multi-tab writes still clobber each other at the React-state layer, same as the pre-existing IndexedDB behavior.
+
+### 4.13 Phone Viewer / Live Bridge (V6.1)
+Lets a phone's browser watch the desktop's active session live (streaming text, thinking chains, images) and send text messages into it, over the LAN or Tailscale. No new process — everything rides the same Vite plugin as §4.12.
+
+```
+Desktop browser (App, localhost)              Phone browser (/viewer, ViewerApp)
+   │ PUT /api/db/sessions/:id (normal save)       │ GET /api/view/bootstrap
+   │ POST /api/live/presence (~200ms debounced)   │ GET /api/view/sessions/:id?tail|from
+   │ SSE  /api/live/events?role=desktop           │ SSE  /api/live/events?token=...
+   │                                               │ POST /api/live/inbox {sessionId, text}
+   └───────────────────┬───────────────────────────┘
+                        ▼
+         Vite plugin (server/localdb.ts + server/live.ts)
+         - session files: the desktop connection is the ONLY writer
+         - PUT succeeds on disk -> update session cache -> broadcast `session` SSE event
+         - inbox is forwarded only to the desktop's SSE connection, never written to disk itself
+         - resolveRole(): loopback (full access) / lan (view + inbox only) / null -> 403
+```
+
+**Role matrix** (`resolveRole()` in `server/http.ts`; `lan` is only reachable at all when LAN mode is on and the token matches):
+
+| Path | `loopback` | `lan` |
+|---|---|---|
+| `/api/db/*` (all of §4.12) | allowed | 403 — `providers.json` never reaches a LAN client |
+| `GET /api/live/lan-info` | allowed | 403 |
+| `POST /api/live/presence` | allowed | 403 |
+| `GET /api/live/events` | allowed (`?role=desktop` marks the desktop connection) | allowed |
+| `POST /api/live/inbox` | allowed | allowed |
+| `GET /api/view/*` | allowed | allowed |
+
+**SSE events** (`GET /api/live/events`, `event:` name + JSON `data:`):
+
+| Event | Recipients | Payload |
+|---|---|---|
+| `hello` | all | `{ role, presence, serverStartedAt }` |
+| `session` | all | `{ id, groupId, name, total, lastUpdated, deleted?: true }` — fired after every successful session PUT/DELETE |
+| `presence` | all | `{ activeGroupId, activeSessionId, isAutoPlay, processingAgentIds, desktopOnline, updatedAt }` |
+| `inbox` | desktop connection only | `{ id, sessionId, text, receivedAt }` |
+
+**`POST /api/live/inbox` validation order** (each failure short-circuits before the next check): `400` (missing/invalid fields, or text empty/over 4000 chars) -> `503 desktop-offline` (no `role=desktop` SSE connection) -> `409 not-active-session` (`sessionId` doesn't match `presence.activeSessionId`) -> `429` (sliding-window rate limit, 20 requests/minute per source) -> `202 { id }` accepted and forwarded over SSE.
+
+**Invariants:**
+*   A session file has exactly one writer: the desktop app. Phone messages never touch disk directly — they travel over SSE to the desktop, which calls `appendUserMessage()` and lets the normal debounced-save path persist them, avoiding a second writer.
+*   `/api/view/*` responses are built from an explicit field whitelist: agents expose only `id`/`name`/`avatar`/`role` — never `systemPrompt`, `model`, `providerId`, `apiKey`, `persona`, or any conversation `summary`/`adminNotes`. Adding a field requires touching this whitelist by hand; forgetting to only under-shares, it never over-shares.
+
+**Security design:**
+*   **Host allowlist**: the `loopback` role requires a loopback hostname; the `lan` role (only reachable when LAN mode is on) requires the Host header to be either a bare IP literal or end in `.ts.net` (Tailscale MagicDNS) — both forms defeat DNS rebinding, since an attacker-controlled domain name is neither.
+*   **Origin same-origin check** applies unconditionally, independent of LAN mode: a present `Origin` header must match `Host` exactly, or the request is rejected outright.
+*   **Token comparison** uses `crypto.timingSafeEqual` (constant-time); a length mismatch short-circuits to `false` without ever calling it (unequal-length buffers throw).
+*   **Attachment URLs**: for the `lan` role, image attachment URLs carry `?token=` in the query string, because an `<img src>` request can't send an `Authorization` header; `loopback` URLs omit it, since same-machine requests don't need it. This is a deliberate, accepted tradeoff — see the P2 item in `PHONE_VIEWER_PLAN.md` §11 (the token becomes visible in page DOM/history).
+
 ---
 
 ## 5. Extension Guide: Building Memory & Backend (Future Roadmap)
@@ -436,9 +527,14 @@ To transform this single-user application into a multi-user online application:
     *   Keep method names unchanged (`loadAllData`, `saveCollection`).
     *   Replace the internal implementation from `dexie` to `fetch('/api/...')` or `supabase-js` client.
 
+Note: an intermediate form of this migration has already shipped as **Local File Storage (V6.0, §4.12)** — `services/db.ts` already speaks `fetch('/api/db/...')` against a local Vite-plugin server instead of Dexie directly, on a single-user, single-machine basis. A real multi-user backend still means replacing that local server with an actual one, plus auth and per-user data isolation.
+
 ---
 
 ## 6. Debugging & Building
 
-*   **Local development**: `npm run dev`
+*   **Local development**: `npm run dev` — listens on loopback only; local file storage (§4.12) is active, phone viewer LAN access (§4.13) is not.
+*   **Local development with LAN/Tailscale access**: `npm run dev:lan` (`vite --mode lan`, listens on all interfaces) or `npm run dev:tsserve` (`vite --mode lan --host 127.0.0.1`, for use behind `tailscale serve`) — enables the `lan` role described in §4.13 and generates `data/lan-token.txt`.
 *   **Production build**: `npm run build`
+*   **Preview build with LAN/Tailscale access**: `npm run preview:lan` (`vite preview --mode lan`)
+*   **`ACO_DATA_DIR`**: environment variable overriding the local storage root used by `server/localdb.ts` (default `<repo>/data`) — set it to point dev/preview/test instances at an isolated data directory.
