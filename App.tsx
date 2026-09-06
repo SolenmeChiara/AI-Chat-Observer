@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Menu, Send, Play, Pause, Trash, MessageSquare, DollarSign, Users, Plus, Paperclip, X, Image as ImageIcon, FileText, RefreshCw, ArrowDown, BarChart3, BrainCircuit, Volume2, VolumeX } from 'lucide-react';
 import { Agent, Message, ApiProvider, GlobalSettings, ChatSession, ChatGroup, Attachment, AgentRole, MemoryConfig, TTSProvider, UserProfile, EntertainmentConfig, DebateConfig, DebateAssignment } from './types';
-import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, getAvatarForModel } from './constants';
+import { INITIAL_AGENTS, INITIAL_PROVIDERS, USER_ID, DEFAULT_SETTINGS, INITIAL_SESSIONS, INITIAL_GROUPS, DEFAULT_GROUP_SCENARIO, getAvatarForModel } from './constants';
 import Sidebar from './components/Sidebar';
 import RightSidebar from './components/RightSidebar';
 import ChatBubble from './components/ChatBubble';
@@ -425,7 +425,7 @@ const App: React.FC = () => {
       id: newGroupId,
       name: `${t('群组')} ${groups.length + 1}`,
       memberIds: agents.filter(a => a.isActive !== false && a.providerId && a.modelId).map(a => a.id),
-      scenario: t('这是一个轻松的聊天室。'),
+      scenario: DEFAULT_GROUP_SCENARIO,
       memoryConfig: {
         enabled: false,
         threshold: 20,
