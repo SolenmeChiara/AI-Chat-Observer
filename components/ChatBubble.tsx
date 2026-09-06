@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Message, Agent, GlobalSettings, AgentRole } from '../types';
+import { Message, Agent, AgentRole } from '../types';
 import { USER_ID } from '../constants';
 import { useT } from '../i18n';
 import { Reply, AtSign, FileImage, BrainCircuit, FileText, File, Shield, Search, ChevronDown, ChevronRight, Volume2, Square, Trash2, X } from 'lucide-react';
@@ -9,11 +9,22 @@ import DOMPurify from 'dompurify';
 
 marked.setOptions({ breaks: true, gfm: true, async: false });
 
+// 渲染实际用到的 settings 字段。放宽成结构类型而不是 GlobalSettings，
+// 是为了让手机观众端（viewer/ViewerApp.tsx）能直接把 bootstrap 里的裁剪版
+// settings 传进来——那边的 userProfiles 只有 id/name/avatar，没有 persona。
+// GlobalSettings 依然可赋值给它，App.tsx 侧零改动。
+export interface ChatBubbleUserProfile {
+  userProfiles?: Array<{ id: string; name: string; avatar: string }>;
+  userName?: string;
+  userAvatar?: string;
+  expandAllReasoning?: boolean;
+}
+
 interface ChatBubbleProps {
   message: Message;
   sender?: Agent;
   allAgents?: Agent[]; // All agents for @mention matching
-  userProfile?: GlobalSettings; // Pass settings to get user name/avatar
+  userProfile?: ChatBubbleUserProfile; // Pass settings to get user name/avatar
   replyToMessage?: Message;
   onReply?: (message: Message) => void;
   onMention?: (name: string) => void;
@@ -23,9 +34,10 @@ interface ChatBubbleProps {
   onStopTTS?: () => void; // Callback to stop TTS
   isTTSPlaying?: boolean; // Is TTS currently playing this message
   currentPlayingMessageId?: string; // ID of the message currently being played
+  readOnly?: boolean; // 只读观看（手机观众端）：不挂 hover、不渲染操作栏、附件按 http URL 直出
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, onDelete, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId }) => {
+const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, userProfile, replyToMessage, onReply, onMention, onDelete, isStreaming, onPlayTTS, onStopTTS, isTTSPlaying, currentPlayingMessageId, readOnly }) => {
   const t = useT();
   const [isHovered, setIsHovered] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -33,8 +45,9 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   const [lightboxBlobUrl, setLightboxBlobUrl] = useState<string | null>(null);
 
   // Convert to blob URL when lightbox opens (for drag support)
+  // readOnly（手机观众端）下附件 content 是 http URL 不是 data:，没有转 blob 的必要，直接跳过。
   useEffect(() => {
-    if (!lightboxSrc?.startsWith('data:')) { setLightboxBlobUrl(null); return; }
+    if (readOnly || !lightboxSrc?.startsWith('data:')) { setLightboxBlobUrl(null); return; }
     let cancelled = false;
     fetch(lightboxSrc).then(r => r.blob()).then(blob => {
       if (!cancelled) setLightboxBlobUrl(URL.createObjectURL(blob));
@@ -167,10 +180,10 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   }, [message.text, isStreaming, allAgents, userProfile?.userName]);
 
   return (
-    <div 
+    <div
       className={`flex w-full mb-6 group ${isUser ? 'justify-end' : 'justify-start'}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={readOnly ? undefined : () => setIsHovered(true)}
+      onMouseLeave={readOnly ? undefined : () => setIsHovered(false)}
     >
       {!isUser && (
         <div className="flex flex-col items-center mr-3 space-y-1">
@@ -290,7 +303,8 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
            </span>
 
-           {/* Actions */}
+           {/* Actions —— readOnly 下整条不渲染：触屏没有 hover，opacity-0 的按钮会变成隐形可点区 */}
+           {!readOnly && (
            <div className={`flex gap-1 transition-opacity duration-200 ${isHovered || isThisMessagePlaying ? 'opacity-100' : 'opacity-0'}`}>
               {/* TTS Play/Stop Button */}
               {onPlayTTS && (
@@ -316,6 +330,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
                 </button>
               )}
            </div>
+           )}
         </div>
 
       </div>
@@ -371,6 +386,7 @@ export default React.memo(ChatBubble, (prev, next) => {
   if (prev.message !== next.message) return false;
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.currentPlayingMessageId !== next.currentPlayingMessageId) return false;
+  if (prev.readOnly !== next.readOnly) return false;
   if (prev.sender?.name !== next.sender?.name) return false;
   if (prev.sender?.avatar !== next.sender?.avatar) return false;
   return true;
