@@ -294,6 +294,13 @@ const App: React.FC = () => {
             mergedSettings.userPersona = activeProfile.persona;
           }
         }
+        // 一次性迁移：index.html 的 Tailwind 守卫曾写错全局名(tailwindcss vs tailwind),
+        // darkMode:'class' 在此之前从未生效,页面一直跟系统配色、设置里的开关空转。
+        // 修好守卫的同时把开关对齐到用户此刻实际看到的配色,免得外观突变。
+        if (!mergedSettings.themeMigrated) {
+          mergedSettings.darkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          mergedSettings.themeMigrated = true;
+        }
         setSettings(mergedSettings);
 
         // Ensure activeGroupId and activeSessionId are valid

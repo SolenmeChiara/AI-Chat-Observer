@@ -233,6 +233,7 @@ export interface GlobalSettings {
 
   // Appearance
   darkMode: boolean;
+  themeMigrated?: boolean;     // 一次性迁移标记：darkMode 开关修好那天已对齐到用户实际看到的配色（见 App.tsx initDB）
   expandAllReasoning: boolean; // If true, all reasoning chains are expanded by default
   language: 'zh' | 'en';
 
