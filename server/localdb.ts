@@ -1,170 +1,52 @@
-// 本机磁盘存储的服务端：一个只处理 /api/db/* 的 Vite 中间件插件。
+// 本机磁盘存储的服务端：一个 Vite 中间件插件，同时挂三组路由——
+//   /api/db/*    数据读写（只服务本机，见 server/http.ts 的 resolveRole）
+//   /api/live/*  手机观众模式的实时通道（server/live.ts）
+//   /api/view/*  剥掉敏感字段的只读视图（server/live.ts）
 // 数据落在 <repo>/data/ 下的 JSON 文件里，不再依赖浏览器 origin 存储。
-// 纯 Node http + fs/promises，不引入 express / body-parser 之类依赖。
+// 纯 Node http + fs/promises，除二维码用的 qrcode 外不引入运行时依赖。
 //
 // 设计要点：
 // - 读失败(文件存在但读不动/parse 不了)一律 500，绝不吞成 null——客户端把 null 当
 //   「首次启动」就会拿种子数据把用户真实数据覆盖掉。文件不存在才是 null + missing。
 // - 写一律 tmp + rename 原子替换，同一路径的写用 promise 链串行化。
-// - 只服务本机：providers.json 里是明文 API key，一旦 vite 以 --host 起在局域网上，
-//   这个接口就等于把 key 挂出去了。所以按「回环地址 + 回环 Host + Origin 同源」三重闸门拦。
+// - 准入判断全部收在 http.ts 的 resolveRole 里；本文件只负责「哪个角色能碰哪条路径」的矩阵。
+//   providers.json 里是明文 API key，只有 loopback 角色能走到 /api/db/*，局域网一律 403。
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Plugin } from 'vite';
-
-/** 请求体上限，超过直接 413。内联 base64 附件让单个 session 可以很大，留足余量。 */
-const MAX_BODY_BYTES = 256 * 1024 * 1024;
+import type { Plugin, UserConfig } from 'vite';
+import {
+  MAX_BODY_BYTES,
+  SESSION_ID_RE,
+  TAILSCALE_DNS_SUFFIX,
+  ensureLanToken,
+  getDataDir,
+  getLanToken,
+  isLanEnabled,
+  isTailscaleIPv4,
+  localIPv4Addresses,
+  parseRequestUrl,
+  readBody,
+  readJson,
+  resolveRole,
+  sendJson,
+  setDataDir,
+  setLanEnabled,
+  type Middleware,
+} from './http';
+import {
+  handleLiveRequest,
+  isLivePath,
+  isLoopbackOnlyLivePath,
+  onSessionDeleted,
+  onSessionWritten,
+  setServerPort,
+} from './live';
 
 /** 整表文件（不含按 id 拆分的 sessions/）。 */
 const TABLE_FILES = ['meta', 'agents', 'providers', 'groups', 'settings'] as const;
 type TableName = (typeof TABLE_FILES)[number];
-
-/** session id 只允许这些字符，挡掉 `..`、`/`、盘符等一切路径穿越写法。 */
-const SESSION_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
-
-type Middleware = (req: IncomingMessage, res: ServerResponse, next: (err?: any) => void) => void;
-
-// --- 工具：只准本机访问 ---
-
-/** 去掉 IPv6 映射前缀和方括号，`::ffff:127.0.0.1` / `[::1]` 都归一成裸地址。 */
-function normalizeHostname(value: string): string {
-  let v = value.trim().toLowerCase();
-  if (v.startsWith('[')) {
-    const end = v.indexOf(']');
-    if (end > 0) return v.slice(1, end);
-  }
-  if (v.startsWith('::ffff:')) v = v.slice('::ffff:'.length);
-  return v;
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  const h = normalizeHostname(hostname);
-  if (h === 'localhost' || h === '::1' || h === '0000:0000:0000:0000:0000:0000:0000:0001') return true;
-  // 整个 127.0.0.0/8 都是回环
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
-}
-
-/** `host` 头里的 hostname 部分（去端口）。IPv6 要先摘方括号再摘端口。 */
-function hostnameFromHostHeader(host: string): string {
-  const h = host.trim();
-  if (h.startsWith('[')) {
-    const end = h.indexOf(']');
-    if (end > 0) return h.slice(1, end).toLowerCase();
-    return '';
-  }
-  return h.split(':')[0].toLowerCase();
-}
-
-/** 准入判断的结果。`ok:false` 时 `reason` 必填（直接当 403 的 error 文案）。 */
-interface AccessDecision {
-  ok: boolean;
-  reason?: string;
-}
-
-/**
- * 访问闸门。**所有对 /api/db/* 的准入判断都收在这一个函数里**，二期要做「手机在局域网上
- * 访问」时改这里一处即可（预期做法：非回环请求放行但剥掉 providers 里的 apiKey 字段 +
- * 校验 token），不要把判断散到路由里。
- *
- * 两组检查，彼此独立：
- *
- * A. 回环闸门（受 `ACO_ALLOW_LAN=1` 控制，默认关闸）
- *    1. TCP 对端必须是回环地址 —— 挡住 `vite --host` 之后局域网里的直连；
- *    2. `Host` 头必须是回环名 —— 挡住 DNS rebinding：攻击者把 evil.com 解析到 127.0.0.1，
- *       此时对端是回环、Origin 与 Host 也自洽，只有 Host 里的名字能暴露它。
- *    开闸后这两条都不查（局域网访问时 Host 本来就是 LAN IP）。
- *
- * B. Origin 同源校验（**与开关无关，永远生效**）
- *    带了 `Origin` 就必须与 `Host` 完全一致，否则 403。没有 CORS 头时浏览器本来也读不到
- *    响应、PUT/DELETE 会被预检拦下，这条是纵深防御。
- *
- * 之所以默认关闸：providers.json 里是明文 API key，`GET /api/db/all` 直接返回。
- */
-function isRequestAllowed(req: IncomingMessage): AccessDecision {
-  const host = (req.headers.host || '').toString();
-
-  // --- A. 回环闸门 ---
-  if (process.env.ACO_ALLOW_LAN !== '1') {
-    const remote = req.socket?.remoteAddress || '';
-    if (!remote || !isLoopbackHostname(remote)) {
-      return {
-        ok: false,
-        reason: `/api/db 只服务本机，拒绝来自 ${remote || '未知地址'} 的请求（确需局域网访问请设 ACO_ALLOW_LAN=1，注意这会把明文 API key 暴露在局域网上）`,
-      };
-    }
-    if (!host || !isLoopbackHostname(hostnameFromHostHeader(host))) {
-      return { ok: false, reason: `/api/db 只服务本机，拒绝 Host: ${host || '(缺失)'}` };
-    }
-  }
-
-  // --- B. Origin 同源校验（始终生效）---
-  const origin = req.headers.origin;
-  if (typeof origin === 'string' && origin) {
-    let originHost: string;
-    try {
-      originHost = new URL(origin).host.toLowerCase();
-    } catch {
-      return { ok: false, reason: `/api/db 拒绝无法解析的 Origin: ${origin}` };
-    }
-    if (!host || originHost !== host.toLowerCase()) {
-      return { ok: false, reason: `/api/db 拒绝跨站请求：Origin ${origin} 与 Host ${host || '(缺失)'} 不一致` };
-    }
-  }
-
-  return { ok: true };
-}
-
-// --- 工具：响应 ---
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  res.statusCode = status;
-  res.setHeader('content-type', 'application/json; charset=utf-8');
-  // 数据是本机磁盘的实时状态，任何一层缓存都可能让前端读到旧值。
-  res.setHeader('cache-control', 'no-store');
-  res.end(text);
-}
-
-// --- 工具：读请求体 ---
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let settled = false;
-
-    const fail = (err: Error & { statusCode?: number }) => {
-      if (settled) return;
-      settled = true;
-      reject(err);
-    };
-
-    req.on('data', (chunk: Buffer) => {
-      // 超限之后仍然把剩下的字节读掉（只是不再缓存）：直接 req.destroy() 会把连接打断，
-      // 客户端看到的是 ECONNRESET 而不是 413，反而更难排查。
-      if (settled) return;
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        const err: Error & { statusCode?: number } = new Error(
-          `request body too large (> ${MAX_BODY_BYTES} bytes)`
-        );
-        err.statusCode = 413;
-        chunks.length = 0; // 立刻释放已缓存的部分
-        fail(err);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      if (settled) return;
-      settled = true;
-      resolve(Buffer.concat(chunks).toString('utf-8'));
-    });
-    req.on('error', (err) => fail(err as Error));
-  });
-}
 
 // --- 工具：原子写 + 同路径串行 ---
 
@@ -203,32 +85,9 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
   }
 }
 
-// --- 工具：读 JSON ---
-
-type ReadResult =
-  | { status: 'ok'; value: unknown }
-  | { status: 'missing' }
-  | { status: 'error'; error: string };
-
-async function readJson(filePath: string): Promise<ReadResult> {
-  let text: string;
-  try {
-    text = await fs.readFile(filePath, 'utf-8');
-  } catch (err: any) {
-    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return { status: 'missing' };
-    return { status: 'error', error: `读取 ${path.basename(filePath)} 失败：${err?.message || String(err)}` };
-  }
-  try {
-    return { status: 'ok', value: JSON.parse(text) };
-  } catch (err: any) {
-    // 文件在但 parse 不了 = 数据损坏，必须让前端看见 500，不能当作「没有这张表」
-    return { status: 'error', error: `解析 ${path.basename(filePath)} 失败：${err?.message || String(err)}` };
-  }
-}
-
 // --- 中间件本体 ---
 
-function createMiddleware(getDataDir: () => string): Middleware {
+function createMiddleware(): Middleware {
   const filePathFor = (table: TableName) => path.join(getDataDir(), `${table}.json`);
   const sessionsDir = () => path.join(getDataDir(), 'sessions');
   const sessionPathFor = (id: string) => path.join(sessionsDir(), `${id}.json`);
@@ -282,10 +141,20 @@ function createMiddleware(getDataDir: () => string): Middleware {
     sendJson(res, 200, { ...out, missing });
   }
 
-  async function handlePut(req: IncomingMessage, res: ServerResponse, filePath: string): Promise<void> {
+  /**
+   * `sessionId` 非空 = 这是一次会话写入，落盘成功后要通知 live 模块
+   * （刷新会话索引/缓存 + 向所有 SSE 连接广播 `session` 事件）。
+   * parsed 对象顺手交出去，省掉为了广播再 parse 一遍几十 MB 的开销。
+   */
+  async function handlePut(
+    req: IncomingMessage,
+    res: ServerResponse,
+    filePath: string,
+    sessionId?: string
+  ): Promise<void> {
     let raw: string;
     try {
-      raw = await readBody(req);
+      raw = await readBody(req, MAX_BODY_BYTES);
     } catch (err: any) {
       const status = err?.statusCode === 413 ? 413 : 400;
       sendJson(res, status, { error: err?.message || 'failed to read request body' });
@@ -305,10 +174,18 @@ function createMiddleware(getDataDir: () => string): Middleware {
       sendJson(res, 500, { error: `写入 ${path.basename(filePath)} 失败：${err?.message || String(err)}` });
       return;
     }
+    if (sessionId) {
+      // 广播失败不能影响这次写的结果：磁盘已经是新的了，回 200 才是真话
+      try {
+        onSessionWritten(sessionId, parsed);
+      } catch (err: any) {
+        console.warn(`[aco-live] 广播 session 事件失败：${err?.message || String(err)}`);
+      }
+    }
     sendJson(res, 200, { ok: true });
   }
 
-  async function handleDeleteSession(res: ServerResponse, filePath: string): Promise<void> {
+  async function handleDeleteSession(res: ServerResponse, filePath: string, sessionId: string): Promise<void> {
     try {
       // force:true —— 文件不存在也算成功（删除是幂等的）
       await serializeByPath(filePath, () => fs.rm(filePath, { force: true }));
@@ -316,30 +193,63 @@ function createMiddleware(getDataDir: () => string): Middleware {
       sendJson(res, 500, { error: `删除 ${path.basename(filePath)} 失败：${err?.message || String(err)}` });
       return;
     }
+    try {
+      onSessionDeleted(sessionId);
+    } catch (err: any) {
+      console.warn(`[aco-live] 广播 session 删除事件失败：${err?.message || String(err)}`);
+    }
     sendJson(res, 200, { ok: true });
   }
 
   return (req, res, next) => {
-    const rawUrl = req.url || '';
-    const pathname = rawUrl.split('?')[0];
-    if (!pathname.startsWith('/api/db/')) {
+    let url: URL;
+    try {
+      url = parseRequestUrl(req);
+    } catch {
+      next();
+      return;
+    }
+    const pathname = url.pathname;
+    const isDb = pathname.startsWith('/api/db/');
+    const isLive = isLivePath(pathname);
+    if (!isDb && !isLive) {
       next();
       return;
     }
 
-    // 准入判断收在 isRequestAllowed 里（回环闸门 + Origin 同源），不过就 403，不落任何盘。
-    const allowed = isRequestAllowed(req);
-    if (!allowed.ok) {
-      const reason = allowed.reason || '/api/db 拒绝该请求';
+    // --- 准入：角色判定收在 http.ts 的 resolveRole 里 ---
+    const role = resolveRole(req, url);
+    if (role === null) {
+      const reason = isLanEnabled()
+        ? `拒绝该请求：不是本机回环，且 Host/token 不满足局域网条件（Host 必须是 IP 字面量或 ${TAILSCALE_DNS_SUFFIX} 域名，并带正确 token）`
+        : '只服务本机（要开放手机观看请用 npm run dev:lan 启动）';
       console.warn(`[aco-local-db] 403 ${req.method} ${pathname} — ${reason}`);
       sendJson(res, 403, { error: reason });
       return;
     }
 
-    const rest = pathname.slice('/api/db/'.length);
+    // --- 授权矩阵（PHONE_VIEWER_PLAN §3.1）---
+    // /api/db/*、/api/live/lan-info、/api/live/presence 只给 loopback；
+    // /api/live/events、/api/live/inbox、/api/view/* 两个角色都可以。
+    if (role !== 'loopback' && (isDb || isLoopbackOnlyLivePath(pathname))) {
+      const reason = isDb
+        ? '/api/db 只服务本机：providers.json 里是明文 API key，永远不对局域网开放'
+        : `${pathname} 只服务本机`;
+      console.warn(`[aco-local-db] 403 ${req.method} ${pathname} — ${reason}`);
+      sendJson(res, 403, { error: reason });
+      return;
+    }
+
     const method = (req.method || 'GET').toUpperCase();
 
     const run = async (): Promise<void> => {
+      if (isLive) {
+        await handleLiveRequest(req, res, url, role);
+        return;
+      }
+
+      const rest = pathname.slice('/api/db/'.length);
+
       if (rest === 'all') {
         if (method !== 'GET') {
           sendJson(res, 405, { error: `method ${method} not allowed on /api/db/all` });
@@ -391,11 +301,11 @@ function createMiddleware(getDataDir: () => string): Middleware {
           return;
         }
         if (method === 'PUT') {
-          await handlePut(req, res, sessionPathFor(id));
+          await handlePut(req, res, sessionPathFor(id), id);
           return;
         }
         if (method === 'DELETE') {
-          await handleDeleteSession(res, sessionPathFor(id));
+          await handleDeleteSession(res, sessionPathFor(id), id);
           return;
         }
         sendJson(res, 405, { error: `method ${method} not allowed on /api/db/sessions/:id` });
@@ -421,22 +331,84 @@ function resolveDataDir(root: string): string {
   return path.join(root, 'data');
 }
 
+/** 入口 URL 只在启动时打一次，dev/preview 各起一次进程互不影响。 */
+let entryUrlsPrinted = false;
+
+function printEntryUrls(port: number): void {
+  if (!isLanEnabled() || entryUrlsPrinted) return;
+  const token = getLanToken();
+  if (!token) return;
+  entryUrlsPrinted = true;
+
+  const query = `?token=${encodeURIComponent(token)}`;
+  const ips = localIPv4Addresses();
+  const tailscale = ips.filter(isTailscaleIPv4);
+  const lan = ips.filter((ip) => !isTailscaleIPv4(ip));
+
+  console.log('[aco-live] 手机观看已开启（局域网 / Tailscale 可访问，凭 token）：');
+  for (const ip of tailscale) console.log(`  Tailscale  http://${ip}:${port}/viewer${query}`);
+  for (const ip of lan) console.log(`  局域网      http://${ip}:${port}/viewer${query}`);
+  if (!tailscale.length && !lan.length) console.log('  （没找到非回环 IPv4 地址）');
+  console.log(`  也可以 tailscale serve https / http://127.0.0.1:${port} 后走 https://<机器名>.<tailnet>.ts.net/viewer${query}`);
+  console.log(`  token 存在 ${path.join(getDataDir(), 'lan-token.txt')}，删掉重启即作废。`);
+}
+
 export function localDbPlugin(): Plugin {
-  let dataDir = resolveDataDir(process.cwd());
-  const middleware = createMiddleware(() => dataDir);
+  setDataDir(resolveDataDir(process.cwd()));
+  const middleware = createMiddleware();
+
+  // 只用 address()，所以按结构类型收——vite 的 HttpServer 是 http.Server | Http2SecureServer
+  type Addressable = { address(): string | { port: number } | null } | null | undefined;
+  const onListening = (httpServer: Addressable, fallbackPort?: number): void => {
+    const addr = httpServer?.address();
+    const port = addr && typeof addr === 'object' ? addr.port : fallbackPort ?? 0;
+    if (port) setServerPort(port);
+    printEntryUrls(port || fallbackPort || 0);
+  };
 
   return {
     name: 'aco-local-db',
+    /**
+     * LAN 开关只有这一处来源：`--mode lan`（npm run dev:lan / preview:lan）或 ACO_ALLOW_LAN=1。
+     * 开启时顺带把监听地址放开到所有接口，并把 `.ts.net` 加进 allowedHosts——
+     * Vite 自带的 hostCheck 对纯 IPv4 Host 本来就放行，但 MagicDNS 主机名会被它挡掉
+     * （挡的是 index.html 这类静态请求，跟我们自己的 403 是两回事）。
+     */
+    config(config, { mode }) {
+      const lan = mode === 'lan' || process.env.ACO_ALLOW_LAN === '1';
+      setLanEnabled(lan);
+      if (!lan) return;
+
+      const patch: UserConfig = {};
+      // 用户显式配过就不覆盖
+      if (config.server?.host === undefined) patch.server = { ...patch.server, host: true };
+      if (config.preview?.host === undefined) patch.preview = { ...patch.preview, host: true };
+      if (config.server?.allowedHosts !== true) {
+        patch.server = { ...patch.server, allowedHosts: [TAILSCALE_DNS_SUFFIX] };
+      }
+      if (config.preview?.allowedHosts !== true) {
+        patch.preview = { ...patch.preview, allowedHosts: [TAILSCALE_DNS_SUFFIX] };
+      }
+      return patch;
+    },
     configResolved(config) {
-      dataDir = resolveDataDir(config.root);
-      console.log(`[aco-local-db] 数据目录：${dataDir}`);
+      setDataDir(resolveDataDir(config.root));
+      console.log(`[aco-local-db] 数据目录：${getDataDir()}`);
+      // token 必须在第一个请求之前就位（resolveRole 是同步的），所以放在这里同步读/生成
+      if (isLanEnabled()) ensureLanToken();
     },
     configureServer(server) {
-      // 不用返回值形式：要抢在 vite 内建中间件之前拿到 /api/db/*
+      // 不用返回值形式：要抢在 vite 内建中间件之前拿到 /api/db/*、/api/live/*、/api/view/*
       server.middlewares.use(middleware);
+      const fallback = server.config.server.port;
+      if (server.httpServer?.listening) onListening(server.httpServer, fallback);
+      else server.httpServer?.once('listening', () => onListening(server.httpServer, fallback));
     },
     configurePreviewServer(server) {
       server.middlewares.use(middleware);
+      const fallback = server.config.preview.port;
+      if (server.httpServer?.listening) onListening(server.httpServer, fallback);
+      else server.httpServer?.once('listening', () => onListening(server.httpServer, fallback));
     },
   };
 }
