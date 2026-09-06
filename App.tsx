@@ -20,6 +20,7 @@ import { performSearch, formatSearchResultsForContext, formatSearchResultsForDis
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
+import { useLiveBridge, type PresenceReport, type InboxEvent } from './services/liveBridge';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -447,8 +448,9 @@ const App: React.FC = () => {
       yieldedAgentIds: []
     };
 
-    setGroups([...groups, newGroup]);
-    setSessions([...sessions, newSession]);
+    // 函数式写入：手机端消息可能在这几十毫秒里落进 sessions，闭包快照会把它吞掉
+    setGroups(prev => [...prev, newGroup]);
+    setSessions(prev => [...prev, newSession]);
     setActiveGroupId(newGroupId);
     setActiveSessionId(newSessionId);
   };
@@ -456,9 +458,10 @@ const App: React.FC = () => {
   const handleDeleteGroup = (id: string) => {
     if (groups.length <= 1) return;
     // Delete group and all its sessions
-    setGroups(groups.filter(g => g.id !== id));
-    setSessions(sessions.filter(s => s.groupId !== id));
+    setGroups(prev => prev.filter(g => g.id !== id));
+    setSessions(prev => prev.filter(s => s.groupId !== id));
 
+    // 下面选下一个 active 会话仍然读闭包快照：只是拿来挑 id，读到旧的也无所谓
     if (activeGroupId === id) {
       const remainingGroups = groups.filter(g => g.id !== id);
       const newActiveGroup = remainingGroups[0];
@@ -516,14 +519,18 @@ const App: React.FC = () => {
       mutedAgents: [],
       yieldedAgentIds: []
     };
-    setSessions([...sessions, newSession]);
+    setSessions(prev => [...prev, newSession]);
     setActiveSessionId(newSession.id);
   };
 
   const handleDeleteSession = (id: string) => {
+    // 闭包快照只用来判断「删完还剩不剩」和挑下一个 active id，真正的写入走函数式
     const newSessions = sessions.filter(s => s.id !== id);
     if (newSessions.length === 0) return;
-    setSessions(newSessions);
+    setSessions(prev => {
+      const next = prev.filter(s => s.id !== id);
+      return next.length === 0 ? prev : next;
+    });
     if (activeSessionId === id) {
       setActiveSessionId(newSessions[0].id);
     }
@@ -2621,6 +2628,125 @@ const App: React.FC = () => {
     }
   };
 
+  // 可编程的「往某个会话追加一条用户消息」入口。
+  // 原本这段逻辑长在 handleUserSend 里，只有本地输入框能用；手机观众模式要让
+  // SSE 收到的 inbox 消息走同一条路，所以抽成独立函数：不碰任何 UI state
+  // （输入框 / 附件 / 引用），只负责构造 Message 并函数式写进指定会话。
+  //
+  // 返回 false 的两种情况：会话不存在、这个 id 在该会话里已经有了（去重，
+  // SSE 重连后服务端可能重推同一条 inbox）。
+  const appendUserMessage = useCallback((sessionId: string, input: {
+    text: string;
+    id?: string;
+    replyToId?: string;
+    pmTargetId?: string;
+    asNarrator?: boolean;
+    attachments?: Attachment[];
+    parseCommands?: boolean;   // 默认 false：只有本地输入框才解析 /roll /tarot
+  }): boolean => {
+    const targetSession = sessions.find(s => s.id === sessionId);
+    if (!targetSession) return false;
+    const messageId = input.id ?? Date.now().toString();
+    if (input.id && targetSession.messages.some(m => m.id === input.id)) return false;
+
+    // 旁白模式：只换 senderId 和 isSystem，正文照原样
+    const effectiveSenderId = input.asNarrator ? 'narrator' : USER_ID;
+
+    const newMessage: Message = {
+      id: messageId,
+      senderId: effectiveSenderId,
+      text: input.text,
+      timestamp: Date.now(),
+      replyToId: input.replyToId || undefined,
+      pmTargetId: input.pmTargetId || undefined,
+      attachments: input.attachments && input.attachments.length > 0 ? input.attachments : undefined,
+      isSystem: !!input.asNarrator // Narrator messages are system messages
+    };
+
+    // 内联娱乐指令（/roll、/tarot）。group 从 sessionId 反查，不能用 activeGroup——
+    // 手机消息进的可能不是当前正在看的会话。
+    const entertainmentMessages: Message[] = [];
+    if (input.parseCommands) {
+      const entertainmentConfig = groups.find(g => g.id === targetSession.groupId)?.entertainmentConfig;
+
+      // Parse inline /roll commands
+      if (entertainmentConfig?.enableDice) {
+        const rollMatches = input.text.matchAll(/\/roll\s+(\d*d\d+(?:[+-]\d+)?)/gi);
+        for (const match of rollMatches) {
+          const result = rollDice(match[1]);
+          if (result) {
+            entertainmentMessages.push({
+              id: `roll-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              senderId: 'SYSTEM',
+              text: `🎲 ${result.breakdown}`,
+              timestamp: Date.now(),
+              isSystem: true
+            });
+          }
+        }
+      }
+
+      // Parse inline /tarot commands
+      if (entertainmentConfig?.enableTarot) {
+        const tarotMatches = input.text.matchAll(/\/tarot(?:\s+(\d+))?/gi);
+        for (const match of tarotMatches) {
+          const count = match[1] ? parseInt(match[1]) : 1;
+          const result = drawTarot(count);
+          if (result) {
+            entertainmentMessages.push({
+              id: `tarot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              senderId: 'SYSTEM',
+              text: `🃏 ${result.summary}`,
+              timestamp: Date.now(),
+              isSystem: true
+            });
+          }
+        }
+      }
+    }
+
+    // 函数式写入 + 更新器里再查一遍：上面读的是渲染时的 sessions 快照，
+    // 同一 tick 里连着来两条 inbox 时，只有这里的复查能真正挡住重复追加。
+    setSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      if (input.id && s.messages.some(m => m.id === input.id)) return s;
+      return {
+        ...s,
+        messages: [...s.messages, newMessage, ...entertainmentMessages],
+        lastUpdated: Date.now(),
+        yieldedAgentIds: [], // Only USER messages wake up PASSed agents
+        yieldedAtCount: undefined // Reset cooldown counter
+      };
+    }));
+    return true;
+  }, [sessions, groups]);
+
+  // SSE 回调里必须拿最新的一份，不能捕获渲染时的旧闭包（App.tsx:2908-2915 记过同样的坑）
+  const appendUserMessageRef = useRef(appendUserMessage);
+  appendUserMessageRef.current = appendUserMessage;
+
+  // --- 手机观众模式：presence 上报 + inbox 接收 ---
+  // 只有文件存储模式才有服务端；IndexedDB 老模式下整个桥不启动。
+  const liveBridgeEnabled = isDbLoaded && getStorageMode() === 'file';
+  const livePresenceReport = useMemo<PresenceReport>(() => ({
+    activeGroupId,
+    activeSessionId,
+    isAutoPlay,
+    processingAgentIds: [...processingAgents]
+  }), [activeGroupId, activeSessionId, isAutoPlay, processingAgents]);
+
+  // 只把消息塞进 state，不在这里触发任何 agent——接话交给 autoplay effect
+  const handleInboxMessage = useCallback((m: InboxEvent) => {
+    const ok = appendUserMessageRef.current(m.sessionId, { id: m.id, text: m.text });
+    if (!ok) console.warn('[live] 手机消息未入流（会话不存在或 id 重复）', m.id, m.sessionId);
+  }, []);
+
+  useLiveBridge({
+    enabled: liveBridgeEnabled,
+    report: livePresenceReport,
+    onInbox: handleInboxMessage
+  });
+
   const handleUserSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputText.trim() && attachments.length === 0) return;
@@ -2757,70 +2883,21 @@ const App: React.FC = () => {
     }
 
     // Check if narrator mode
-    const isNarratorMode = settings.activeProfileId === 'narrator';
-
     // Always use USER_ID for user messages (AI recognizes this)
     // Profile only affects display name (settings.userName), not senderId
-    const effectiveSenderId = isNarratorMode ? 'narrator' : USER_ID;
+    const isNarratorMode = settings.activeProfileId === 'narrator';
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      senderId: effectiveSenderId,
+    // 消息构造 + 入流全在 appendUserMessage 里（本地输入框才解析 /roll /tarot）；
+    // 这里只剩 UI 侧的收尾
+    appendUserMessage(activeSessionId, {
       text: inputText,
-      timestamp: Date.now(),
       replyToId: replyToId || undefined,
       pmTargetId: pmTargetId || undefined,
       attachments: attachments.length > 0 ? attachments : undefined,
-      isSystem: isNarratorMode // Narrator messages are system messages
-    };
+      asNarrator: isNarratorMode,
+      parseCommands: true
+    });
 
-    // User/Narrator message clears the yielded list - all PASSed agents can speak again
-    // Also check for inline entertainment commands (/roll, /tarot)
-    const entertainmentConfig = activeGroup?.entertainmentConfig;
-    const entertainmentMessages: Message[] = [];
-
-    // Parse inline /roll commands
-    if (entertainmentConfig?.enableDice) {
-      const rollMatches = inputText.matchAll(/\/roll\s+(\d*d\d+(?:[+-]\d+)?)/gi);
-      for (const match of rollMatches) {
-        const result = rollDice(match[1]);
-        if (result) {
-          entertainmentMessages.push({
-            id: `roll-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            senderId: 'SYSTEM',
-            text: `🎲 ${result.breakdown}`,
-            timestamp: Date.now(),
-            isSystem: true
-          });
-        }
-      }
-    }
-
-    // Parse inline /tarot commands
-    if (entertainmentConfig?.enableTarot) {
-      const tarotMatches = inputText.matchAll(/\/tarot(?:\s+(\d+))?/gi);
-      for (const match of tarotMatches) {
-        const count = match[1] ? parseInt(match[1]) : 1;
-        const result = drawTarot(count);
-        if (result) {
-          entertainmentMessages.push({
-            id: `tarot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            senderId: 'SYSTEM',
-            text: `🃏 ${result.summary}`,
-            timestamp: Date.now(),
-            isSystem: true
-          });
-        }
-      }
-    }
-
-    updateActiveSession(s => ({
-      ...s,
-      messages: [...s.messages, newMessage, ...entertainmentMessages],
-      lastUpdated: Date.now(),
-      yieldedAgentIds: [], // Only USER messages wake up PASSed agents
-      yieldedAtCount: undefined // Reset cooldown counter
-    }));
     setInputText('');
     setReplyToId(null);
     setPmTargetId(null);

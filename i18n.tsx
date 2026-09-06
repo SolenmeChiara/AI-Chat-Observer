@@ -386,6 +386,23 @@ const en: Record<string, string> = {
   '隐藏入群前消息': 'Hide pre-join messages',
   '段落分割': 'Paragraph split',
   '正在输入中...': 'is typing...',
+  // 手机观众模式（PhoneViewerModal + Sidebar 入口）
+  '在手机上实时观看': 'Watch live on your phone',
+  '手机观看': 'Phone Viewer',
+  '正在获取访问地址...': 'Fetching access URLs...',
+  '服务端未升级': 'Server not upgraded',
+  '当前版本的本地服务还没有 /api/live 接口，更新后重启即可使用。': 'This local server build has no /api/live endpoints yet. Update and restart to use it.',
+  '还没开放局域网': 'Network access is off',
+  '当前只监听本机。用下面的命令重新启动，再回来打开这个面板：': 'Currently listening on localhost only. Restart with the command below, then reopen this panel:',
+  '没找到可用的网络地址': 'No usable network address found',
+  '手机扫码，或直接在手机浏览器里打开下面的地址。': 'Scan with your phone, or open the URL below in your phone browser.',
+  '复制': 'Copy',
+  '复制失败，请手动选中地址': 'Copy failed — please select the URL manually',
+  'Tailscale 直连': 'Tailscale direct',
+  'Tailscale HTTPS（需 tailscale serve）': 'Tailscale HTTPS (requires tailscale serve)',
+  '局域网': 'Local network',
+  '推荐用 Tailscale：只有你自己的设备能连上，且全程加密；局域网 IP 是退路，别在公共 WiFi 用': 'Tailscale is recommended: only your own devices can connect, and traffic is encrypted end to end. The LAN IP is a fallback — never use it on public Wi-Fi.',
+  '想换一把钥匙：删掉 data/lan-token.txt 再重启。': 'To rotate the key: delete data/lan-token.txt and restart.',
 };
 
 let currentLocale: Locale = 'zh';

@@ -1,13 +1,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider, UserProfile } from '../types';
-import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles, Download } from 'lucide-react';
+import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles, Download, Smartphone } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
 import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
 import { isImageGenModel } from '../services/openaiService';
 import { formatSessionAsHtml } from '../services/exportHtml';
 import type { DbSnapshot } from '../services/db';
+import PhoneViewerModal from './PhoneViewerModal';
 import { useT } from '../i18n';
 
 // TTS Settings Panel Component
@@ -501,6 +502,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const agentAvatarInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null); // JSON 全量备份的导入文件选择器
+  const [showPhoneViewer, setShowPhoneViewer] = useState(false); // 「手机观看」二维码弹窗
   const [editingAgentAvatar, setEditingAgentAvatar] = useState<string | null>(null);
 
   // Agent card collapse state
@@ -2459,12 +2461,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                        }}
                      />
                    </div>
+
+                   {/* 手机观众模式：扫码在手机上实时看这台电脑正在跑的群聊 */}
+                   <div className="mt-4 pt-4 border-t border-gray-200 dark:border-zinc-700">
+                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('在手机上实时观看')}</p>
+                     <button
+                       onClick={() => setShowPhoneViewer(true)}
+                       className="w-full py-2 flex items-center justify-center gap-1.5 border border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+                     >
+                       <Smartphone size={14} /> {t('手机观看')}
+                     </button>
+                   </div>
                  </div>
                );
              })()}
            </div>
         )}
       </div>
+
+      {showPhoneViewer && <PhoneViewerModal onClose={() => setShowPhoneViewer(false)} />}
     </div>
   );
 };
