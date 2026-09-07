@@ -328,25 +328,60 @@ const ViewerApp: React.FC = () => {
 
   // --- 动作通道（§2.2 / §2.5）---
 
+  /**
+   * toast 文案拼接。中英标点不一样：中文「点名发言失败：TA 正在禁言中」不加空格、用全角冒号，
+   * 英文得是「Ask to speak failed: they are muted right now」。
+   * 直接拼会拼出「Ask to speakfailed：…」。
+   */
+  const joinToast = useCallback(
+    (label: string, verdict: string, detail?: string): string =>
+      lang === 'zh'
+        ? `${label}${verdict}${detail ? `：${detail}` : ''}`
+        : `${label} ${verdict}${detail ? `: ${detail}` : ''}`,
+    [lang]
+  );
+
   /** 电脑端回的 error 是机器可读短码，这里翻成人话；没见过的码原样带出来，方便截图报 bug */
   const describeActionCode = useCallback(
     (code?: string): string => {
       switch (code) {
+        // --- 电脑端语义校验回的短码（App.tsx handleActionEvent，14 个，与它一一对表）---
         case 'not-active-session':
           return t('电脑端已经切到别的会话了');
         case 'agent-not-found':
           return t('找不到这个角色');
         case 'invalid-model':
-        case 'invalid-provider':
-          return t('模型或供应商不存在');
+          return t('这个模型不在该供应商下');
+        case 'provider-not-found':
+        case 'invalid-provider': // 契约注释里的旧写法，留着当别名
+          return t('找不到这个供应商');
+        case 'session-not-found':
+          return t('找不到这个会话');
+        case 'message-not-found':
+          return t('要引用的那条消息不在了');
+        case 'not-a-member':
+          return t('TA 不在当前群里');
+        case 'already-member':
+          return t('TA 已经在群里了');
+        case 'agent-muted':
+          return t('TA 正在禁言中');
+        case 'agent-inactive':
+          return t('TA 在电脑端被停用了');
         case 'busy':
           return t('TA 正在生成，稍后再试');
+        case 'append-failed':
+          return t('电脑端没能写进这条消息');
+        case 'internal-error':
+          return t('电脑端执行时出错了');
+        case 'unknown-action':
+          return t('电脑端不认识这个操作，可能版本太旧');
+        // --- 手机端与 HTTP 层自己的短码 ---
+        case 'timeout':
+          return t('电脑端没有回应');
         case 'desktop-offline':
           return t('电脑端已离线');
         case 'rate-limited':
           return t('操作太快了，缓一缓');
-        case 'timeout':
-          return t('电脑端没有回应');
         case undefined:
         case '':
         case 'bad-request':
@@ -426,7 +461,7 @@ const ViewerApp: React.FC = () => {
       });
 
       if (result.ok) {
-        pushToast('ok', `${entry.label}${t('成功')}`);
+        pushToast('ok', joinToast(entry.label, t('成功')));
         // 禁言 / 解禁 / 加人都会改电脑端那份会话，顺手让成员面板重新拉一次禁言表
         setMuteTick(x => x + 1);
         if (entry.type === 'message.send' && entry.draftMessageId && result.data?.messageId) {
@@ -442,7 +477,7 @@ const ViewerApp: React.FC = () => {
           setEditAgentId(result.data.agentId);
         }
       } else {
-        pushToast('err', `${entry.label}${t('失败')}：${describeActionCode(result.error)}`);
+        pushToast('err', joinToast(entry.label, t('失败'), describeActionCode(result.error)));
         if (entry.type === 'message.send' && entry.draftMessageId) {
           setPending(prev => prev.filter(m => m.id !== entry.draftMessageId));
           // 文本还回输入框，但别覆盖用户在这几秒里新打的字
@@ -451,7 +486,7 @@ const ViewerApp: React.FC = () => {
       }
       return true;
     },
-    [pushToast, t, describeActionCode]
+    [pushToast, t, describeActionCode, joinToast]
   );
 
   const handleActionResult = useCallback(
@@ -510,12 +545,12 @@ const ViewerApp: React.FC = () => {
           next.delete(localKey);
           return next;
         });
-        pushToast('err', `${opts.label}${t('失败')}：${describeActionHttpError(err)}`);
+        pushToast('err', joinToast(opts.label, t('失败'), describeActionHttpError(err)));
         if (err instanceof ViewerHttpError && (err.status === 401 || err.status === 403)) setPhase('denied');
         return false;
       }
     },
-    [pushToast, t, describeActionHttpError, settleAction]
+    [pushToast, t, describeActionHttpError, settleAction, joinToast]
   );
 
   /**
@@ -1573,7 +1608,7 @@ const ViewerApp: React.FC = () => {
                 ) : (
                   <AlertCircle size={13} className="shrink-0" />
                 )}
-                <span className="truncate">{item.text}</span>
+                <span className="min-w-0 line-clamp-2 break-words leading-snug">{item.text}</span>
               </div>
             ))}
           </div>

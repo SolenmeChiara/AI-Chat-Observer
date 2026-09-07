@@ -625,6 +625,12 @@ const App: React.FC = () => {
     // 同步辩论 turn index ref
     const targetSession = sessions.find(s => s.id === id);
     debateTurnIndexRef.current = targetSession?.debateConfig?.currentTurnIndex ?? 0;
+    // 会话属于别的群时把 activeGroupId 一起带过去。少这一句就会「读的是 B 群的会话、
+    // 操作的是 A 群」：群成员增删写进 A 群、加群系统消息落进 B 群的会话、上下文用 A 群的剧本。
+    // 电脑端点非活跃群里的会话（Sidebar.tsx:1037）本来就有这个洞，手机端的会话面板把它变成了主路径。
+    if (targetSession && targetSession.groupId && targetSession.groupId !== activeGroupId) {
+      setActiveGroupId(targetSession.groupId);
+    }
   };
 
   const handleUpdateSummary = (id: string, summary: string) => {
@@ -3315,8 +3321,13 @@ const App: React.FC = () => {
         }
         case 'agent.trigger': {
           const { agentId } = evt.payload as AgentIdPayload;
-          if (!findAgent(agentId)) { reply(false, 'agent-not-found'); return; }
+          const target = findAgent(agentId);
+          if (!target) { reply(false, 'agent-not-found'); return; }
           if (!memberIds.includes(agentId)) { reply(false, 'not-a-member'); return; }
+          // triggerAgentReply 对「停用」和「没配供应商/模型」也是 console.log 后静默返回
+          // （App.tsx:1556-1565）。不先挡一道的话手机会弹「点名发言成功」然后永远等不到发言。
+          if (target.isActive === false) { reply(false, 'agent-inactive'); return; }
+          if (!target.providerId || !target.modelId) { reply(false, 'invalid-model'); return; }
           const session = st.sessions.find(s => s.id === st.activeSessionId);
           if ((session?.mutedAgentIds || []).includes(agentId)) { reply(false, 'agent-muted'); return; }
           // triggerAgentReply 对这几种情况只是 console.log 后静默返回，不会告诉我们，所以先自己判一遍
