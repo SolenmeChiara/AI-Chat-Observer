@@ -21,7 +21,18 @@ import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from 
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
 import { buildQuoteFollowupHint, sliceAfterCutoff, findCutoffIndex } from './services/shared';
-import { useLiveBridge, type PresenceReport, type InboxEvent, type ControlEvent } from './services/liveBridge';
+import { useLiveBridge, postActionResult, type PresenceReport, type InboxEvent, type ControlEvent } from './services/liveBridge';
+import {
+  SESSION_SCOPED_ACTIONS,
+  type ActionEvent,
+  type ActionResult,
+  type AgentCreatePayload,
+  type AgentIdPayload,
+  type AgentMutePayload,
+  type AgentPatch,
+  type AgentUpdatePayload,
+  type MessageSendPayload,
+} from './server/actionContract';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -922,33 +933,128 @@ const App: React.FC = () => {
     return inputCost + outputCost;
   };
 
-  const handleAddAgentFromRightSidebar = (providerId: string, modelId: string) => {
+  // 从「供应商 + 模型」造一个新 agent 并写进 agents。返回新建的对象本身（调用方接着要用它，
+  // 比如立刻加进当前群——那时候 setAgents 还没提交，用 id 去 agents.find 一定扑空）。
+  // 手机远程 `agent.create` 与电脑端的「从右栏加成员」共用这段构造逻辑。
+  const createAgentFromModel = (
+    providerId: string,
+    modelId: string,
+    opts?: { name?: string; systemPrompt?: string }
+  ): { ok: true; agent: Agent } | { ok: false; error: string } => {
     const provider = providers.find(p => p.id === providerId);
-    const model = provider?.models.find(m => m.id === modelId);
+    if (!provider) return { ok: false, error: 'provider-not-found' };
+    const model = provider.models.find(m => m.id === modelId);
+    if (!model) return { ok: false, error: 'invalid-model' };
 
-    const newAgentName = model?.name || modelId || 'New Agent';
+    // id 沿用全项目一致的 Date.now()；同一毫秒里连建两个会撞，撞了补一个随机后缀
+    let id = Date.now().toString();
+    if (agents.some(a => a.id === id)) id = `${id}-${Math.random().toString(36).slice(2, 8)}`;
+
     const newAgent: Agent = {
-      id: Date.now().toString(),
-      name: newAgentName,
-      avatar: getAvatarForModel(modelId, provider?.name || ''),
+      id,
+      name: opts?.name?.trim() || model.name || modelId || 'New Agent',
+      avatar: getAvatarForModel(modelId, provider.name || ''),
       providerId: providerId,
       modelId: modelId,
-      systemPrompt: t('你是一个乐于助人的群聊参与者。'),
+      systemPrompt: opts?.systemPrompt ?? t('你是一个乐于助人的群聊参与者。'),
       color: 'bg-gray-600',
       config: { temperature: null, topP: null, maxTokens: 2000, enableReasoning: false, reasoningBudget: 0 },
       role: AgentRole.MEMBER
     };
     setAgents(prev => [...prev, newAgent]);
+    return { ok: true, agent: newAgent };
+  };
+
+  const handleAddAgentFromRightSidebar = (providerId: string, modelId: string) => {
+    const created = createAgentFromModel(providerId, modelId);
+    if (!created.ok) return;
 
     // Add system message for new member joining
     const joinMessage: Message = {
       id: `join-${Date.now()}`,
       senderId: 'system',
-      text: `${newAgentName} ${t('加入了群聊')}`,
+      text: `${created.agent.name} ${t('加入了群聊')}`,
       timestamp: Date.now(),
       isSystem: true
     };
     updateActiveSession(s => ({ ...s, messages: [...s.messages, joinMessage] }));
+  };
+
+  // 手机远程改 agent（PHONE_ACTIONS_PLAN §2.4）。三段联动照抄 components/Sidebar.tsx 的
+  // updateAgent（换模型时同步默认名、重算头像、补自动提示词），只有一处刻意不同：
+  // patch 里显式给了的字段不再被联动覆盖。Sidebar 那边是分次交互（先选模型再改名字），
+  // 远程是一次提交 name + modelId + systemPrompt，照抄会把手机上刚填的名字/提示词吃掉。
+  const applyRemoteAgentPatch = (
+    agentId: string,
+    patch: AgentPatch
+  ): { ok: true } | { ok: false; error: string } => {
+    const agent = agents.find(a => a.id === agentId);
+    if (!agent) return { ok: false, error: 'agent-not-found' };
+
+    const targetProviderId = patch.providerId ?? agent.providerId;
+    const targetProvider = providers.find(pr => pr.id === targetProviderId);
+    if (patch.providerId !== undefined && !targetProvider) return { ok: false, error: 'provider-not-found' };
+
+    const targetModelId = patch.modelId ?? agent.modelId;
+    // 只在动了 provider / model 时校验：换了供应商却没换模型，老模型多半不在新列表里。
+    // 不合法就整条 patch 作废，不做部分应用（半套配置比不改更难查）。
+    if (
+      (patch.modelId !== undefined || patch.providerId !== undefined) &&
+      !targetProvider?.models.some(m => m.id === targetModelId)
+    ) {
+      return { ok: false, error: 'invalid-model' };
+    }
+
+    const modelChanged = patch.modelId !== undefined && patch.modelId !== agent.modelId;
+
+    setAgents(prev => prev.map(a => {
+      if (a.id !== agentId) return a;
+      // role 是枚举、config 要浅合并，这两个不能直接跟着 patch 铺进去
+      const { role: patchRole, config: patchConfig, ...rest } = patch;
+      const next: Agent = { ...a, ...rest };
+      if (patchConfig) next.config = { ...a.config, ...patchConfig };
+      if (patchRole !== undefined) next.role = patchRole === 'ADMIN' ? AgentRole.ADMIN : AgentRole.MEMBER;
+
+      // --- Smart Name Sync（Sidebar.updateAgent 同款）---
+      if (modelChanged && patch.name === undefined) {
+        const oldProvider = providers.find(pr => pr.id === a.providerId);
+        const oldModelDef = oldProvider?.models.find(m => m.id === a.modelId);
+        const isDefaultName =
+          a.name === 'New Agent' ||
+          a.name === '' ||
+          a.name === a.modelId ||
+          (!!oldModelDef && a.name === oldModelDef.name);
+        if (isDefaultName) {
+          const newModelDef = targetProvider?.models.find(m => m.id === patch.modelId);
+          if (newModelDef) next.name = newModelDef.name || newModelDef.id;
+        }
+      }
+
+      // --- 头像：自定义头像（base64）不动 ---
+      if (
+        (patch.modelId !== undefined || patch.providerId !== undefined) &&
+        patch.avatar === undefined &&
+        !a.avatar.startsWith('data:') &&
+        targetProvider
+      ) {
+        next.avatar = getAvatarForModel(targetModelId, targetProvider.name);
+      }
+
+      // --- 换模型时补自动提示词（原来是空的或还是自动生成的那句才补）---
+      if (patch.modelId !== undefined && patch.systemPrompt === undefined) {
+        const isAutoGenerated =
+          !a.systemPrompt ||
+          (a.systemPrompt.startsWith('You are ') && a.systemPrompt.includes('Your name in this group chat is'));
+        if (isAutoGenerated) {
+          const modelDef = targetProvider?.models.find(m => m.id === patch.modelId);
+          const modelName = modelDef?.name || patch.modelId;
+          next.systemPrompt = `You are ${modelName}. Your name in this group chat is ${next.name || modelName}.`;
+        }
+      }
+
+      return next;
+    }));
+    return { ok: true };
   };
 
   // 从当前群组中移除成员
@@ -979,14 +1085,12 @@ const App: React.FC = () => {
     } : s));
   };
 
-  // 添加角色到当前群组
-  const handleActivateAgent = (id: string) => {
-    const agent = agents.find(a => a.id === id);
-    if (!agent) return;
-
+  // 把一个已经存在的 agent 加进当前群组。单独抽出来是为了「新建后立刻入群」——
+  // 那时候 setAgents 还没提交，handleActivateAgent 里那句 agents.find 一定扑空。
+  const addAgentToActiveGroup = (agent: Agent) => {
     setGroups(prev => prev.map(g => g.id === activeGroupId ? {
       ...g,
-      memberIds: [...g.memberIds, id]
+      memberIds: [...g.memberIds, agent.id]
     } : g));
 
     // Add system message for new member joining
@@ -1001,8 +1105,15 @@ const App: React.FC = () => {
     updateActiveSession(s => ({
       ...s,
       messages: [...s.messages, joinMessage],
-      agentJoinedAt: { ...(s.agentJoinedAt || {}), [id]: joinMessageId }
+      agentJoinedAt: { ...(s.agentJoinedAt || {}), [agent.id]: joinMessageId }
     }));
+  };
+
+  // 添加角色到当前群组
+  const handleActivateAgent = (id: string) => {
+    const agent = agents.find(a => a.id === id);
+    if (!agent) return;
+    addAgentToActiveGroup(agent);
   };
 
   // 切换群组管理员状态
@@ -3086,11 +3197,179 @@ const App: React.FC = () => {
     else handleStopAllRef.current();
   }, []);
 
+  // --- 手机远程动作（PHONE_ACTIONS_PLAN §2.8）---
+  //
+  // useLiveBridge 只在 enabled 翻转时建一次 SSE 连接，回调走 ref。所以这里读到的**一切**
+  // state 都必须经 ref 取，直接闭包捕获会永远看到首帧的 agents / groups / sessions。
+  // 服务端只做了形状校验（type 白名单、payload 长度、当前会话、限流），语义全在这一段：
+  // id 存不存在、是不是群成员、模型合不合法、有没有在生成中。
+  const actionStateRef = useRef({
+    agents, providers, groups, sessions, activeGroupId, activeSessionId, processingAgents, settings
+  });
+  actionStateRef.current = {
+    agents, providers, groups, sessions, activeGroupId, activeSessionId, processingAgents, settings
+  };
+
+  const actionHandlersRef = useRef({
+    appendUserMessage, handleSwitchSession, addAgentToActiveGroup, handleRemoveAgent,
+    handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel
+  });
+  actionHandlersRef.current = {
+    appendUserMessage, handleSwitchSession, addAgentToActiveGroup, handleRemoveAgent,
+    handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel
+  };
+
+  const handleActionEvent = useCallback((evt: ActionEvent) => {
+    // 每个分支都必须回一次结果（成功或失败），手机那头在按 id 等着；不回就只能等 8s 超时。
+    let replied = false;
+    const reply = (ok: boolean, error?: string, data?: ActionResult['data']) => {
+      if (replied) return;
+      replied = true;
+      const result: ActionResult = { id: evt.id, ok };
+      if (error) result.error = error;
+      if (data) result.data = data;
+      void postActionResult(result);
+    };
+
+    try {
+      const st = actionStateRef.current;
+      const h = actionHandlersRef.current;
+
+      // 双保险：服务端已经比过一次，但 presence 上报有 200ms 防抖，电脑刚切会话那一瞬
+      // 服务端手上还是旧值。session.switch 的 sessionId 是「要切到哪」，不参与这条比对。
+      if (
+        SESSION_SCOPED_ACTIONS.has(evt.type) &&
+        evt.type !== 'session.switch' &&
+        evt.sessionId !== st.activeSessionId
+      ) {
+        reply(false, 'not-active-session');
+        return;
+      }
+
+      const memberIds = st.groups.find(g => g.id === st.activeGroupId)?.memberIds || [];
+      const findAgent = (id: string) => st.agents.find(a => a.id === id);
+
+      switch (evt.type) {
+        case 'message.send': {
+          const payload = evt.payload as MessageSendPayload;
+          const sessionId = evt.sessionId || '';
+          const target = st.sessions.find(s => s.id === sessionId);
+          if (!target) { reply(false, 'session-not-found'); return; }
+          // 私讯目标必须是当前群成员（'user' = 发给主持人自己，手机端用不到但契约允许）
+          if (payload.pmTargetId && payload.pmTargetId !== USER_ID && !memberIds.includes(payload.pmTargetId)) {
+            reply(false, 'not-a-member');
+            return;
+          }
+          if (payload.replyToId && !target.messages.some(m => m.id === payload.replyToId)) {
+            reply(false, 'message-not-found');
+            return;
+          }
+          // 用动作 id 当消息 id：SSE 重连后服务端若重推同一条，appendUserMessage 会去重
+          const ok = h.appendUserMessage(sessionId, {
+            id: evt.id,
+            text: payload.text,
+            pmTargetId: payload.pmTargetId,
+            replyToId: payload.replyToId,
+            parseCommands: !!payload.parseCommands
+          });
+          reply(ok, ok ? undefined : 'append-failed', ok ? { messageId: evt.id } : undefined);
+          return;
+        }
+        case 'session.switch': {
+          const sessionId = evt.sessionId || '';
+          if (!st.sessions.some(s => s.id === sessionId)) { reply(false, 'session-not-found'); return; }
+          // 注意它会顺手 setIsAutoPlay(false)，与电脑端点会话列表的行为一致
+          h.handleSwitchSession(sessionId);
+          reply(true, undefined, { sessionId });
+          return;
+        }
+        case 'group.member.add': {
+          const { agentId } = evt.payload as AgentIdPayload;
+          const agent = findAgent(agentId);
+          if (!agent) { reply(false, 'agent-not-found'); return; }
+          if (memberIds.includes(agentId)) { reply(false, 'already-member'); return; }
+          h.addAgentToActiveGroup(agent);
+          reply(true, undefined, { agentId });
+          return;
+        }
+        case 'group.member.remove': {
+          const { agentId } = evt.payload as AgentIdPayload;
+          if (!memberIds.includes(agentId)) { reply(false, 'not-a-member'); return; }
+          h.handleRemoveAgent(agentId);
+          reply(true, undefined, { agentId });
+          return;
+        }
+        case 'agent.mute': {
+          const payload = evt.payload as AgentMutePayload;
+          if (!findAgent(payload.agentId)) { reply(false, 'agent-not-found'); return; }
+          h.handleMuteAgent(payload.agentId, payload.durationMinutes, `${st.settings.userName || 'User'}（手机）`);
+          reply(true, undefined, { agentId: payload.agentId });
+          return;
+        }
+        case 'agent.unmute': {
+          const { agentId } = evt.payload as AgentIdPayload;
+          if (!findAgent(agentId)) { reply(false, 'agent-not-found'); return; }
+          h.handleUnmuteAgent(agentId);
+          reply(true, undefined, { agentId });
+          return;
+        }
+        case 'agent.trigger': {
+          const { agentId } = evt.payload as AgentIdPayload;
+          if (!findAgent(agentId)) { reply(false, 'agent-not-found'); return; }
+          if (!memberIds.includes(agentId)) { reply(false, 'not-a-member'); return; }
+          const session = st.sessions.find(s => s.id === st.activeSessionId);
+          if ((session?.mutedAgentIds || []).includes(agentId)) { reply(false, 'agent-muted'); return; }
+          // triggerAgentReply 对这几种情况只是 console.log 后静默返回，不会告诉我们，所以先自己判一遍
+          if (st.processingAgents.has(agentId) || pendingTriggerRef.current.has(agentId)) {
+            reply(false, 'busy');
+            return;
+          }
+          if (!st.settings.enableConcurrency && st.processingAgents.size + pendingTriggerRef.current.size > 0) {
+            reply(false, 'busy');
+            return;
+          }
+          // 不等它跑完：一次生成动辄几十秒，手机那头 8s 就超时了。ok = 已受理，
+          // 真正的回复照常经会话文件落盘 + `session` 事件回流到手机。
+          Promise.resolve(h.triggerAgentReply(agentId)).catch(err => {
+            console.warn('[live] 远程触发的生成失败', agentId, err);
+          });
+          reply(true, undefined, { agentId });
+          return;
+        }
+        case 'agent.update': {
+          const payload = evt.payload as AgentUpdatePayload;
+          const r = h.applyRemoteAgentPatch(payload.agentId, payload.patch);
+          reply(r.ok, r.ok ? undefined : r.error, r.ok ? { agentId: payload.agentId } : undefined);
+          return;
+        }
+        case 'agent.create': {
+          const payload = evt.payload as AgentCreatePayload;
+          const r = h.createAgentFromModel(payload.providerId, payload.modelId, {
+            name: payload.name,
+            systemPrompt: payload.systemPrompt
+          });
+          if (!r.ok) { reply(false, r.error); return; }
+          // 直接给对象而不是 id：新 agent 还没进 state，用 id 查一定扑空
+          if (payload.joinActiveGroup) h.addAgentToActiveGroup(r.agent);
+          reply(true, undefined, { agentId: r.agent.id });
+          return;
+        }
+        default:
+          reply(false, 'unknown-action');
+          return;
+      }
+    } catch (err) {
+      console.warn('[live] 远程动作执行失败', evt.type, err);
+      reply(false, 'internal-error');
+    }
+  }, []);
+
   useLiveBridge({
     enabled: liveBridgeEnabled,
     report: livePresenceReport,
     onInbox: handleInboxMessage,
-    onControl: handleControlEvent
+    onControl: handleControlEvent,
+    onAction: handleActionEvent
   });
 
   const handleUserSend = async (e?: React.FormEvent) => {

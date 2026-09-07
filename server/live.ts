@@ -29,6 +29,16 @@ import {
   sendJson,
   type Role,
 } from './http';
+import {
+  ACTION_LIMITS,
+  ACTION_MAX_PER_WINDOW,
+  ACTION_RATE_WINDOW_MS,
+  ACTION_TYPES,
+  AGENT_PATCH_CONFIG_KEYS,
+  AGENT_PATCH_KEYS,
+  SESSION_SCOPED_ACTIONS,
+  type ActionType,
+} from './actionContract';
 
 // --- 常量 ---
 
@@ -47,6 +57,12 @@ const INBOX_WINDOW_MS = 60_000;
 const INBOX_MAX_PER_WINDOW = 20;
 /** inbox 文本长度上限。 */
 const INBOX_MAX_TEXT = 4000;
+/** 淘汰扫描用的窗口：取所有限速窗口里最长的那个，短窗口的桶多留一会儿不影响判定。 */
+const RATE_SWEEP_WINDOW_MS = Math.max(INBOX_WINDOW_MS, ACTION_RATE_WINDOW_MS);
+/** action-result 里 error 短码的长度上限（机器可读短码，不是给人看的文案）。 */
+const ACTION_ERROR_MAX = 200;
+/** action-result 的 data 只允许这几个 id 类字段，别的一律 400。 */
+const ACTION_RESULT_DATA_KEYS = ['agentId', 'messageId', 'sessionId'];
 
 const serverStartedAt = Date.now();
 
@@ -90,6 +106,8 @@ interface StoredSession {
   name?: string;
   lastUpdated?: number;
   messages: StoredMessage[];
+  /** ../types.ts 的 MuteInfo[]：{ agentId, muteUntil, mutedBy }。没有敏感字段，原样出门。 */
+  mutedAgents?: unknown[];
 }
 
 export interface PresenceReport {
@@ -316,10 +334,21 @@ async function handlePresence(req: IncomingMessage, res: ServerResponse): Promis
 
 // --- inbox ---
 
-function rateLimitOk(source: string): boolean {
+function rateLimitOk(
+  source: string,
+  maxPerWindow: number = INBOX_MAX_PER_WINDOW,
+  windowMs: number = INBOX_WINDOW_MS
+): boolean {
   const now = Date.now();
-  const hits = (rateHits.get(source) || []).filter((t) => now - t < INBOX_WINDOW_MS);
-  if (hits.length >= INBOX_MAX_PER_WINDOW) {
+  // 顺手淘汰：桶只在自己被访问时才清理的话，来过一次就再没回来的地址会永久占着一个 key。
+  // 桶数 = 见过的来源地址数（个位数），整表扫一遍的代价可以忽略。
+  rateHits.forEach((times, key) => {
+    const kept = times.filter((t) => now - t < RATE_SWEEP_WINDOW_MS);
+    if (kept.length === 0) rateHits.delete(key);
+    else if (kept.length !== times.length) rateHits.set(key, kept);
+  });
+  const hits = (rateHits.get(source) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= maxPerWindow) {
     rateHits.set(source, hits);
     return false;
   }
@@ -434,6 +463,293 @@ async function handleControl(req: IncomingMessage, res: ServerResponse): Promise
   const id = `ctl-${Date.now()}-${crypto.randomBytes(4).toString('base64url').slice(0, 6)}`;
   broadcast('control', { id, action: 'autoplay', enabled, sessionId, receivedAt: Date.now() }, (c) => c.isDesktop);
   sendJson(res, 202, { id });
+}
+
+// --- action（手机远程动作通道，PHONE_ACTIONS_PLAN §2.2-2.5）---
+
+/**
+ * 需要 sessionId 但**不**要求它等于电脑当前会话的动作。
+ * `session.switch` 的 sessionId 是「要切到哪」，拿它跟当前会话比会让切换永远 409；
+ * 契约里的 SESSION_SCOPED_ACTIONS 只表达「这个 type 必须带 sessionId」，
+ * 「必须等于当前会话」那条是 PHONE_ACTIONS_PLAN §2.1 里带例外的规则。
+ */
+const SESSION_TARGET_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>(['session.switch']);
+
+/** 每个 type 允许出现的 payload 键。白名单之外一律 400，键名进响应体的 field。 */
+const ACTION_PAYLOAD_KEYS: Record<ActionType, string[]> = {
+  'message.send': ['text', 'pmTargetId', 'replyToId', 'parseCommands'],
+  'session.switch': [],
+  'group.member.add': ['agentId'],
+  'group.member.remove': ['agentId'],
+  'agent.mute': ['agentId', 'durationMinutes'],
+  'agent.unmute': ['agentId'],
+  'agent.trigger': ['agentId'],
+  'agent.update': ['agentId', 'patch'],
+  'agent.create': ['providerId', 'modelId', 'name', 'systemPrompt', 'joinActiveGroup'],
+};
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** 必填 id：非空字符串且不超长。空串按缺失处理。 */
+function badId(v: unknown): boolean {
+  return typeof v !== 'string' || v.length === 0 || v.length > ACTION_LIMITS.id;
+}
+
+function badOptionalId(v: unknown): boolean {
+  return v !== undefined && badId(v);
+}
+
+function badOptionalString(v: unknown, max: number): boolean {
+  return v !== undefined && (typeof v !== 'string' || v.length > max);
+}
+
+function badOptionalBool(v: unknown): boolean {
+  return v !== undefined && typeof v !== 'boolean';
+}
+
+function badOptionalInt(v: unknown, min: number, max: number): boolean {
+  return v !== undefined && (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max);
+}
+
+/**
+ * 校验 AgentPatch。白名单之外的键直接判错（尤其 searchConfig / voiceId 这类凭据或私有配置），
+ * 返回出错的字段名（`patch.xxx`），全对返回 null。空 patch 合法：是一次没有改动的提交，
+ * 电脑端应用后回 ok，不当错误。
+ */
+function validateAgentPatch(patch: unknown): string | null {
+  if (!isPlainObject(patch)) return 'patch';
+  const allowed = AGENT_PATCH_KEYS as ReadonlyArray<string>;
+  for (const key of Object.keys(patch)) {
+    if (allowed.indexOf(key) < 0) return `patch.${key}`;
+  }
+  if (badOptionalString(patch.name, ACTION_LIMITS.name)) return 'patch.name';
+  if (badOptionalString(patch.systemPrompt, ACTION_LIMITS.systemPrompt)) return 'patch.systemPrompt';
+  if (badOptionalId(patch.providerId)) return 'patch.providerId';
+  if (badOptionalId(patch.modelId)) return 'patch.modelId';
+  if (badOptionalString(patch.color, ACTION_LIMITS.color)) return 'patch.color';
+  if (badOptionalString(patch.avatar, ACTION_LIMITS.avatar)) return 'patch.avatar';
+  if (patch.role !== undefined && patch.role !== 'MEMBER' && patch.role !== 'ADMIN') return 'patch.role';
+  if (badOptionalBool(patch.mentionOnly)) return 'patch.mentionOnly';
+  if (badOptionalBool(patch.enablePM)) return 'patch.enablePM';
+  if (patch.commandMode !== undefined && patch.commandMode !== 'native' && patch.commandMode !== 'text') {
+    return 'patch.commandMode';
+  }
+  if (patch.config !== undefined) {
+    const config = patch.config;
+    if (!isPlainObject(config)) return 'patch.config';
+    const allowedConfig = AGENT_PATCH_CONFIG_KEYS as ReadonlyArray<string>;
+    for (const key of Object.keys(config)) {
+      if (allowedConfig.indexOf(key) < 0) return `patch.config.${key}`;
+    }
+    // temperature / topP 允许显式 null：types.ts 里 null = 用供应商默认值
+    if (config.temperature !== undefined && config.temperature !== null && typeof config.temperature !== 'number') {
+      return 'patch.config.temperature';
+    }
+    if (config.topP !== undefined && config.topP !== null && typeof config.topP !== 'number') {
+      return 'patch.config.topP';
+    }
+    if (badOptionalInt(config.maxTokens, 1, ACTION_LIMITS.maxTokensMax)) return 'patch.config.maxTokens';
+    if (badOptionalBool(config.enableReasoning)) return 'patch.config.enableReasoning';
+    if (badOptionalInt(config.reasoningBudget, 0, ACTION_LIMITS.reasoningBudgetMax)) {
+      return 'patch.config.reasoningBudget';
+    }
+  }
+  return null;
+}
+
+/**
+ * 按 type 校验 payload 的形状与长度。**只做形状**：id 存不存在、是不是群成员这类语义
+ * 服务端一概不知道（它不读 agents/groups 的内存状态），交给电脑端在执行时判，失败经 action-result 回来。
+ */
+function validateActionPayload(type: ActionType, payload: Record<string, unknown>): string | null {
+  const allowed = ACTION_PAYLOAD_KEYS[type];
+  for (const key of Object.keys(payload)) {
+    if (allowed.indexOf(key) < 0) return `payload.${key}`;
+  }
+  switch (type) {
+    case 'message.send': {
+      const text = payload.text;
+      if (typeof text !== 'string' || !text.trim() || text.length > ACTION_LIMITS.text) return 'text';
+      if (badOptionalId(payload.pmTargetId)) return 'pmTargetId';
+      if (badOptionalId(payload.replyToId)) return 'replyToId';
+      if (badOptionalBool(payload.parseCommands)) return 'parseCommands';
+      return null;
+    }
+    case 'session.switch':
+      return null;
+    case 'group.member.add':
+    case 'group.member.remove':
+    case 'agent.unmute':
+    case 'agent.trigger':
+      return badId(payload.agentId) ? 'agentId' : null;
+    case 'agent.mute': {
+      if (badId(payload.agentId)) return 'agentId';
+      const minutes = payload.durationMinutes;
+      if (
+        typeof minutes !== 'number' ||
+        !Number.isInteger(minutes) ||
+        minutes < 0 ||
+        minutes > ACTION_LIMITS.muteMaxMinutes
+      ) {
+        return 'durationMinutes';
+      }
+      return null;
+    }
+    case 'agent.update': {
+      if (badId(payload.agentId)) return 'agentId';
+      return validateAgentPatch(payload.patch);
+    }
+    case 'agent.create': {
+      if (badId(payload.providerId)) return 'providerId';
+      if (badId(payload.modelId)) return 'modelId';
+      if (badOptionalString(payload.name, ACTION_LIMITS.name)) return 'name';
+      if (badOptionalString(payload.systemPrompt, ACTION_LIMITS.systemPrompt)) return 'systemPrompt';
+      if (badOptionalBool(payload.joinActiveGroup)) return 'joinActiveGroup';
+      return null;
+    }
+    default:
+      return 'type';
+  }
+}
+
+/**
+ * 手机发起的动作。和 inbox / control 同一套形状：**只做转发**，不落盘、不改 presenceReport、
+ * 不读 agents/groups。服务端负责白名单 type、payload 形状与长度、作用域（当前会话）与限流；
+ * 语义（agent 存不存在、是不是群成员、模型合不合法）全在电脑端，失败经 action-result 回来。
+ */
+async function handleAction(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!isJsonRequest(req)) {
+    sendJson(res, 400, { error: 'expected content-type: application/json' });
+    return;
+  }
+  let raw: string;
+  try {
+    raw = await readBody(req, SMALL_BODY_BYTES);
+  } catch (err: any) {
+    sendJson(res, err?.statusCode === 413 ? 413 : 400, { error: err?.message || 'failed to read request body' });
+    return;
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: any) {
+    sendJson(res, 400, { error: `invalid JSON: ${err?.message || String(err)}` });
+    return;
+  }
+
+  // 校验顺序钉死，与 inbox / control 一致：400 -> 503 -> 409 -> 429 -> 202
+  if (!isPlainObject(parsed)) {
+    sendJson(res, 400, { error: 'bad-request', field: 'body' });
+    return;
+  }
+  const type = parsed.type as ActionType;
+  if (typeof type !== 'string' || (ACTION_TYPES as ReadonlyArray<string>).indexOf(type) < 0) {
+    sendJson(res, 400, { error: 'bad-request', field: 'type' });
+    return;
+  }
+  // payload 缺省当 {}：只有 session.switch 用得上，别的 type 下面的必填校验会自己报错
+  const payload = parsed.payload === undefined ? {} : parsed.payload;
+  if (!isPlainObject(payload)) {
+    sendJson(res, 400, { error: 'bad-request', field: 'payload' });
+    return;
+  }
+  const scoped = SESSION_SCOPED_ACTIONS.has(type);
+  const sessionId = typeof parsed.sessionId === 'string' ? parsed.sessionId : '';
+  if (scoped && (badId(sessionId) || !SESSION_ID_RE.test(sessionId))) {
+    sendJson(res, 400, { error: 'bad-request', field: 'sessionId' });
+    return;
+  }
+  const badField = validateActionPayload(type, payload);
+  if (badField) {
+    sendJson(res, 400, { error: 'bad-request', field: badField });
+    return;
+  }
+  if (countDesktop() === 0) {
+    sendJson(res, 503, { error: 'desktop-offline' });
+    return;
+  }
+  // session.switch 的 sessionId 是目标会话，不参与「必须是电脑当前会话」的比对
+  if (scoped && !SESSION_TARGET_ACTIONS.has(type) && sessionId !== presenceReport.activeSessionId) {
+    sendJson(res, 409, { error: 'not-active-session' });
+    return;
+  }
+  // 独立桶：连发几条消息不该把「让 TA 发言」一起堵死，也不该被 inbox / control 的配额牵连
+  const source = `action:${req.socket?.remoteAddress || 'unknown'}`;
+  if (!rateLimitOk(source, ACTION_MAX_PER_WINDOW, ACTION_RATE_WINDOW_MS)) {
+    sendJson(res, 429, { error: 'rate-limited' });
+    return;
+  }
+
+  const id = `act-${Date.now()}-${crypto.randomBytes(4).toString('base64url').slice(0, 6)}`;
+  const event: Record<string, unknown> = { id, type, payload, receivedAt: Date.now() };
+  if (scoped) event.sessionId = sessionId;
+  broadcast('action', event, (c) => c.isDesktop);
+  sendJson(res, 202, { id });
+}
+
+/**
+ * 电脑端回传动作执行结果（**只收 loopback**，见 isLoopbackOnlyLivePath）。
+ * 局域网角色能发这个的话就能伪造任意动作的「成功」，手机会以为改动生效了。
+ * 服务端不解释内容，校验形状后广播给非 desktop 的连接，手机按 id 认领。
+ */
+async function handleActionResult(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!isJsonRequest(req)) {
+    sendJson(res, 400, { error: 'expected content-type: application/json' });
+    return;
+  }
+  let raw: string;
+  try {
+    raw = await readBody(req, SMALL_BODY_BYTES);
+  } catch (err: any) {
+    sendJson(res, err?.statusCode === 413 ? 413 : 400, { error: err?.message || 'failed to read request body' });
+    return;
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: any) {
+    sendJson(res, 400, { error: `invalid JSON: ${err?.message || String(err)}` });
+    return;
+  }
+  if (!isPlainObject(parsed)) {
+    sendJson(res, 400, { error: 'bad-request', field: 'body' });
+    return;
+  }
+  if (badId(parsed.id)) {
+    sendJson(res, 400, { error: 'bad-request', field: 'id' });
+    return;
+  }
+  if (typeof parsed.ok !== 'boolean') {
+    sendJson(res, 400, { error: 'bad-request', field: 'ok' });
+    return;
+  }
+  if (badOptionalString(parsed.error, ACTION_ERROR_MAX)) {
+    sendJson(res, 400, { error: 'bad-request', field: 'error' });
+    return;
+  }
+  const out: Record<string, unknown> = { id: parsed.id, ok: parsed.ok };
+  if (typeof parsed.error === 'string' && parsed.error) out.error = parsed.error;
+  if (parsed.data !== undefined) {
+    const data = parsed.data;
+    if (!isPlainObject(data)) {
+      sendJson(res, 400, { error: 'bad-request', field: 'data' });
+      return;
+    }
+    const projected: Record<string, string> = {};
+    for (const key of Object.keys(data)) {
+      // 白名单：data 只放 id 类信息，绝不当成一条「什么都能塞」的旁路
+      if (ACTION_RESULT_DATA_KEYS.indexOf(key) < 0 || badId(data[key])) {
+        sendJson(res, 400, { error: 'bad-request', field: `data.${key}` });
+        return;
+      }
+      projected[key] = data[key] as string;
+    }
+    if (Object.keys(projected).length > 0) out.data = projected;
+  }
+  broadcast('action-result', out, (c) => !c.isDesktop);
+  sendJson(res, 202, { ok: true });
 }
 
 // --- lan-info ---
@@ -664,6 +980,20 @@ export function onSessionWritten(id: string, parsed: unknown): void {
   });
 }
 
+/** agents / groups / settings 三张表要广播 catalog；providers / meta 不广播（前者含 key，后者手机用不上）。 */
+const CATALOG_TABLES = ['agents', 'groups', 'settings'];
+
+/**
+ * 整表 PUT 落盘成功后调用（server/localdb.ts 的 handlePut）。
+ * 手机端的目录数据（成员、角色、供应商下拉）只在 bootstrap 时拉一次，没有这条事件
+ * 电脑端改了什么手机永远看不到。广播给**全部**客户端，手机端收到后防抖重拉 bootstrap。
+ * 事件里只有表名和时间戳，不带任何内容——内容要经 /api/view/bootstrap 的白名单投影才出门。
+ */
+export function onTableWritten(table: string): void {
+  if (CATALOG_TABLES.indexOf(table) < 0) return;
+  broadcast('catalog', { table, at: Date.now() });
+}
+
 /** 会话 DELETE 成功后调用。 */
 export function onSessionDeleted(id: string): void {
   const prev = sessionIndex?.get(id);
@@ -681,9 +1011,54 @@ export function onSessionDeleted(id: string): void {
 
 // --- /api/view/bootstrap ---
 
-/** 白名单投影：只挑渲染真正要用到的字段，systemPrompt / providerId / modelId 一律不出门。 */
+/** AgentConfig 里手机能看能改的那几项；visionProxy* / image* / effort 等不出门（挑字段，不是删字段）。 */
+function projectAgentConfig(c: any) {
+  if (!c || typeof c !== 'object') return undefined;
+  return {
+    temperature: typeof c.temperature === 'number' ? c.temperature : null,
+    topP: typeof c.topP === 'number' ? c.topP : null,
+    maxTokens: typeof c.maxTokens === 'number' ? c.maxTokens : undefined,
+    enableReasoning: !!c.enableReasoning,
+    reasoningBudget: typeof c.reasoningBudget === 'number' ? c.reasoningBudget : undefined,
+  };
+}
+
+/**
+ * 白名单投影。一期只出 id/name/avatar/role；PHONE_ACTIONS_PLAN §2.7 有意放宽——
+ * 手机要能编辑提示词与模型，新的边界是「凭据永不出机，提示词与配置可以」。
+ * 显式不出门：searchConfig（里面是搜索引擎的 apiKey）、voiceId / voiceProviderId、enableGoogleSearch。
+ * 写法是「挑字段」不是「删字段」：Agent 将来加字段时漏挑只会少显示，不会泄漏。
+ */
 function projectAgent(a: any) {
-  return { id: a?.id, name: a?.name, avatar: a?.avatar, role: a?.role };
+  return {
+    id: a?.id,
+    name: a?.name,
+    avatar: a?.avatar,
+    role: a?.role,
+    providerId: a?.providerId,
+    modelId: a?.modelId,
+    systemPrompt: typeof a?.systemPrompt === 'string' ? a.systemPrompt : '',
+    color: a?.color,
+    config: projectAgentConfig(a?.config),
+    mentionOnly: !!a?.mentionOnly,
+    enablePM: !!a?.enablePM,
+    commandMode: a?.commandMode === 'native' ? 'native' : 'text',
+    isActive: a?.isActive !== false,
+  };
+}
+
+/**
+ * 供应商投影：只出下拉框要用的三样 + 模型的 id/name。
+ * **不含** apiKey / baseUrl / vertexProject / openaiApiMode 等任何其它字段，价格也不出。
+ * 这是 providers.json 唯一一条通向 /api/view 的路径，读完立刻投影，原对象不进任何缓存。
+ */
+function projectProvider(p: any) {
+  return {
+    id: p?.id,
+    name: p?.name,
+    type: p?.type,
+    models: Array.isArray(p?.models) ? p.models.map((m: any) => ({ id: m?.id, name: m?.name })) : [],
+  };
 }
 
 function projectGroup(g: any) {
@@ -692,6 +1067,8 @@ function projectGroup(g: any) {
     name: g?.name,
     memberIds: Array.isArray(g?.memberIds) ? g.memberIds : [],
     adminIds: Array.isArray(g?.adminIds) ? g.adminIds : [],
+    mentionOnlyIds: Array.isArray(g?.mentionOnlyIds) ? g.mentionOnlyIds : [],
+    scenario: typeof g?.scenario === 'string' ? g.scenario : '',
   };
 }
 
@@ -711,12 +1088,13 @@ function projectSettings(s: any) {
 
 async function handleBootstrap(res: ServerResponse): Promise<void> {
   const dir = getDataDir();
-  const [agentsR, groupsR, settingsR] = await Promise.all([
+  const [agentsR, groupsR, settingsR, providersR] = await Promise.all([
     readJson(path.join(dir, 'agents.json')),
     readJson(path.join(dir, 'groups.json')),
     readJson(path.join(dir, 'settings.json')),
+    readJson(path.join(dir, 'providers.json')),
   ]);
-  for (const r of [agentsR, groupsR, settingsR]) {
+  for (const r of [agentsR, groupsR, settingsR, providersR]) {
     if (r.status === 'error') {
       sendJson(res, 500, { error: r.error });
       return;
@@ -734,11 +1112,18 @@ async function handleBootstrap(res: ServerResponse): Promise<void> {
   const agentsRaw = agentsR.status === 'ok' && Array.isArray(agentsR.value) ? (agentsR.value as any[]) : [];
   const groupsRaw = groupsR.status === 'ok' && Array.isArray(groupsR.value) ? (groupsR.value as any[]) : [];
   const settingsRaw = settingsR.status === 'ok' ? settingsR.value : null;
+  // providers.json 里是明文 API key。这一行读进来的原始对象只在下一行被 projectProvider
+  // 挑成 id/name/type/models 就丢掉，不赋给任何模块级变量、不进缓存。
+  const providers =
+    providersR.status === 'ok' && Array.isArray(providersR.value)
+      ? (providersR.value as any[]).map(projectProvider)
+      : [];
 
   const sessions = Array.from(index.values()).sort((a, b) => b.lastUpdated - a.lastUpdated);
 
   sendJson(res, 200, {
     agents: agentsRaw.map(projectAgent),
+    providers,
     groups: groupsRaw.map(projectGroup),
     sessions,
     settings: projectSettings(settingsRaw),
@@ -838,6 +1223,8 @@ async function handleViewSession(res: ServerResponse, id: string, url: URL, role
     lastUpdated: session.lastUpdated ?? 0,
     total,
     from,
+    // 手机的成员面板要显示「禁言中 / 还剩多久」，这是唯一的来源（禁言是会话级的，不在 bootstrap 里）
+    mutedAgents: Array.isArray(session.mutedAgents) ? session.mutedAgents : [],
     messages: session.messages.slice(from, to).map((m) => toViewMessage(id, m, tokenQuery)),
   });
 }
@@ -903,7 +1290,12 @@ async function handleAttachment(
 
 /** 这些路径只给 loopback（电脑端本机页面）。其余 live/view 路径 loopback 与 lan 都可以。 */
 export function isLoopbackOnlyLivePath(pathname: string): boolean {
-  return pathname === '/api/live/lan-info' || pathname === '/api/live/presence';
+  return (
+    pathname === '/api/live/lan-info' ||
+    pathname === '/api/live/presence' ||
+    // action-result 是电脑端自己的回传通道：局域网角色能发它就能伪造任意动作的「执行成功」
+    pathname === '/api/live/action-result'
+  );
 }
 
 /** 本模块是否认领这个路径。 */
@@ -966,6 +1358,24 @@ export async function handleLiveRequest(
       return;
     }
     await handleControl(req, res);
+    return;
+  }
+
+  if (pathname === '/api/live/action') {
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: `method ${method} not allowed on ${pathname}` });
+      return;
+    }
+    await handleAction(req, res);
+    return;
+  }
+
+  if (pathname === '/api/live/action-result') {
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: `method ${method} not allowed on ${pathname}` });
+      return;
+    }
+    await handleActionResult(req, res);
     return;
   }
 

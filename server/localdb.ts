@@ -42,6 +42,7 @@ import {
   isLoopbackOnlyLivePath,
   onSessionDeleted,
   onSessionWritten,
+  onTableWritten,
   setServerBindAddress,
   setServerPort,
 } from './live';
@@ -147,12 +148,17 @@ function createMiddleware(): Middleware {
    * `sessionId` 非空 = 这是一次会话写入，落盘成功后要通知 live 模块
    * （刷新会话索引/缓存 + 向所有 SSE 连接广播 `session` 事件）。
    * parsed 对象顺手交出去，省掉为了广播再 parse 一遍几十 MB 的开销。
+   *
+   * `table` 非空 = 这是一次整表写入，落盘成功后广播 `catalog`（只有 agents/groups/settings
+   * 会真的播出去，见 live.ts 的 onTableWritten）。手机端据此重拉 bootstrap，否则电脑端改了
+   * 成员/提示词/供应商，手机要等下次打开页面才知道。
    */
   async function handlePut(
     req: IncomingMessage,
     res: ServerResponse,
     filePath: string,
-    sessionId?: string
+    sessionId?: string,
+    table?: TableName
   ): Promise<void> {
     let raw: string;
     try {
@@ -182,6 +188,14 @@ function createMiddleware(): Middleware {
         onSessionWritten(sessionId, parsed);
       } catch (err: any) {
         console.warn(`[aco-live] 广播 session 事件失败：${err?.message || String(err)}`);
+      }
+    }
+    if (table) {
+      // 同上：磁盘已经是新的了，广播失败不该把这次写报成失败
+      try {
+        onTableWritten(table);
+      } catch (err: any) {
+        console.warn(`[aco-live] 广播 catalog 事件失败：${err?.message || String(err)}`);
       }
     }
     sendJson(res, 200, { ok: true });
@@ -266,7 +280,7 @@ function createMiddleware(): Middleware {
           sendJson(res, 405, { error: `method ${method} not allowed on /api/db/${rest}` });
           return;
         }
-        await handlePut(req, res, filePathFor(rest as TableName));
+        await handlePut(req, res, filePathFor(rest as TableName), undefined, rest as TableName);
         return;
       }
 

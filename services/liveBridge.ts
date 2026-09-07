@@ -12,6 +12,9 @@
 // 任何网络失败都只 console.warn，绝不往上抛——服务端没升级 / 没开局域网时
 // 这些接口全是 404，主界面必须照常能用。
 import { useEffect, useRef } from 'react';
+import { ACTION_TYPES, type ActionEvent, type ActionResult, type ActionType } from '../server/actionContract';
+
+export type { ActionEvent, ActionResult, ActionType };
 
 /** POST /api/live/presence 的 body（契约见 PHONE_VIEWER_PLAN §3.2） */
 export interface PresenceReport {
@@ -41,6 +44,25 @@ export interface ControlEvent {
   receivedAt: number;
 }
 
+const ACTION_RESULT_URL = '/api/live/action-result';
+
+/**
+ * 回传一次动作执行结果。**永不抛**：服务端没升级 / 断网时只 warn，
+ * 手机那头会在 8s 超时后自己显示失败，比让 App 的分发表炸掉强。
+ */
+export async function postActionResult(result: ActionResult): Promise<void> {
+  try {
+    const res = await fetch(ACTION_RESULT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(result),
+    });
+    if (!res.ok) console.warn('[live] action-result 被拒绝', res.status, result.id);
+  } catch (err) {
+    console.warn('[live] action-result 回传失败', err);
+  }
+}
+
 export interface UseLiveBridgeOptions {
   /** 只有本地文件存储模式才有服务端可言；legacy(IndexedDB) 下整个桥不启动 */
   enabled: boolean;
@@ -50,6 +72,11 @@ export interface UseLiveBridgeOptions {
   onInbox: (msg: InboxEvent) => void;
   /** 收到手机遥控指令时回调（同样走 ref，不怕旧闭包） */
   onControl?: (cmd: ControlEvent) => void;
+  /**
+   * 收到手机远程动作时回调（同样走 ref）。回调**必须自己**用 postActionResult 回一次结果，
+   * 成功失败都要回——手机那头在等，不回就只能等 8s 超时。
+   */
+  onAction?: (evt: ActionEvent) => void;
 }
 
 const EVENTS_URL = '/api/live/events?role=desktop';
@@ -67,10 +94,11 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 const reportKey = (r: PresenceReport): string =>
   JSON.stringify([r.activeGroupId, r.activeSessionId, r.isAutoPlay, [...r.processingAgentIds].sort()]);
 
-export function useLiveBridge({ enabled, report, onInbox, onControl }: UseLiveBridgeOptions): void {
+export function useLiveBridge({ enabled, report, onInbox, onControl, onAction }: UseLiveBridgeOptions): void {
   const reportRef = useRef(report);
   const onInboxRef = useRef(onInbox);
   const onControlRef = useRef(onControl);
+  const onActionRef = useRef(onAction);
   // 已经上报过的指纹：SSE open 时会立刻发一次，防抖 effect 拿它去重
   const sentKeyRef = useRef<string | null>(null);
   // 各类 warn 上次打印的时间戳，用于节流
@@ -79,6 +107,7 @@ export function useLiveBridge({ enabled, report, onInbox, onControl }: UseLiveBr
   reportRef.current = report;
   onInboxRef.current = onInbox;
   onControlRef.current = onControl;
+  onActionRef.current = onAction;
 
   // 节流版 console.warn：同一个 tag 30s 内只出一次
   const warn = useRef((tag: string, ...args: unknown[]) => {
@@ -173,6 +202,37 @@ export function useLiveBridge({ enabled, report, onInbox, onControl }: UseLiveBr
           });
         } catch (err) {
           warn('control 事件解析失败', err);
+        }
+      }) as EventListener);
+
+      es.addEventListener('action', ((ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data) as Partial<ActionEvent>;
+          // 逐字段校验：SSE 那头是服务端，但解析出来的仍然是一段外来 JSON，
+          // 形状不对就丢掉，绝不让它带着 undefined 走进 App 的分发表。
+          if (
+            !data ||
+            typeof data.id !== 'string' ||
+            !data.id ||
+            typeof data.type !== 'string' ||
+            (ACTION_TYPES as ReadonlyArray<string>).indexOf(data.type) < 0 ||
+            !data.payload ||
+            typeof data.payload !== 'object' ||
+            Array.isArray(data.payload) ||
+            (data.sessionId !== undefined && typeof data.sessionId !== 'string')
+          ) {
+            warn('action 事件字段不完整，已忽略', ev.data);
+            return;
+          }
+          onActionRef.current?.({
+            id: data.id,
+            type: data.type as ActionType,
+            sessionId: data.sessionId,
+            payload: data.payload as ActionEvent['payload'],
+            receivedAt: typeof data.receivedAt === 'number' ? data.receivedAt : Date.now(),
+          });
+        } catch (err) {
+          warn('action 事件解析失败', err);
         }
       }) as EventListener);
 

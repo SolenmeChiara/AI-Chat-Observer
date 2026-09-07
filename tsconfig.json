@@ -25,6 +25,13 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  // 只 include src，其余（App.tsx / components / services / server/actionContract.ts）
+  // 按 import 关系自动进编译单元。
+  //
+  // 这里**故意没有** `references: [{ path: "./tsconfig.node.json" }]`：加上它以后，
+  // 前端 import `server/actionContract.ts`（手机远程动作通道的三方共用契约）会被 TS 当成
+  // 「引用工程的产物」去找 actionContract.d.ts，报 TS6305（该 .d.ts 从未构建过，
+  // tsconfig.node.json 只用来 --noEmit 检查）。项目里没有任何地方跑 `tsc --build`，
+  // references 只剩这一个副作用，所以摘掉。服务端仍由 `tsc --noEmit -p tsconfig.node.json` 单独检查。
+  "include": ["src"]
 }
