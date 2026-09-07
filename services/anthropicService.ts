@@ -52,7 +52,14 @@ export async function* streamAnthropicReply(
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /**
+   * Optional per-turn hint appended to the tail [END OF LOG] turn (quote-followup leg —
+   * see buildQuoteFollowupHint). Deliberately NOT part of `stable`/`memory`: those are the
+   * cached prefix. The tools array is likewise left untouched between the two legs, so the
+   * prefix (tools → system → history) still matches and only the tail turn differs.
+   */
+  followupHint?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -231,7 +238,8 @@ export async function* streamAnthropicReply(
   // Anthropic's cache prefix order is tools → system → messages, so a system block that
   // changes every second invalidated breakpoint #2 above on every single call. Here it
   // sits after the breakpoint, where changing every turn costs nothing.
-  const endOfLogText = buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode);
+  const perTurnWithHint = followupHint ? `${systemParts.perTurn}\n${followupHint}` : systemParts.perTurn;
+  const endOfLogText = buildEndOfLogPrompt(perTurnWithHint, agent.name, commandMode);
   const endOfLogBlock = { type: "text", text: endOfLogText };
   if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === 'user') {
     const lastMsg = formattedMessages[formattedMessages.length - 1];

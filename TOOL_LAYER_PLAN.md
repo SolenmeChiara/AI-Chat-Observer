@@ -52,6 +52,17 @@ PASS 不工具化的理由(Sol 拍板,2026-07-10):工具的价值在结构化参
 **决策三:SEARCH 复用现有搜索事务,不做请求内 loop(Phase 3 再议)。**
 原生轨模型调用 `search` 工具后,本回合正常结束,搜索结果照旧作为系统消息落地,由现有 searchTxnRef 事务(App.tsx:144, 1968-2060, 2489-2517)驱动二次触发。**不存在 tool_use/tool_result 配对问题**:本项目每次请求的历史是从群聊记录重新文本化拼装的(filterVisibleMessages → 群聊 log),上一回合的 tool_use block 根本不会以 API 原生形态进入下一次请求,所以无需回传 tool_result。请求内多轮 loop(同回合拿到结果继续说)留作 Phase 3 增强。
 
+> **2026-09-06 修订:N1 在 Anthropic 上兑现,quote-only 回合改走「引用续写腿」。**
+>
+> 9573931 提交信息里预告的 N1 风险(「模型把 `reply` 当成先调用、等 tool_result 再说话的普通工具」)当天在 Sol 的真实群聊上炸了——预计出在 OpenAI 系,结果先炸在 Anthropic:`Claude Fable 5.1` 连续三次只发一个 `reply` 的 tool_use 块就 `stop_reason=tool_use` 停住,正文为空(控制台 `Stream completed (2 chunks, 0 chars)`),被当成格式错误记 PASS;两人群里另一位是 lastSpeaker,于是 `[AutoPlay] No eligible agents!` 群聊哑火。
+>
+> 根因正是决策三这条「不回传 tool_result」——模型等的那个 result 永远不会来。两处修复:
+> - **教学侧(常态路径)**:`reply` 的工具描述改成明确的顺序指令(先写正文、再在同一个 response 里调工具;工具无返回值、不结束回合)。见 capabilities.ts 头部注释与 `reply` 的 description。
+> - **兜底侧(净)**:quote-only 回合(原生轨 + 正文为空 + 无 `{{PASS}}` + 无其它有副作用工具 + 已有引用 + 本次不是续写腿)不再记 PASS,而是删掉占位气泡、登记一次 `kind:'quote'` 事务,由**搜索事务同一条流水线**(同一个 ref / 同一个 autoplay 闸门 / 同一个消费者 effect)让同一个 agent 立刻再发一次请求,带上 `[QUOTE ATTACHED]` per-turn 提示,引用继承到第二腿产出的消息上。第二腿仍然空正文就走原来的 PASS,**绝不第三腿**。
+> - 两腿的 `tools` 数组与 system 块逐字节一致(提示只进 perTurn 层,随 `[END OF LOG]` 尾轮走),所以第二腿仍然吃满缓存前缀。
+>
+> Phase 3 的「请求内 tool loop」依然没做——这次是把回合拆成两次请求,不是在一次请求里回传 tool_result。真要根治(尤其是 `search` 也想同回合拿结果继续说)还得走 Phase 3。
+
 ### 2.2 能力注册表(新文件 `services/capabilities.ts`)
 
 ```ts

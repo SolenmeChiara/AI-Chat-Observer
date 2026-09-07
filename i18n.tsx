@@ -405,6 +405,7 @@ const en: Record<string, string> = {
   '局域网': 'Local network',
   '推荐用 Tailscale：只有你自己的设备能连上，且全程加密；局域网 IP 是退路，别在公共 WiFi 用': 'Tailscale is recommended: only your own devices can connect, and traffic is encrypted end to end. The LAN IP is a fallback — never use it on public Wi-Fi.',
   '想换一把钥匙：删掉 data/lan-token.txt 再重启。': 'To rotate the key: delete data/lan-token.txt and restart.',
+  '引用续写': 'quote follow-up',
 };
 
 let currentLocale: Locale = 'zh';

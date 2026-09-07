@@ -29,6 +29,18 @@ import type { ProtocolStrings } from './shared';
  * untouched. The failure mode is strictly better, so the id-carrying half of REPLY
  * is now a tool. The text marker and the lenient [Replying to] recovery both stay
  * (native models still write the marker occasionally) — see App.tsx's bridge.
+ *
+ * 2026-09-06 — the failure mode that WAS underestimated: `reply` is the one tool here
+ * with no result to return, but a model has no way to know that from the schema alone.
+ * Claude (Anthropic, native track) read it as an ordinary tool, emitted the tool_use
+ * block, stopped at stop_reason=tool_use and waited for a tool_result that this app —
+ * which rebuilds every request from the chat log and never replays tool results — will
+ * never send. Result: an empty turn, three times in a row, then a dead group chat.
+ * Two mitigations, both here-adjacent: (a) the description below now leads with the
+ * ordering ("write the text FIRST, then call") and states outright that the tool
+ * returns nothing and does not end the turn; (b) App.tsx no longer burns such a turn
+ * as a PASS — it re-asks the same agent once with the quote carried forward (the quote
+ * transaction, mirroring the search transaction). (a) is the common path, (b) the net.
  */
 
 /**
@@ -236,7 +248,15 @@ export const CAPABILITIES: CapabilityDef[] = [
     // "priority to speak next" is the real mechanism, not flattery: App.tsx's REPLY
     // PRIORITY block picks the quoted message's sender as the next speaker when it is
     // eligible. Stating it gives the model a reason to reach for the tool.
-    description: 'Quote a specific earlier message so your reply is visibly attached to it. message_id is the exact id string from that message\'s [ID: ...] label at the START of its line in the chat log — copy it verbatim. Call this alongside your reply text: the tool only attaches the quote, it does not speak for you, and a quote with no text is discarded. The member whose message you quote is given priority to speak next.',
+    //
+    // COST OF EDITING THIS STRING (review, 2026-09-07): the tools array is the HEAD of
+    // every provider's cache prefix (Anthropic: tools → system → messages; OpenAI/Gemini
+    // automatic prefix caching starts at the same place). Changing one character here
+    // invalidates the whole prefix, so the first turn of every native agent on every
+    // provider after a deploy pays a full uncached prefill. That is a one-off, and it is
+    // the reason the quote-followup leg does NOT strip tools between its two legs — but
+    // it means this string is not a place for casual wording tweaks.
+    description: 'Quote a specific earlier message so your reply is visibly attached to it. message_id is the exact id string from that message\'s [ID: ...] label at the START of its line in the chat log — copy it verbatim. Write your message text first, then call this tool in the same response — it returns nothing and does not end your turn, so do not wait for a result. The tool only attaches the quote; a call with no message text posts nothing. The member whose message you quote is given priority to speak next.',
     paramsSchema: {
       type: 'object',
       properties: {

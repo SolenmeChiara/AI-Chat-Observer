@@ -246,6 +246,32 @@ export function buildEndOfLogPrompt(
 }
 
 /**
+ * Per-turn hint for the SECOND leg of a quote-only turn (App.tsx's quote transaction).
+ *
+ * Background: a native-track model that treats `reply` as a "call it, wait for the
+ * tool_result, then speak" tool emits a tool_use block and stops — stop_reason=tool_use,
+ * zero prose. This app rebuilds every request from the chat log and never returns a
+ * tool_result, so that result never comes and the turn dies empty. Instead of burning
+ * the turn as a PASS, App.tsx removes the placeholder and re-asks the SAME agent once,
+ * carrying the quote forward and appending this hint.
+ *
+ * MUST be appended to the perTurn tier only (it rides the tail [END OF LOG] user turn).
+ * Putting it in `stable`/`memory` would change the cached prefix and cost a full cache
+ * miss on every provider — see SystemPromptParts.
+ *
+ * WORDING CONSTRAINT (review, 2026-09-07): the id is written bare, NOT wrapped in an
+ * `[ID: ...]` label. [OUTPUT FORMAT] bans reproducing the log header "or any part of it",
+ * and this hint is the LAST thing before the trigger sentence — demonstrating the banned
+ * shape right there is the surest way to get it echoed into the prose (the whole
+ * takeImitatedReplyPreview recovery path exists because models already copy that header).
+ * The closing clause re-states the ban instead of showing it.
+ */
+export function buildQuoteFollowupHint(messageId: string): string {
+  return `[QUOTE ATTACHED]
+Your previous attempt this turn called \`reply\` to quote the message with id ${messageId}, but contained no text, so nothing was posted. That quote is already attached to the message you write now. Write the message body itself; do not call \`reply\` again, and do not write that id or any log header into your text.`;
+}
+
+/**
  * Assemble the full system prompt as one string (stable + memory + perTurn).
  *
  * LEGACY — currently unused by the chat path and kept only for compatibility with any

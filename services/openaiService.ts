@@ -87,7 +87,13 @@ export async function* streamOpenAIReply(
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /**
+   * Optional per-turn hint appended to the tail [END OF LOG] turn (quote-followup leg —
+   * see buildQuoteFollowupHint). Never enters the cacheable system message, and the tools
+   * array is identical between the two legs so prefix caching still matches.
+   */
+  followupHint?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -171,7 +177,10 @@ export async function* streamOpenAIReply(
 
        return { role: 'user', content: textContent };
     }),
-    { role: 'user', content: buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode) }
+    { role: 'user', content: buildEndOfLogPrompt(
+      followupHint ? `${systemParts.perTurn}\n${followupHint}` : systemParts.perTurn,
+      agent.name, commandMode
+    ) }
   ];
 
   // Native track: assemble Chat Completions tool schemas once (omitted when empty).
@@ -489,7 +498,9 @@ export async function* streamOpenAIResponsesReply(
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** Per-turn quote-followup hint; rides the tail input item only (see buildQuoteFollowupHint). */
+  followupHint?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -556,7 +567,10 @@ export async function* streamOpenAIResponsesReply(
 
   inputItems.push({
     role: 'user',
-    content: buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode)
+    content: buildEndOfLogPrompt(
+      followupHint ? `${systemParts.perTurn}\n${followupHint}` : systemParts.perTurn,
+      agent.name, commandMode
+    )
   });
 
   // Native track: Responses function tools (top-level `{type:'function', name, ...}` shape),

@@ -20,6 +20,7 @@ import { performSearch, formatSearchResultsForContext, formatSearchResultsForDis
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
+import { buildQuoteFollowupHint } from './services/shared';
 import { useLiveBridge, type PresenceReport, type InboxEvent, type ControlEvent } from './services/liveBridge';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
@@ -236,7 +237,25 @@ const App: React.FC = () => {
   // 最新渲染的闭包触发发起者（这样它才能看到搜索结果——旧的 setTimeout 方案读的是
   // 触发时的旧消息快照，搜索结果永远不在里面）。失败路径直接置 null，轮转恢复。
   // 每次状态变更都伴随一条消息写入，所以依赖 messages 的 effect 必然会被唤醒。
-  const searchTxnRef = useRef<{ status: 'searching' | 'followup'; agentId: string; sessionId: string; query: string } | null>(null);
+  //
+  // 2026-09-06：同一条轨道上多了第二种事务 kind='quote'（引用续写腿）。原生工具轨的
+  // 模型（实测 Claude）会把 `reply` 当成「先调用、等 tool_result 再说话」的普通工具：
+  // 发出 tool_use 就 stop_reason=tool_use 停住，正文为空。本仓库每次请求都从聊天记录
+  // 重新拼装、从不回传 tool_result，那个 result 永远不会来 → 回合空转。这种回合不再
+  // 记 PASS，而是删掉占位气泡、登记一次 quote 事务，由同一个消费者 effect 让同一个
+  // agent 立刻再发一次请求（带 [QUOTE ATTACHED] per-turn 提示、引用继承下去）。
+  // 复用搜索事务这套三件套的理由：autoplay 闸门、切会话挂起/恢复、清空消息时的清理
+  // 全部现成，语义对 quote 事务同样成立。quote 事务只有 'followup' 一种状态（没有
+  // 「请求进行中」阶段——第一腿结束的那一刻就直接进 followup）。
+  const searchTxnRef = useRef<{
+    kind?: 'search' | 'quote';        // 缺省（旧写法）= 'search'
+    status: 'searching' | 'followup';
+    agentId: string;
+    sessionId: string;
+    query?: string;                   // search 事务专用
+    quoteReplyToId?: string;          // quote 事务专用：第二腿要带上的引用目标
+    disableSearch?: boolean;          // quote 事务专用：第二腿沿用第一腿的 disableSearch
+  } | null>(null);
 
   // Track last message count when summary was triggered (per session)
   const lastSummaryCountRef = useRef<Map<string, number>>(new Map());
@@ -541,7 +560,8 @@ const App: React.FC = () => {
     if (activeSessionId === id) {
       setActiveSessionId(newSessions[0].id);
     }
-    // A search transaction bound to a deleted session can never be consumed — drop it
+    // A transaction (search or quote follow-up) bound to a deleted session can never be
+    // consumed — drop it, or the gate would pause a session that no longer exists.
     if (searchTxnRef.current?.sessionId === id) {
       searchTxnRef.current = null;
     }
@@ -612,7 +632,8 @@ const App: React.FC = () => {
     mentionPairRef.current = null; // Reset mention pair decay
     debateTurnIndexRef.current = 0; // Reset debate turn index
     // The search results (and the "searching" notice) were just wiped — a follow-up
-    // would reply to nothing, and a dangling 'searching' txn would pause the chat forever
+    // would reply to nothing, and a dangling 'searching' txn would pause the chat forever.
+    // Same for a quote follow-up: its quote target is gone with the rest of the messages.
     if (searchTxnRef.current?.sessionId === activeSessionId) {
       searchTxnRef.current = null;
     }
@@ -1199,7 +1220,11 @@ const App: React.FC = () => {
 
 
   // --- CORE LOGIC ---
-  const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false, retryCount: number = 0) => {
+  // opts.quoteReplyToId：这一腿是「引用续写腿」（quote 事务的第二腿，见 searchTxnRef 注释）。
+  // 它同时是三件事：① 预置 detectedReplyId，产出的消息一定带上这条引用；② 让四个 adapter
+  // 在 per-turn 层收到 [QUOTE ATTACHED] 提示；③ 作为「本次不是续写腿」的否定条件，保证
+  // 第二腿再空也只走 PASS，绝不出现第三腿。
+  const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false, retryCount: number = 0, opts?: { quoteReplyToId?: string }) => {
     const agent = agents.find(a => a.id === agentId);
     const agentName = agent?.name || agentId;
 
@@ -1312,8 +1337,9 @@ const App: React.FC = () => {
             console.log(`[${agent.name}] Timeout on first attempt, retrying...`);
             // Remove the failed placeholder
             updateThisSession(s => ({ ...s, messages: s.messages.filter(m => m.id !== newMessageId) }));
-            // Retry with retryCount = 1
-            triggerAgentReply(agentId, disableSearch, 1);
+            // Retry with retryCount = 1. opts is forwarded: a timed-out quote-followup leg
+            // retries as a quote-followup leg (same quote, same hint, still not a first leg).
+            triggerAgentReply(agentId, disableSearch, 1, opts);
         } else {
             // Already retried, give up. Read the partial output from live state
             // (not a stale closure) and finalize message + recovery notice atomically.
@@ -1600,6 +1626,10 @@ const App: React.FC = () => {
         return;
       }
 
+      // 引用续写腿的 per-turn 提示（只进 perTurn 层，不碰 stable/memory，也不动 tools 数组
+      // ——两腿的缓存前缀必须逐字节一致，否则 Anthropic 侧整段前缀 miss）。
+      const followupHint = opts?.quoteReplyToId ? buildQuoteFollowupHint(opts.quoteReplyToId) : undefined;
+
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(
           agent, agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
@@ -1612,7 +1642,7 @@ const App: React.FC = () => {
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
           agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal
+          abortController.signal, followupHint
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
@@ -1620,7 +1650,7 @@ const App: React.FC = () => {
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal
+          abortController.signal, followupHint
         );
       } else if (provider.openaiApiMode === 'responses') {
         console.log(`[${agent.name}] 📡 Using OpenAI Responses API`);
@@ -1628,7 +1658,7 @@ const App: React.FC = () => {
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal
+          abortController.signal, followupHint
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
@@ -1636,7 +1666,7 @@ const App: React.FC = () => {
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal
+          abortController.signal, followupHint
         );
       }
 
@@ -1649,7 +1679,9 @@ const App: React.FC = () => {
       // {{RESPONSE:}} wrapper) and invokes tools natively; text-track parsing is bypassed.
       // Explicit commandMode 'text' opts into the legacy protocol.
       const isNativeCommandMode = getCommandMode(agent) === 'native';
-      let detectedReplyId: string | undefined = undefined;
+      // 引用续写腿：引用在第一腿就定下了，这里预置——本腿产出的消息一定挂上它。
+      // 模型若又调一次 reply，会撞上桥接层「二次 reply 调用 warn 忽略」的分支，无副作用。
+      let detectedReplyId: string | undefined = opts?.quoteReplyToId;
       let chunkCount = 0;
       let splitCount = 0;
       let currentSplitId = newMessageId;
@@ -1713,6 +1745,11 @@ const App: React.FC = () => {
           for (const call of chunk.toolCalls) {
             const cap = call.capability;
             const args = call.args || {};
+            // One unconditional line per native tool call, before any branch. Without it a
+            // successful `reply` call was invisible in the console (its branch logs nothing on
+            // the happy path) — which is exactly why the 2026-09-06 quote-only incident looked
+            // like "the model returned nothing" instead of "the model called reply and stopped".
+            console.log(`[${agent.name}] 🔧 Native tool call: ${cap}`, args);
             // Every tool but `reply` carries a side effect that only the speak branch runs
             // (search transaction, PM delivery, dice/tarot markers) or an effect already
             // executed before the branch (admin/self-mute) whose turn is expected to speak.
@@ -2246,17 +2283,21 @@ const App: React.FC = () => {
 
       // Decide PASS vs speak, and whether an empty result is a format error.
       let isFormatError: boolean;
+      // Quote-only turn (native track): the model called `reply` and wrote nothing. Not a PASS —
+      // the same agent is re-asked once with the quote carried forward. Decided below, acted on
+      // right after (before the isPass branch), because the action is "neither PASS nor speak".
+      let isQuoteOnlyTurn = false;
       if (isNativeCommandMode) {
         // Native: strip the same instruction markers the finalText cleanup removes (below),
         // then a turn is a format error ONLY when nothing remains AND there is no {{PASS}}
         // AND no effectful native tool call. A tool-only turn (e.g. search with no prose) must
         // NOT be forced to PASS, or the search transaction in the speak branch would never run.
         // The one exception is a quote-only turn: `reply` does not set receivedNativeToolCall,
-        // so "called reply, said nothing" lands here as a format error → PASS → the placeholder
-        // is removed. Without that, the speak branch would store an empty message carrying only
-        // a replyToId — a quote bubble with no words. It also keeps the REPLY PRIORITY handoff
-        // honest: that logic reads the LAST STORED message's replyToId, so a turn that stores
-        // nothing cannot hand the next slot to the quoted member.
+        // so "called reply, said nothing" lands here as a format error. It used to become a
+        // plain PASS; since 2026-09-06 it first gets one quote-followup leg (see below), and
+        // only a SECOND empty leg falls through to PASS. Storing the empty body was never an
+        // option: the speak branch would leave a quote bubble with no words, and the REPLY
+        // PRIORITY handoff reads the LAST STORED message's replyToId.
         const nativeCleanedBody = extractedContent
           .replace(/^\{\{REPLY:\s*([^\s}]+)\s*(?:\}\})?/, '')
           .replace(/\{\{MUTE:\s*(.+?)\}\}/, '')
@@ -2270,7 +2311,16 @@ const App: React.FC = () => {
           .replace(/\{\{SILENCE(?::\s*\d+(?:min|h|d|m))?\}\}/gi, '')
           .trim();
         isFormatError = !nativeCleanedBody && !isPass && !receivedNativeToolCall;
-        if (isFormatError) isPass = true;
+        // Quote-only = that same empty turn, but a quote WAS produced (by the `reply` tool or by
+        // the {{REPLY:}} / [Replying to] text paths — the source doesn't matter, detectedReplyId
+        // is the single variable all three feed). Two extra guards:
+        //   - !opts?.quoteReplyToId: this must not already be the followup leg. A second empty
+        //     leg falls through to PASS — there is never a third.
+        //   - !searchTxnRef.current: never clobber a live search transaction (in practice
+        //     impossible — the autoplay gate + the followup effect both clear it before this
+        //     agent could be triggered — but overwriting it would hang the rotation forever).
+        isQuoteOnlyTurn = isFormatError && !!detectedReplyId && !opts?.quoteReplyToId && !searchTxnRef.current;
+        if (isFormatError && !isQuoteOnlyTurn) isPass = true;
         // When a tool call arrived with empty text, isPass stays false → speak branch →
         // empty bubble + the search transaction runs (the followup effect re-triggers the reply).
       } else {
@@ -2280,6 +2330,36 @@ const App: React.FC = () => {
         if (!extractedContent || isPass) {
           isPass = true;
         }
+      }
+
+      // QUOTE-ONLY TURN → 引用续写腿。既不 PASS 也不落库：删掉占位气泡，登记一次 quote
+      // 事务，交给搜索事务同一个消费者 effect（它用「续写腿登记后重新渲染出来的」
+      // triggerAgentReply 实例，闭包里才有最新消息）。
+      // 关键副作用差分（相对旧的 PASS 路径）：
+      //   - 不写 yieldedAgentIds —— 这个 agent 没有让出发言权，只是话说了一半；
+      //   - 计 cost —— 与 PASS 分支不同（审查阶段补）：空回合也是一次完整 prefill，
+      //     一个 quote-only 回合会把同一段前缀发两遍，账不记就是白花钱看不见；
+      //   - autoplay 由事务闸门挡住：删占位气泡会让 messages 变化触发一次
+      //     autoplay effect，闸门在所有触发路径之前，所以没人能插话；
+      //   - finally 照常释放锁（return 不跳过 finally），消费者 effect 随后放行。
+      if (isQuoteOnlyTurn) {
+        console.log(`[QuoteTxn] Quote-only turn, re-asking ${agentId} for the message body (quote → ${detectedReplyId})`);
+        // 第一腿的 token 照常入账：它是一次完整请求（prefill 全额、输出只有一个 tool_use
+        // 块），跳过它会让「一回合两次请求」的真实成本在总花费里凭空消失。
+        setTotalCost(prev => prev + calculateCost(accumulatedUsage, provider, agent.modelId));
+        updateThisSession(s => ({
+          ...s,
+          messages: s.messages.filter(m => m.id !== newMessageId),
+        }));
+        searchTxnRef.current = {
+          kind: 'quote',
+          status: 'followup',
+          agentId,
+          sessionId: capturedSessionId,
+          quoteReplyToId: detectedReplyId,
+          disableSearch,
+        };
+        return;
       }
 
       if (isPass) {
@@ -2419,7 +2499,7 @@ const App: React.FC = () => {
               messages: [...s.messages, {
                 id: `search-busy-${Date.now()}`,
                 senderId: 'SYSTEM',
-                text: `[${t('系统提示')}] ${t('已有一个搜索正在进行中')}（${searchTxnRef.current?.query}），${agent.name} ${t('的搜索请求被忽略')}: "${detectedSearchQuery}"`,
+                text: `[${t('系统提示')}] ${t('已有一个搜索正在进行中')}（${searchTxnRef.current?.query || t('引用续写')}），${agent.name} ${t('的搜索请求被忽略')}: "${detectedSearchQuery}"`,
                 timestamp: Date.now(),
                 isSystem: true
               }],
@@ -2818,7 +2898,7 @@ const App: React.FC = () => {
         const busyMsg: Message = {
           id: `search-busy-${Date.now()}`,
           senderId: 'SYSTEM',
-          text: `[${t('系统提示')}] ${t('已有一个搜索正在进行中')}（${searchTxnRef.current.query}），${t('请稍后再试')}`,
+          text: `[${t('系统提示')}] ${t('已有一个搜索正在进行中')}（${searchTxnRef.current.query || t('引用续写')}），${t('请稍后再试')}`,
           timestamp: Date.now(),
           isSystem: true
         };
@@ -3009,7 +3089,7 @@ const App: React.FC = () => {
     }
   };
 
-  // --- SEARCH FOLLOW-UP ---
+  // --- SEARCH / QUOTE FOLLOW-UP ---
   // Consumes a completed search transaction: triggers the initiating agent so it can
   // respond to the results. Lives OUTSIDE the autoplay loop (manual triggers deserve
   // their follow-up too, even with autoplay off). Crucially, this effect re-runs on
@@ -3017,6 +3097,11 @@ const App: React.FC = () => {
   // AFTER the search results landed — its closure actually contains them. The old
   // implementation called the pre-search instance from a setTimeout, so the second
   // request never included the results.
+  //
+  // Since 2026-09-06 it also consumes the quote transaction (kind: 'quote'): a native-track
+  // turn that called `reply` and produced no prose. Same machinery, different second leg —
+  // the agent is re-asked with the quote carried forward and a per-turn hint, instead of
+  // being asked to respond to search results.
   useEffect(() => {
     const txn = searchTxnRef.current;
     if (!txn || txn.status !== 'followup') return;
@@ -3028,8 +3113,13 @@ const App: React.FC = () => {
       // stays pending and the next run reschedules it (same pitfall as debate-turn skipping).
       if (searchTxnRef.current !== txn) return;
       searchTxnRef.current = null;
-      console.log(`[SearchTxn] Results landed, triggering ${txn.agentId} to respond (search disabled this turn)`);
-      triggerAgentReply(txn.agentId, true);
+      if (txn.kind === 'quote') {
+        console.log(`[QuoteTxn] Quote-only turn, re-asking ${txn.agentId} for the message body`);
+        triggerAgentReply(txn.agentId, txn.disableSearch ?? false, 0, { quoteReplyToId: txn.quoteReplyToId });
+      } else {
+        console.log(`[SearchTxn] Results landed, triggering ${txn.agentId} to respond (search disabled this turn)`);
+        triggerAgentReply(txn.agentId, true);
+      }
     }, 500);
     return () => clearTimeout(timeoutId);
   }, [messages, activeSessionId, processingAgents, triggerAgentReply]);
@@ -3040,9 +3130,11 @@ const App: React.FC = () => {
       // console.log('[AutoPlay] Disabled');
       return;
     }
-    // SEARCH TRANSACTION GATE: while a search is in flight (or its follow-up hasn't
-    // fired yet), the whole rotation in that session pauses — nobody talks over the
-    // search, and the initiating agent is guaranteed the next word.
+    // TRANSACTION GATE: while a search is in flight (or its follow-up hasn't fired yet),
+    // the whole rotation in that session pauses — nobody talks over the search, and the
+    // initiating agent is guaranteed the next word. Same for a pending quote-followup leg:
+    // removing the empty placeholder changes `messages` and wakes this effect, and without
+    // the gate another member would slip in between the two legs of one turn.
     if (searchTxnRef.current && searchTxnRef.current.sessionId === activeSessionId) {
       return;
     }

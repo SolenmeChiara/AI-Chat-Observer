@@ -101,7 +101,9 @@ export async function* streamGeminiReply(
   mentionOnlyIds?: string[],
   agentJoinedAt?: Record<string, string>,
   hidePreJoinMessages?: Record<string, boolean>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** Per-turn quote-followup hint; rides the trigger turn only (see buildQuoteFollowupHint). */
+  followupHint?: string
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
 
@@ -223,7 +225,10 @@ export async function* streamGeminiReply(
 
   // Last turn: The "Trigger". Also carries the per-turn volatile context (time / recall /
   // attention) that used to sit in systemInstruction and broke the cache prefix on every call.
-  const triggerText = buildEndOfLogPrompt(systemParts.perTurn, agent.name, commandMode);
+  const triggerText = buildEndOfLogPrompt(
+    followupHint ? `${systemParts.perTurn}\n${followupHint}` : systemParts.perTurn,
+    agent.name, commandMode
+  );
   formattedContents.push({
     role: 'user',
     parts: [{ text: triggerText }]
