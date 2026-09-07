@@ -236,6 +236,15 @@ export function writeThemePreference(theme: ViewerTheme): void {
   }
 }
 
+/** 退回「跟随电脑」。四期侧边栏的主题是三选一，得有路回到「没选过」这一档。 */
+export function clearThemePreference(): void {
+  try {
+    window.localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    /* 同上 */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // fetch 封装
 // ---------------------------------------------------------------------------

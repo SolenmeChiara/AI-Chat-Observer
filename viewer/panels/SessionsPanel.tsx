@@ -1,31 +1,49 @@
-// 「管理」抽屉 · 会话列表（PHONE_ACTIONS_PLAN.md §2.9）。
+// 侧边栏 · 会话区（四期）。
 //
-// 这里的「切过去」是把**电脑端**切过去（`session.switch`），不是手机本地换个视图——
-// 头部那个下拉才是本地切换。两件事不一样：远程切会让电脑端停掉自动播放（与电脑上手点一致）。
+// 三期这里是抽屉里的一叠卡片，每张卡片右端挂一颗 40px 的「切过去」小按钮。
+// Sol 在 iPhone 上的原话是「按键太小了 不如侧边栏」，所以四期把整行变成按钮：
+// 全宽到边、≥52px、名字与状态各占一行。
+//
+// 两件事分成两个命中区，别混：
+//   · 点**整行** = 手机自己去看这个会话（本地换视图、关「跟随电脑」），不惊动电脑，
+//     在线离线一个样——这是二期头部下拉的语义，翻历史用的。
+//   · 点**行尾那颗 44×44 的显示器键** = 让电脑端也切过去（`session.switch`）。
+//     它才会停掉电脑的自动播放，成功后由 settleAction 把「跟随电脑」打开并收起侧边栏。
+// 电脑端当前那一行的显示器键是禁用态（已经在那儿了）；电脑不可达时也禁用。
 
 import React from 'react';
-import { CornerDownRight, Monitor } from 'lucide-react';
+import { Loader2, Monitor, Smartphone } from 'lucide-react';
 import type { ViewGroup, ViewSessionIndex } from '../viewerClient';
-import { ActionButton, PanelHint, type PanelBaseProps } from './shared';
+import { PanelHint, SidebarRow, type Translate } from './shared';
 
-export interface SessionsPanelProps extends PanelBaseProps {
+export interface SessionsPanelProps {
+  t: Translate;
   groups: ViewGroup[];
   sessions: ViewSessionIndex[];
   /** 电脑端当前会话 */
   activeSessionId: string | null;
   /** 手机正在看的会话 */
   viewingSessionId: string | null;
+  /** 电脑端不可达：行尾的显示器键禁用，整行照常可点 */
+  disabled: boolean;
+  /** 该行是否有 session.switch 在飞 */
+  isPending: (key: string) => boolean;
+  /** 点整行：手机本地看这个会话 */
+  onPick: (sessionId: string) => void;
+  /** 点行尾显示器键：让电脑端切过去 */
+  onSwitchDesktop: (sessionId: string) => void;
 }
 
 const SessionsPanel: React.FC<SessionsPanelProps> = ({
   t,
-  runAction,
-  isPending,
-  disabled,
   groups,
   sessions,
   activeSessionId,
   viewingSessionId,
+  disabled,
+  isPending,
+  onPick,
+  onSwitchDesktop,
 }) => {
   const grouped = groups
     .map(g => ({ group: g, items: sessions.filter(s => s.groupId === g.id) }))
@@ -36,60 +54,44 @@ const SessionsPanel: React.FC<SessionsPanelProps> = ({
   }
 
   return (
-    <div className="px-3 pb-6 pt-2 space-y-4">
+    <div>
       {grouped.map(({ group, items }) => (
         <div key={group.id}>
-          <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 mb-1.5 px-0.5">{group.name}</div>
-          <div className="space-y-1.5">
-            {items.map(s => {
-              const isActive = s.id === activeSessionId;
-              const isViewing = s.id === viewingSessionId;
-              return (
-                <div
-                  key={s.id}
-                  className={`rounded-2xl border p-2.5 flex items-center gap-2 ${
-                    isActive
-                      ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20'
-                      : 'border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900'
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm text-gray-900 dark:text-gray-100 truncate">
-                      {s.name || t('未命名会话')}
-                    </div>
-                    <div className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1.5 flex-wrap">
-                      <span>
-                        {s.messageCount} {t('条')}
-                      </span>
-                      {isActive && (
-                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                          <Monitor size={11} /> {t('电脑端正在看')}
-                        </span>
-                      )}
-                      {isViewing && !isActive && <span>· {t('正在看')}</span>}
-                    </div>
-                  </div>
-                  <ActionButton
-                    size="sm"
-                    tone={isActive ? 'plain' : 'primary'}
-                    pending={isPending(`switch:${s.id}`)}
-                    disabled={disabled || isActive}
-                    onClick={() =>
-                      void runAction({
-                        type: 'session.switch',
-                        payload: {},
-                        sessionId: s.id,
-                        key: `switch:${s.id}`,
-                        label: t('切换会话'),
-                      })
-                    }
+          <div className="px-4 pt-3 pb-1 text-[11px] text-gray-400 dark:text-gray-500 truncate">{group.name}</div>
+          {items.map(s => {
+            const isActive = s.id === activeSessionId;
+            const isViewing = s.id === viewingSessionId;
+            const pending = isPending(`switch:${s.id}`);
+            const marks: string[] = [`${s.messageCount} ${t('条')}`];
+            if (isActive) marks.push(t('电脑端正在看'));
+            else if (isViewing) marks.push(t('正在看'));
+            return (
+              <SidebarRow
+                key={s.id}
+                active={isActive}
+                onClick={() => onPick(s.id)}
+                title={s.name || t('未命名会话')}
+                subtitle={marks.join(' · ')}
+                icon={isViewing ? <Smartphone size={16} /> : <span className="w-4" />}
+                action={
+                  <button
+                    type="button"
+                    aria-label={t('让电脑切到这个会话')}
+                    title={t('让电脑切到这个会话')}
+                    disabled={disabled || isActive || pending}
+                    onClick={() => onSwitchDesktop(s.id)}
+                    className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors disabled:opacity-40 ${
+                      isActive
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-gray-400 dark:text-gray-500 active:bg-gray-100 dark:active:bg-zinc-800'
+                    }`}
                   >
-                    <CornerDownRight size={13} /> {t('切过去')}
-                  </ActionButton>
-                </div>
-              );
-            })}
-          </div>
+                    {pending ? <Loader2 size={18} className="animate-spin" /> : <Monitor size={18} />}
+                  </button>
+                }
+              />
+            );
+          })}
         </div>
       ))}
     </div>

@@ -38,6 +38,7 @@ function formatRemaining(muteUntil: number, now: number, t: Translate): string {
 
 const MembersPanel: React.FC<MembersPanelProps> = ({
   t,
+  lang,
   runAction,
   isPending,
   disabled,
@@ -89,12 +90,18 @@ const MembersPanel: React.FC<MembersPanelProps> = ({
   return (
     <div className="px-3 pb-6 pt-2">
       {scopeHint && (
-        <div className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
-          {t('电脑端当前在')}「{scopeHint.sessionName}」，{t('这里的操作都作用于那个会话')}。
+        <div className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900 px-3 pt-2 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+          {/* 标点跟着语言走：英文里塞「」和全角逗号是三期留下的洋泾浜 */}
+          <div className="break-words">
+            {lang === 'zh'
+              ? `${t('电脑端当前在')}「${scopeHint.sessionName}」，${t('这里的操作都作用于那个会话')}。`
+              : `${t('电脑端当前在')} “${scopeHint.sessionName}” — ${t('这里的操作都作用于那个会话')}.`}
+          </div>
+          {/* 44px 高，不是一行下划线小字：这条也算「可点元素」 */}
           <button
             type="button"
             onClick={scopeHint.onJump}
-            className="ml-1 min-h-0 min-w-0 underline underline-offset-2 font-medium"
+            className="min-h-[44px] px-2 -ml-2 -mt-1 underline underline-offset-2 font-medium"
           >
             {t('跳过去')}
           </button>

@@ -15,19 +15,17 @@ import {
   AlertCircle,
   ArrowDown,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   CornerUpLeft,
-  List,
   Loader2,
-  LocateFixed,
-  LocateOff,
+  Menu,
+  Monitor,
   Moon,
-  Pause,
-  Play,
   Plus,
   RefreshCw,
   Send,
-  Settings2,
   Smartphone,
   Sun,
   UserCog,
@@ -40,7 +38,7 @@ import MembersPanel from './panels/MembersPanel';
 import AgentEditPanel from './panels/AgentEditPanel';
 import AgentCreatePanel from './panels/AgentCreatePanel';
 import SessionsPanel from './panels/SessionsPanel';
-import type { RunActionOptions } from './panels/shared';
+import { SidebarRow, SidebarSection, SidebarSwitch, type RunActionOptions } from './panels/shared';
 import {
   BootstrapData,
   EMPTY_WINDOW,
@@ -54,6 +52,7 @@ import {
   ViewSessionIndex,
   ViewerHttpError,
   ViewerTheme,
+  clearThemePreference,
   clearToken,
   connectLiveEvents,
   fetchBootstrap,
@@ -86,6 +85,15 @@ const LONG_PRESS_MS = 500;
 /** 长按期间手指移动超过这个距离就当成滚动，不算长按 */
 const LONG_PRESS_SLOP_PX = 10;
 
+/** 从屏幕左边多少像素以内起手才算「边缘右滑开侧边栏」 */
+const EDGE_OPEN_PX = 24;
+
+/** 侧边栏开合手势的判定距离：横向走够这么多才算数 */
+const SWIPE_TRIGGER_PX = 56;
+
+/** 侧边栏滑入 / 收起的时长，和 duration-200 对齐 */
+const SIDEBAR_ANIM_MS = 200;
+
 /** 一条动作的等待记录。key 是按钮维度的标识，id（Map 的键）是服务端给的动作 id。 */
 interface PendingAction {
   type: ActionType;
@@ -95,6 +103,8 @@ interface PendingAction {
   /** message.send 专用：失败时要撤掉的乐观占位与要还回输入框的原文 */
   draftMessageId?: string;
   draftText?: string;
+  /** session.switch 专用：成功后手机自己也要跟过去的那个会话 */
+  targetSessionId?: string;
 }
 
 interface Toast {
@@ -103,11 +113,36 @@ interface Toast {
   text: string;
 }
 
-type DrawerTab = 'members' | 'edit' | 'create' | 'sessions';
+/**
+ * 侧边栏当前页。'home' 是主页（会话 / 控制 / 管理三段），其余三个是推进去的子页。
+ * 用「推入子页」而不是三期那种顶部 tab 栏：tab 栏一行挤四个，每个只有 ~80×44，
+ * 而子页的返回栏是整条 44px 的行，指头点哪儿都算。
+ */
+type SidebarPage = 'home' | 'members' | 'edit' | 'create';
 
 /** 系统 / 搜索结果消息自成一段，不参与分组（它们走 ChatBubble 的另一条渲染分支） */
 function isStandaloneMessage(m: Message): boolean {
   return !!m.isSystem || m.senderId === 'SYSTEM' || !!m.isSearchResult;
+}
+
+/**
+ * 引用条压成一行之后要的预览：取正文第一段有字的，把 Markdown 记号剥掉。
+ * 不剥的话一行里全是 `**` `##` `- ` 这种噪声，本来就只剩几十个字符的位置更看不出引的是哪句。
+ * 只做行内那几种常见记号，不引 markdown 解析器——这是一行提示，不是渲染。
+ */
+function previewLine(text: string): string {
+  const line = text.split('\n').map(s => s.trim()).find(s => s.length > 0) || '';
+  return line
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1') // 图片
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // 链接
+    .replace(/^#{1,6}\s+/, '') // 标题
+    .replace(/^>\s?/, '') // 引用
+    .replace(/^([-*+]|\d+\.)\s+/, '') // 列表
+    .replace(/(\*\*|__|~~|`)/g, '') // 粗体 / 删除线 / 行内代码
+    .replace(/(^|\s)[*_](\S)/g, '$1$2') // 斜体起
+    .replace(/(\S)[*_](\s|$)/g, '$1$2') // 斜体收
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** 本条是不是上一条的延续：同一个人、同一个私讯目标、5 分钟以内 */
@@ -208,7 +243,11 @@ const ViewerApp: React.FC = () => {
   // 通用表而不是每个按钮一个 boolean：动作有九种，按钮有几十个。
   const [pendingActions, setPendingActions] = useState<Map<string, PendingAction>>(() => new Map());
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
+  // 侧边栏分两个 state：sidebarOpen 管挂载，sidebarShown 管那条 translateX 过渡。
+  // 合成一个的话，元素挂上去的同一帧就已经在终点位置，滑入动画根本不会发生。
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarShown, setSidebarShown] = useState(false);
+  const [sidebarPage, setSidebarPage] = useState<SidebarPage>('home');
   const [editAgentId, setEditAgentId] = useState<string | null>(null);
   /** 电脑端当前会话的禁言表（成员面板要显示剩余时间） */
   const [activeMuted, setActiveMuted] = useState<MuteInfo[]>([]);
@@ -235,6 +274,41 @@ const ViewerApp: React.FC = () => {
   followRef.current = followDesktop;
   const pendingActionsRef = useRef(pendingActions);
   pendingActionsRef.current = pendingActions;
+
+  // --- 侧边栏的开合 ---
+
+  const sidebarCloseTimerRef = useRef<number | null>(null);
+  const sidebarPanelRef = useRef<HTMLDivElement>(null);
+  const sidebarBackdropRef = useRef<HTMLDivElement>(null);
+
+  const openSidebar = useCallback(() => {
+    if (sidebarCloseTimerRef.current !== null) {
+      window.clearTimeout(sidebarCloseTimerRef.current);
+      sidebarCloseTimerRef.current = null;
+    }
+    setSidebarOpen(true);
+    // 挂载和「推到终点」必须隔一帧，否则没有过渡可看。
+    // 收起动画中途又被点开时元素还挂着，这一句同样把它推回去。
+    requestAnimationFrame(() => setSidebarShown(true));
+  }, []);
+
+  const closeSidebar = useCallback(() => {
+    setSidebarShown(false);
+    if (sidebarCloseTimerRef.current !== null) window.clearTimeout(sidebarCloseTimerRef.current);
+    sidebarCloseTimerRef.current = window.setTimeout(() => {
+      sidebarCloseTimerRef.current = null;
+      setSidebarOpen(false);
+      // 下次打开一律从主页开始：子页停在半路上，再进来会不知道自己在哪一层
+      setSidebarPage('home');
+    }, SIDEBAR_ANIM_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (sidebarCloseTimerRef.current !== null) window.clearTimeout(sidebarCloseTimerRef.current);
+    },
+    []
+  );
 
   const lang = boot?.settings.language === 'en' ? 'en' : 'zh';
   const t = useMemo(() => makeViewerT(lang), [lang]);
@@ -284,14 +358,6 @@ const ViewerApp: React.FC = () => {
     [pendingActions]
   );
   const isPending = useCallback((key: string) => pendingKeys.has(key), [pendingKeys]);
-
-  /** 按 group 分组的会话列表，喂给头部下拉 */
-  const groupedSessions = useMemo(() => {
-    if (!boot) return [];
-    return boot.groups
-      .map(g => ({ group: g, items: boot.sessions.filter(s => s.groupId === g.id) }))
-      .filter(entry => entry.items.length > 0);
-  }, [boot]);
 
   const displayMessages = useMemo(() => {
     if (pending.length === 0) return win.messages;
@@ -470,8 +536,14 @@ const ViewerApp: React.FC = () => {
           setPending(prev => prev.map(m => (m.id === entry.draftMessageId ? { ...m, id: realId } : m)));
         }
         if (entry.type === 'session.switch') {
-          // 远程切会话成功 = 用户明确想跟着电脑走，把「跟随电脑」打开（§2.9）
+          // 远程切会话成功 = 用户明确想跟着电脑走，把「跟随电脑」打开（§2.9）；
+          // 顺手收起侧边栏——切会话的目的就是去看那个会话，没理由还挡着。
           setFollowDesktop(true);
+          // 手机的视图也要自己挪过去：presence 事件多半比这条回执先到，
+          // 那一刻 followDesktop 还是 false（用户刚点过某一行本地看别的会话），
+          // applyPresence 就把它放过去了。只靠 follow 会停在旧会话上等下一个 presence。
+          if (entry.targetSessionId) setViewingSessionId(entry.targetSessionId);
+          closeSidebar();
         }
         if (entry.type === 'agent.create' && result.data?.agentId) {
           setEditAgentId(result.data.agentId);
@@ -486,7 +558,7 @@ const ViewerApp: React.FC = () => {
       }
       return true;
     },
-    [pushToast, t, describeActionCode, joinToast]
+    [pushToast, t, describeActionCode, joinToast, closeSidebar]
   );
 
   const handleActionResult = useCallback(
@@ -520,6 +592,9 @@ const ViewerApp: React.FC = () => {
         at: Date.now(),
         draftMessageId: opts.draftMessageId,
         draftText: opts.draftText,
+        // session.switch 的 sessionId 就是「要切去的那个」（不是「当前那个」），
+        // 收尾时手机自己也得挪过去，所以在这儿留一份
+        targetSessionId: opts.type === 'session.switch' ? opts.sessionId : undefined,
       };
       setPendingActions(prev => new Map(prev).set(localKey, entry));
 
@@ -762,11 +837,12 @@ const ViewerApp: React.FC = () => {
   }, [token, blocked, applyPresence, loadBootstrap, runSync, handleActionResult]);
 
   /**
-   * 电脑端当前会话的禁言表。抽屉开着时才拉，`tail=1` 只为把 `mutedAgents` 捎回来
+   * 电脑端当前会话的禁言表。侧边栏开着时才拉，`tail=1` 只为把 `mutedAgents` 捎回来
    * （会话正文这里一个字都不用）。会话事件、动作回执、切会话都会把 muteTick 顶一下。
+   * 绑在「侧边栏开」而不是「正在看成员页」上：成员页只隔一次点击，等进去再拉会先闪一下空表。
    */
   useEffect(() => {
-    if (!drawerTab || !activeSessionId || blocked) return;
+    if (!sidebarOpen || !activeSessionId || blocked) return;
     let cancelled = false;
     fetchSessionTail(activeSessionId, 1)
       .then(page => {
@@ -779,7 +855,7 @@ const ViewerApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [drawerTab, activeSessionId, muteTick, blocked]);
+  }, [sidebarOpen, activeSessionId, muteTick, blocked]);
 
   // --- pending 清理：真消息进窗口后就撤掉乐观占位 ---
 
@@ -834,11 +910,12 @@ const ViewerApp: React.FC = () => {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  const handleToggleTheme = useCallback(() => {
-    const next: ViewerTheme = isDark ? 'light' : 'dark';
-    writeThemePreference(next);
+  /** 三选一：'light' / 'dark' / null（回到跟随电脑端） */
+  const handlePickTheme = useCallback((next: ViewerTheme | null) => {
+    if (next) writeThemePreference(next);
+    else clearThemePreference();
     setThemeOverride(next);
-  }, [isDark]);
+  }, []);
 
   // --- 滚动 ---
 
@@ -1030,7 +1107,7 @@ const ViewerApp: React.FC = () => {
       const { clientX: x, clientY: y } = e;
       const timer = window.setTimeout(() => {
         if (longPressRef.current) longPressRef.current.fired = true;
-        setReplyTo({ id: msg.id, name: nameOfSender(msg), text: msg.text.slice(0, 200) });
+        setReplyTo({ id: msg.id, name: nameOfSender(msg), text: previewLine(msg.text).slice(0, 200) });
         // 有振动马达的机器给一下，手指才知道「按到了」
         try {
           navigator.vibrate?.(12);
@@ -1081,6 +1158,147 @@ const ViewerApp: React.FC = () => {
       if (err instanceof ViewerHttpError && (err.status === 401 || err.status === 403)) setPhase('denied');
     }
   }, [controlPending, desktopReachable, presence?.isAutoPlay, clearControlPending, describeControlError]);
+
+  // --- 侧边栏手势 ---
+  //
+  // 开：从屏幕左边缘 24px 内起手、横向走够 56px。这一档不做跟手动画，只在 touchend 判一次——
+  // iOS Safari 的「侧滑返回」抢的正是同一块边缘，跟手做到一半被系统接管的话，
+  // 面板会僵在半路，判一次反而稳。有历史记录时这个手势本来就打不过 Safari，
+  // 所以 44px 的菜单键才是主入口，这条只是顺手。
+  // 关：面板已经挂着，可以真跟手——直接改 DOM 的 transform，不走 setState，
+  // 免得每个 touchmove 都把整棵消息树重渲一遍。
+
+  const openSwipeRef = useRef<{ x: number; y: number; at: number } | null>(null);
+
+  const handleRootTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      if (sidebarOpen || e.touches.length !== 1) {
+        openSwipeRef.current = null;
+        return;
+      }
+      const p = e.touches[0];
+      openSwipeRef.current = p.clientX <= EDGE_OPEN_PX ? { x: p.clientX, y: p.clientY, at: Date.now() } : null;
+    },
+    [sidebarOpen]
+  );
+
+  const handleRootTouchEnd = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      const start = openSwipeRef.current;
+      openSwipeRef.current = null;
+      if (!start) return;
+      const p = e.changedTouches[0];
+      if (!p) return;
+      const dx = p.clientX - start.x;
+      const dy = p.clientY - start.y;
+      // 慢吞吞挪过去的不算：那多半是在选文字
+      if (dx >= SWIPE_TRIGGER_PX && Math.abs(dy) < Math.abs(dx) && Date.now() - start.at < 800) openSidebar();
+    },
+    [openSidebar]
+  );
+
+  const closeSwipeRef = useRef<{ x: number; y: number; width: number; axis: 'none' | 'x' } | null>(null);
+
+  /** 跟手期间直接写 style，收尾时清掉，交还给 className 上的过渡 */
+  const paintSidebarDrag = useCallback((dx: number | null) => {
+    const panel = sidebarPanelRef.current;
+    const backdrop = sidebarBackdropRef.current;
+    if (!panel) return;
+    if (dx === null) {
+      panel.style.transition = '';
+      panel.style.transform = '';
+      if (backdrop) {
+        backdrop.style.transition = '';
+        backdrop.style.opacity = '';
+      }
+      return;
+    }
+    panel.style.transition = 'none';
+    panel.style.transform = `translateX(${dx}px)`;
+    if (backdrop) {
+      backdrop.style.transition = 'none';
+      backdrop.style.opacity = String(Math.max(0, 1 + dx / (panel.offsetWidth || 1)));
+    }
+  }, []);
+
+  const handleSidebarTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 1) {
+      closeSwipeRef.current = null;
+      return;
+    }
+    const p = e.touches[0];
+    closeSwipeRef.current = {
+      x: p.clientX,
+      y: p.clientY,
+      width: sidebarPanelRef.current?.offsetWidth || 1,
+      axis: 'none',
+    };
+  }, []);
+
+  const handleSidebarTouchMove = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      const s = closeSwipeRef.current;
+      const p = e.touches[0];
+      if (!s || !p) return;
+      const dx = p.clientX - s.x;
+      const dy = p.clientY - s.y;
+      if (s.axis === 'none') {
+        // 先锁轴：竖着走就是在滚面板内容，这一整轮都别再管
+        if (Math.abs(dy) > 12 && Math.abs(dy) >= Math.abs(dx)) {
+          closeSwipeRef.current = null;
+          return;
+        }
+        if (Math.abs(dx) > 12) s.axis = 'x';
+        else return;
+      }
+      paintSidebarDrag(Math.min(0, dx));
+    },
+    [paintSidebarDrag]
+  );
+
+  const handleSidebarTouchEnd = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      const s = closeSwipeRef.current;
+      closeSwipeRef.current = null;
+      if (!s || s.axis !== 'x') return;
+      const p = e.changedTouches[0];
+      const dx = p ? p.clientX - s.x : 0;
+      paintSidebarDrag(null);
+      if (dx <= -SWIPE_TRIGGER_PX) closeSidebar();
+    },
+    [paintSidebarDrag, closeSidebar]
+  );
+
+  /**
+   * 点会话行：手机自己去看这个会话，不惊动电脑（二期头部下拉的语义）。
+   * 「跟随电脑」必须关掉——不关的话电脑那边下一个 presence 事件就把人拽回去了。
+   * 电脑在线离线走同一条路：翻历史不需要电脑配合。
+   */
+  const handlePickSession = useCallback(
+    (sessionId: string) => {
+      setFollowDesktop(false);
+      setViewingSessionId(sessionId);
+      closeSidebar();
+    },
+    [closeSidebar]
+  );
+
+  /**
+   * 点行尾的显示器键：让**电脑端**也切过去。这一步会停掉电脑的自动播放
+   * （与在电脑上手点一致），成功后 settleAction 负责打开「跟随电脑」并收起侧边栏。
+   */
+  const handleSwitchDesktopSession = useCallback(
+    (sessionId: string) => {
+      void runAction({
+        type: 'session.switch',
+        payload: {},
+        sessionId,
+        key: `switch:${sessionId}`,
+        label: t('切换会话'),
+      });
+    },
+    [runAction, t]
+  );
 
   // --- @提及 ---
 
@@ -1205,11 +1423,22 @@ const ViewerApp: React.FC = () => {
 
   const pmTarget = pmTargetId ? sessionMembers.find(a => a.id === pmTargetId) || null : null;
 
-  const drawerTabs: Array<{ key: DrawerTab; label: string; Icon: typeof Users }> = [
-    { key: 'members', label: t('成员'), Icon: Users },
-    { key: 'edit', label: t('编辑'), Icon: UserCog },
-    { key: 'create', label: t('新建'), Icon: Plus },
-    { key: 'sessions', label: t('会话'), Icon: List },
+  /** 头部右端那句只读状态 */
+  const linkText = desktopReachable ? t('在线') : link === 'connecting' ? t('正在连接...') : t('离线');
+
+  const sidebarTitle =
+    sidebarPage === 'members'
+      ? t('成员')
+      : sidebarPage === 'edit'
+        ? t('编辑角色')
+        : sidebarPage === 'create'
+          ? t('新建角色')
+          : t('菜单');
+
+  const themeOptions: Array<{ value: ViewerTheme | null; label: string; Icon: typeof Sun }> = [
+    { value: 'light', label: t('浅色'), Icon: Sun },
+    { value: 'dark', label: t('深色'), Icon: Moon },
+    { value: null, label: t('跟随'), Icon: Monitor },
   ];
 
   return (
@@ -1220,120 +1449,58 @@ const ViewerApp: React.FC = () => {
       <div
         className="flex flex-col bg-gray-50 dark:bg-black overflow-hidden relative"
         style={{ height: 'var(--vvh, 100dvh)' }}
+        onTouchStart={handleRootTouchStart}
+        onTouchEnd={handleRootTouchEnd}
+        onTouchCancel={() => {
+          openSwipeRef.current = null;
+        }}
       >
-        {/* 头部。src/index.css 在 ≤640px 下把所有 button 撑到 44×44，这里的图标按钮
-            用 min-h-0 / min-w-0 覆盖掉（类选择器特异性高于元素选择器），否则头部会白白高一截。 */}
-        <header className="shrink-0 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-3 pt-1 pb-0.5">
-          <div className="flex items-center gap-1.5">
-            <select
-              value={viewingSessionId || ''}
-              onChange={e => {
-                // 手动选会话就默认不再跟随电脑，否则下一个 presence 事件立刻把人拽回去
-                setFollowDesktop(false);
-                setViewingSessionId(e.target.value);
-              }}
-              aria-label={t('选择会话')}
-              className="flex-1 min-w-0 bg-transparent text-[15px] font-semibold text-gray-900 dark:text-gray-100 border-0 focus:outline-none truncate py-0 leading-tight"
-            >
-              {groupedSessions.map(({ group, items }) => (
-                <optgroup key={group.id} label={group.name}>
-                  {items.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name || t('未命名会话')}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-
+        {/* 头部只剩三样：44×44 的菜单键、会话标题、只读的在线状态。
+            三期这里塞了会话下拉 + 两颗 32px 圆钮 + 两颗 20px 胶囊，Sol 在真机上够不着——
+            所有能点的东西都搬进侧边栏，那边每行 ≥52px。 */}
+        <header className="shrink-0 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 pl-0.5 pr-3">
+          <div className="flex items-center gap-1">
             <button
-              onClick={handleToggleTheme}
-              aria-label={isDark ? t('切换到浅色') : t('切换到深色')}
-              title={isDark ? t('切换到浅色') : t('切换到深色')}
-              className="shrink-0 w-8 h-8 min-w-0 min-h-0 rounded-full flex items-center justify-center border border-gray-300 dark:border-zinc-700 text-gray-500 dark:text-gray-400 transition-colors"
+              onClick={openSidebar}
+              aria-label={t('打开菜单')}
+              title={t('菜单')}
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-gray-600 dark:text-gray-300 active:bg-gray-100 dark:active:bg-zinc-800"
             >
-              {isDark ? <Sun size={15} /> : <Moon size={15} />}
+              <Menu size={22} />
             </button>
 
-            <button
-              onClick={() => {
-                const next = !followDesktop;
-                setFollowDesktop(next);
-                if (next && presence?.activeSessionId) setViewingSessionId(presence.activeSessionId);
-              }}
-              aria-label={followDesktop ? t('跟随电脑（已开启）') : t('跟随电脑（已关闭）')}
-              title={followDesktop ? t('跟随电脑（已开启）') : t('跟随电脑（已关闭）')}
-              className={`shrink-0 w-8 h-8 min-w-0 min-h-0 rounded-full flex items-center justify-center border transition-colors ${
-                followDesktop
-                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-transparent'
-                  : 'bg-transparent text-gray-500 dark:text-gray-400 border-gray-300 dark:border-zinc-700'
-              }`}
-            >
-              {followDesktop ? <LocateFixed size={15} /> : <LocateOff size={15} />}
-            </button>
-          </div>
+            <h1 className="flex-1 min-w-0 truncate text-[15px] font-semibold text-gray-900 dark:text-gray-100">
+              {currentSession?.name || t('未命名会话')}
+            </h1>
 
-          {/* 状态条：在线 · [▶ 自动播放] · 正在生成：xxx，压在一行里 */}
-          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 overflow-hidden">
             {/* SSE 断了就等于不知道电脑那边什么情况，别再报「在线」；
                 还没握上手的那一小会儿也别急着报「离线」，用中性的「正在连接」占位 */}
-            <span className="flex items-center gap-1 shrink-0">
-              <span className={`w-1.5 h-1.5 rounded-full ${desktopReachable ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-              {desktopReachable ? t('在线') : link === 'connecting' ? t('正在连接...') : t('离线')}
-            </span>
-            <span className="text-gray-300 dark:text-zinc-700 shrink-0">·</span>
-
-            {/* 自动播放开关：点一下把指令送给电脑端，等 presence 回流才算数 */}
-            <button
-              onClick={() => void handleToggleAutoPlay()}
-              disabled={!desktopReachable || controlPending}
-              aria-label={presence?.isAutoPlay ? t('暂停自动播放') : t('开启自动播放')}
-              className={`shrink-0 min-h-0 min-w-0 h-5 pl-1 pr-1.5 rounded-full border flex items-center gap-1 text-[11px] transition-colors disabled:opacity-50 ${
-                presence?.isAutoPlay
-                  ? 'border-emerald-300 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
-                  : 'border-gray-300 dark:border-zinc-700 text-gray-500 dark:text-gray-400'
-              }`}
-            >
-              {controlPending ? (
-                <Loader2 size={10} className="animate-spin" />
-              ) : presence?.isAutoPlay ? (
-                <Pause size={10} />
+            <span className="shrink-0 flex items-center gap-1.5 text-[12px] text-gray-500 dark:text-gray-400">
+              {link === 'offline' ? (
+                <Loader2 size={11} className="animate-spin text-amber-500 shrink-0" />
               ) : (
-                <Play size={10} />
+                <span className={`w-2 h-2 rounded-full shrink-0 ${desktopReachable ? 'bg-emerald-500' : 'bg-gray-400'}`} />
               )}
-              {presence?.isAutoPlay ? t('自动播放') : t('已暂停')}
-            </button>
-
-            {generatingNames.length > 0 && (
-              <>
-                <span className="text-gray-300 dark:text-zinc-700 shrink-0">·</span>
-                <span className="text-blue-500 truncate min-w-0">
-                  {t('正在生成')}：{generatingNames.join(', ')}
-                </span>
-              </>
-            )}
-            {linkLost && (
-              <span className="ml-auto shrink-0 text-amber-500 flex items-center gap-1">
-                <Loader2 size={10} className="animate-spin" />
-                {t('连接已断开，正在重连...')}
-              </span>
-            )}
-
-            {/* 「管理」抽屉入口。放状态条右端，不另占一行——头部在二期刚瘦下来。 */}
-            <button
-              onClick={() => setDrawerTab(prev => (prev ? null : 'members'))}
-              aria-label={t('管理')}
-              className={`${linkLost ? '' : 'ml-auto'} shrink-0 min-h-0 min-w-0 h-5 pl-1 pr-1.5 rounded-full border flex items-center gap-1 text-[11px] transition-colors ${
-                drawerTab
-                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-transparent'
-                  : 'border-gray-300 dark:border-zinc-700 text-gray-500 dark:text-gray-400'
-              }`}
-            >
-              <Settings2 size={10} />
-              {t('管理')}
-            </button>
+              {linkText}
+            </span>
           </div>
         </header>
+
+        {/* 「正在生成：xxx」。浮在消息列表上方而不是占头部一行：它来了又走，
+            占位的话每次有人开口整个列表都要跳一下。只读，不拦触摸。 */}
+        {generatingNames.length > 0 && (
+          <div className="pointer-events-none absolute top-14 inset-x-0 z-20 flex justify-center px-4">
+            <div className="max-w-full rounded-full bg-blue-500/90 text-white text-[11px] px-3 py-1 shadow-md flex items-center gap-1.5">
+              <Loader2 size={11} className="animate-spin shrink-0" />
+              <span className="truncate">
+                {t('正在生成')}
+                {lang === 'zh' ? '：' : ': '}
+                {generatingNames.join(', ')}
+              </span>
+            </div>
+          </div>
+        )}
+
 
         {/* 消息列表 */}
         <div className="flex-1 overflow-y-auto px-3 py-4 bg-gray-50/50 dark:bg-black/50" ref={scrollContainerRef}>
@@ -1501,22 +1668,25 @@ const ViewerApp: React.FC = () => {
               </div>
             )}
 
-            {/* 引用条：长按气泡设上的，发出去后自动清掉 */}
+            {/* 引用条：长按气泡设上的，发出去后自动清掉。
+                压成一行（整条正好 44px = 关闭键那么高）：这里挨着输入框，
+                两行的版本会把本来就被软键盘压扁的可视区再吃掉一截。 */}
             {replyTo && (
-              <div className="mb-2 flex items-center gap-2 rounded-xl bg-gray-100 dark:bg-zinc-800 border-l-2 border-zinc-400 dark:border-zinc-500 pl-2.5 pr-1 py-1">
-                <CornerUpLeft size={13} className="shrink-0 text-gray-400" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-medium text-gray-600 dark:text-gray-300 truncate">
+              <div className="mb-2 flex items-center h-11 rounded-xl bg-gray-100 dark:bg-zinc-800 border-l-2 border-zinc-400 dark:border-zinc-500 pl-2.5">
+                <CornerUpLeft size={14} className="shrink-0 text-gray-400" />
+                <div className="min-w-0 flex-1 ml-2 text-[12px] text-gray-400 dark:text-gray-500 truncate">
+                  <span className="font-medium text-gray-600 dark:text-gray-300">
                     {t('回复')} {replyTo.name}
-                  </div>
-                  <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{replyTo.text}</div>
+                  </span>
+                  {lang === 'zh' ? '：' : ': '}
+                  {replyTo.text}
                 </div>
                 <button
                   onClick={() => setReplyTo(null)}
                   aria-label={t('取消回复')}
-                  className="shrink-0 w-10 h-10 min-w-0 min-h-0 flex items-center justify-center text-gray-400"
+                  className="shrink-0 w-11 h-11 flex items-center justify-center text-gray-400"
                 >
-                  <X size={15} />
+                  <X size={16} />
                 </button>
               </div>
             )}
@@ -1587,12 +1757,12 @@ const ViewerApp: React.FC = () => {
           </div>
         </div>
 
-        {/* 动作结果 toast。抽屉之上（z-60），不然在抽屉里点的按钮看不到回执。
-            底部偏移分两档：抽屉关着时要让开输入区（92px），开着时输入区被盖住了，贴着屏幕底更不挡内容。 */}
+        {/* 动作结果 toast。侧边栏之上（z-60），不然在侧边栏里点的按钮看不到回执。
+            底部偏移分两档：侧边栏关着时要让开输入区（92px），开着时输入区被盖住了，贴着屏幕底更不挡内容。 */}
         {toasts.length > 0 && (
           <div
             className="pointer-events-none fixed inset-x-0 z-[60] flex flex-col items-center gap-1.5 px-4"
-            style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${drawerTab ? 16 : 92}px)` }}
+            style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${sidebarOpen ? 16 : 92}px)` }}
           >
             {toasts.map(item => (
               <div
@@ -1614,58 +1784,166 @@ const ViewerApp: React.FC = () => {
           </div>
         )}
 
-        {/* 「管理」抽屉（§2.9）。底部弹出，高度 90%，内部自己滚（overscroll-contain
-            掐断滚动链，否则滑到底会把身后的消息列表一起带着走）。 */}
-        {drawerTab && (
-          <div className="fixed inset-0 z-50 flex flex-col justify-end">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setDrawerTab(null)} aria-hidden="true" />
+        {/* 侧边栏（四期）。从左侧滑出，宽 min(85vw, 360px)，高度跟 --vvh 走（软键盘弹起时
+            也不会有一截跑到屏幕外）。外层 flex：面板占左边，剩下的宽度整块是遮罩，点它关闭。
+            内容区自己滚，overscroll-contain 掐断滚动链，否则滑到底会把身后的消息列表一起带着走。 */}
+        {sidebarOpen && (
+          <div className="fixed inset-0 z-50 flex" style={{ height: 'var(--vvh, 100dvh)' }}>
             <div
+              ref={sidebarPanelRef}
               role="dialog"
-              aria-label={t('管理')}
-              className="relative flex flex-col rounded-t-2xl bg-gray-50 dark:bg-black border-t border-gray-200 dark:border-zinc-800 shadow-2xl overflow-hidden"
-              style={{ height: 'calc(var(--vvh, 100dvh) * 0.9)' }}
+              aria-modal="true"
+              aria-label={t('菜单')}
+              onTouchStart={handleSidebarTouchStart}
+              onTouchMove={handleSidebarTouchMove}
+              onTouchEnd={handleSidebarTouchEnd}
+              onTouchCancel={() => {
+                closeSwipeRef.current = null;
+                paintSidebarDrag(null);
+              }}
+              className={`relative z-10 flex flex-col h-full bg-white dark:bg-zinc-900 shadow-2xl transition-transform duration-200 ease-out ${
+                sidebarShown ? 'translate-x-0' : '-translate-x-full'
+              }`}
+              style={{ width: 'min(85vw, 360px)' }}
             >
-              <div className="shrink-0 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800">
-                <div className="flex items-center gap-2 px-3 h-12">
-                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate flex-1 min-w-0">
-                    {activeGroup?.name || t('管理')}
+              {/* 顶栏。主页是标题 + 关闭；子页把标题换成整条 44px 的返回栏（‹ 成员）。 */}
+              <div className="shrink-0 flex items-center gap-1 h-12 px-0.5 border-b border-gray-200 dark:border-zinc-800">
+                {sidebarPage === 'home' ? (
+                  <span className="flex-1 min-w-0 truncate pl-3.5 text-[15px] font-semibold text-gray-900 dark:text-gray-100">
+                    {sidebarTitle}
                   </span>
-                  {!desktopReachable && (
-                    <span className="text-[10px] text-amber-500 truncate shrink-0">
-                      {t('电脑端已离线，暂时不能操作')}
-                    </span>
-                  )}
+                ) : (
                   <button
-                    onClick={() => setDrawerTab(null)}
-                    aria-label={t('关闭')}
-                    className="shrink-0 w-11 h-11 -mr-2 flex items-center justify-center text-gray-400"
+                    onClick={() => setSidebarPage('home')}
+                    aria-label={t('返回')}
+                    className="flex-1 min-w-0 h-11 flex items-center gap-0.5 pl-1 pr-2 rounded-xl text-left active:bg-gray-100 dark:active:bg-zinc-800"
                   >
-                    <X size={20} />
+                    <ChevronLeft size={20} className="shrink-0 text-gray-400" />
+                    <span className="truncate text-[15px] font-semibold text-gray-900 dark:text-gray-100">
+                      {sidebarTitle}
+                    </span>
                   </button>
-                </div>
-                <nav className="flex px-2">
-                  {drawerTabs.map(({ key, label, Icon }) => (
-                    <button
-                      key={key}
-                      onClick={() => setDrawerTab(key)}
-                      aria-current={drawerTab === key}
-                      className={`flex-1 min-w-0 min-h-0 h-11 flex items-center justify-center gap-1 text-[12px] border-b-2 transition-colors ${
-                        drawerTab === key
-                          ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-medium'
-                          : 'border-transparent text-gray-400 dark:text-gray-500'
-                      }`}
-                    >
-                      <Icon size={14} className="shrink-0" />
-                      <span className="truncate">{label}</span>
-                    </button>
-                  ))}
-                </nav>
+                )}
+                <button
+                  onClick={closeSidebar}
+                  aria-label={t('关闭菜单')}
+                  className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-gray-400 active:bg-gray-100 dark:active:bg-zinc-800"
+                >
+                  <X size={20} />
+                </button>
               </div>
 
+              {!desktopReachable && (
+                <div className="shrink-0 px-4 py-2 text-[11px] leading-snug break-words text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-900/40">
+                  {t('电脑端已离线，暂时不能操作')}
+                </div>
+              )}
+
               <div className="flex-1 overflow-y-auto overscroll-contain pb-safe">
-                {drawerTab === 'members' && (
+                {sidebarPage === 'home' && (
+                  <>
+                    <SidebarSection>{t('会话')}</SidebarSection>
+                    <SessionsPanel
+                      t={t}
+                      groups={boot.groups}
+                      sessions={sessions}
+                      activeSessionId={activeSessionId}
+                      viewingSessionId={viewingSessionId}
+                      disabled={!desktopReachable}
+                      isPending={isPending}
+                      onPick={handlePickSession}
+                      onSwitchDesktop={handleSwitchDesktopSession}
+                    />
+
+                    <SidebarSection>{t('控制')}</SidebarSection>
+                    <SidebarSwitch
+                      label={t('自动播放')}
+                      hint={presence?.isAutoPlay ? t('电脑端正在播放') : t('电脑端已暂停')}
+                      checked={!!presence?.isAutoPlay}
+                      pending={controlPending}
+                      disabled={!desktopReachable}
+                      onToggle={() => void handleToggleAutoPlay()}
+                    />
+                    <SidebarSwitch
+                      label={t('跟随电脑')}
+                      hint={followDesktop ? t('会话跟着电脑端走') : t('手机自己选会话')}
+                      checked={followDesktop}
+                      onToggle={() => {
+                        const next = !followDesktop;
+                        setFollowDesktop(next);
+                        if (next && presence?.activeSessionId) setViewingSessionId(presence.activeSessionId);
+                      }}
+                    />
+                    {/* 主题三选一。段是 44px 高的按钮；英文 "Follow computer" 塞不进三分之一宽，
+                        段上只写「跟随 / Auto」，选中这档时下面补一句完整说明。 */}
+                    <div className="px-4 pt-2.5 pb-3">
+                      <div className="text-[15px] leading-snug text-gray-900 dark:text-gray-100 mb-1.5">{t('主题')}</div>
+                      <div className="flex rounded-xl border border-gray-200 dark:border-zinc-700 overflow-hidden">
+                        {themeOptions.map(({ value, label, Icon }, i) => {
+                          const on = themeOverride === value;
+                          return (
+                            <button
+                              key={label}
+                              onClick={() => handlePickTheme(value)}
+                              aria-pressed={on}
+                              className={`flex-1 min-w-0 min-h-[44px] px-1 py-1 flex flex-col items-center justify-center gap-0.5 text-[11px] leading-tight transition-colors ${
+                                i > 0 ? 'border-l border-gray-200 dark:border-zinc-700' : ''
+                              } ${
+                                on
+                                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                                  : 'text-gray-500 dark:text-gray-400'
+                              }`}
+                            >
+                              <Icon size={14} className="shrink-0" />
+                              <span className="max-w-full break-words text-center">{label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {themeOverride === null && (
+                        <div className="text-[11px] leading-snug break-words text-gray-400 dark:text-gray-500 mt-1.5">
+                          {t('深浅色跟随电脑端')}
+                        </div>
+                      )}
+                    </div>
+
+                    <SidebarSection>{t('管理')}</SidebarSection>
+                    <SidebarRow
+                      icon={<Users size={16} />}
+                      title={t('成员')}
+                      subtitle={activeGroup?.name}
+                      disabled={!desktopReachable}
+                      trailing={<ChevronRight size={16} />}
+                      onClick={() => setSidebarPage('members')}
+                    />
+                    <SidebarRow
+                      icon={<UserCog size={16} />}
+                      title={t('编辑角色')}
+                      disabled={!desktopReachable}
+                      trailing={<ChevronRight size={16} />}
+                      onClick={() => setSidebarPage('edit')}
+                    />
+                    <SidebarRow
+                      icon={<Plus size={16} />}
+                      title={t('新建角色')}
+                      disabled={!desktopReachable}
+                      trailing={<ChevronRight size={16} />}
+                      onClick={() => setSidebarPage('create')}
+                    />
+
+                    {/* 侧边栏开着时头部被盖住了，状态在这儿再说一遍 */}
+                    <div className="mt-3 px-4 py-4 border-t border-gray-100 dark:border-zinc-800 text-[11px] leading-snug break-words text-gray-400 dark:text-gray-500">
+                      {t('电脑端')}
+                      {lang === 'zh' ? '：' : ': '}
+                      {linkText}
+                    </div>
+                  </>
+                )}
+
+                {sidebarPage === 'members' && (
                   <MembersPanel
                     t={t}
+                    lang={lang}
                     runAction={runAction}
                     isPending={isPending}
                     disabled={!desktopReachable}
@@ -1676,7 +1954,7 @@ const ViewerApp: React.FC = () => {
                     processingAgentIds={presence?.processingAgentIds || []}
                     onEditAgent={id => {
                       setEditAgentId(id);
-                      setDrawerTab('edit');
+                      setSidebarPage('edit');
                     }}
                     scopeHint={
                       activeSessionId && activeSessionId !== viewingSessionId
@@ -1685,15 +1963,17 @@ const ViewerApp: React.FC = () => {
                             onJump: () => {
                               setFollowDesktop(true);
                               setViewingSessionId(activeSessionId);
+                              closeSidebar();
                             },
                           }
                         : null
                     }
                   />
                 )}
-                {drawerTab === 'edit' && (
+                {sidebarPage === 'edit' && (
                   <AgentEditPanel
                     t={t}
+                    lang={lang}
                     runAction={runAction}
                     isPending={isPending}
                     disabled={!desktopReachable}
@@ -1704,31 +1984,29 @@ const ViewerApp: React.FC = () => {
                     onSelect={setEditAgentId}
                   />
                 )}
-                {drawerTab === 'create' && (
+                {sidebarPage === 'create' && (
                   <AgentCreatePanel
                     t={t}
+                    lang={lang}
                     runAction={runAction}
                     isPending={isPending}
                     disabled={!desktopReachable}
                     providers={providers}
                     sessionId={activeSessionId}
-                    onCreated={() => setDrawerTab('members')}
-                  />
-                )}
-                {drawerTab === 'sessions' && (
-                  <SessionsPanel
-                    t={t}
-                    runAction={runAction}
-                    isPending={isPending}
-                    disabled={!desktopReachable}
-                    groups={boot.groups}
-                    sessions={sessions}
-                    activeSessionId={activeSessionId}
-                    viewingSessionId={viewingSessionId}
+                    onCreated={() => setSidebarPage('members')}
                   />
                 )}
               </div>
             </div>
+
+            <div
+              ref={sidebarBackdropRef}
+              onClick={closeSidebar}
+              aria-hidden="true"
+              className={`flex-1 bg-black/40 transition-opacity duration-200 ${
+                sidebarShown ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
           </div>
         )}
       </div>

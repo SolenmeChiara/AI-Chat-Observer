@@ -57,6 +57,7 @@ const sameDraft = (a: Draft, b: Draft): boolean =>
 
 const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
   t,
+  lang,
   runAction,
   isPending,
   disabled,
@@ -225,7 +226,9 @@ const AgentEditPanel: React.FC<AgentEditPanelProps> = ({
 
           {providers.length === 0 ? (
             <div className="text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
-              {t('没有可用的供应商')}：{t('这台电脑还没配供应商，或者服务端版本较旧')}
+              {t('没有可用的供应商')}
+              {lang === 'zh' ? '：' : ': '}
+              {t('这台电脑还没配供应商，或者服务端版本较旧')}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">

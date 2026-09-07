@@ -20,19 +20,30 @@ const en: Record<string, string> = {
 
   // 头部 / 状态条
   '跟随电脑': 'Follow computer',
-  '跟随电脑（已开启）': 'Following the computer (on)',
-  '跟随电脑（已关闭）': 'Following the computer (off)',
-  '切换到浅色': 'Switch to light mode',
-  '切换到深色': 'Switch to dark mode',
   '在线': 'Online',
   '离线': 'Offline',
   '自动播放': 'Auto-play',
-  '已暂停': 'Paused',
-  '开启自动播放': 'Start auto-play',
-  '暂停自动播放': 'Pause auto-play',
   '正在生成': 'Generating',
-  '选择会话': 'Select session',
   '未命名会话': 'Untitled session',
+
+  // ---- 四期：侧边栏 ----
+  '菜单': 'Menu',
+  '打开菜单': 'Open menu',
+  '关闭菜单': 'Close menu',
+  '返回': 'Back',
+  '控制': 'Controls',
+  '主题': 'Theme',
+  '浅色': 'Light',
+  '深色': 'Dark',
+  '跟随': 'Auto',
+  '编辑角色': 'Edit agent',
+  '让电脑切到这个会话': 'Open on the computer',
+  '电脑端': 'Computer',
+  '电脑端正在播放': 'The computer is playing',
+  '电脑端已暂停': 'The computer is paused',
+  '会话跟着电脑端走': 'Follow whatever the computer opens',
+  '手机自己选会话': 'Pick sessions on the phone yourself',
+  '深浅色跟随电脑端': 'Light/dark follows the computer',
 
   // 消息列表
   '加载更早': 'Load earlier',
@@ -64,12 +75,10 @@ const en: Record<string, string> = {
 
   // ---- 三期：远程动作 ----
 
-  // 抽屉与分栏
+  // 侧边栏分区（三期叫「抽屉与分栏」，四期改成侧边栏后 key 没变）
   '管理': 'Manage',
-  '关闭': 'Close',
   '成员': 'Members',
   '编辑': 'Edit',
-  '新建': 'New',
   '会话': 'Sessions',
   '电脑端已离线，暂时不能操作': 'The computer is offline, actions are unavailable',
 
@@ -162,7 +171,6 @@ const en: Record<string, string> = {
   '正在看': 'Viewing',
   '还没有任何会话': 'No sessions yet',
   '条': 'msgs',
-  '切过去': 'Switch',
 
   // 发送区：私讯与回复
   '私讯给…': 'Private message…',
