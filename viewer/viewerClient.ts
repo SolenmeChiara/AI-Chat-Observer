@@ -3,7 +3,10 @@
 
 // 纯类型引用：这样整个模块编译后不留任何运行时 import，
 // 合并逻辑可以脱离浏览器单独跑测试（mofalajidui/testMerge.mjs）。
-import type { AgentRole, Message } from '../types';
+import type { AgentRole, Message, MuteInfo } from '../types';
+// 动作通道契约（PHONE_ACTIONS_PLAN.md §2.2–2.6）。三方共用一份，这里只取类型，
+// 不取常量：本模块编译后要保持零运行时 import，合并逻辑才能脱离浏览器单跑（testMerge.mjs）。
+import type { ActionPayloadMap, ActionResult, ActionType, CatalogEvent } from '../server/actionContract';
 
 export const TOKEN_STORAGE_KEY = 'aco-viewer-token';
 
@@ -18,12 +21,54 @@ export const SYNC_OVERLAP = 8;
 // 契约类型（§3.2 / §3.3）
 // ---------------------------------------------------------------------------
 
-/** bootstrap 只吐渲染要用的字段，systemPrompt / providerId 等永远不出电脑 */
+/**
+ * agent 的模型参数子集。**刻意不含 `apiKey`**：`types.ts` 的 `AgentConfig` 里有一个
+ * `apiKey: string`（agent 级覆盖用），那是凭据，手机端既不读也不发。
+ * 字段全可选，因为服务端投影是「白名单挑字段」，缺哪个都不该让界面崩。
+ */
+export interface ViewAgentConfig {
+  temperature?: number | null;
+  topP?: number | null;
+  maxTokens?: number;
+  enableReasoning?: boolean;
+  reasoningBudget?: number;
+}
+
+/**
+ * bootstrap 的 agent 投影。
+ *
+ * 二期之前这里只有 id/name/avatar/role。三期（PHONE_ACTIONS_PLAN §2.7）**有意放宽**：
+ * 手机要能编辑提示词与模型，就得先读得到它们。新的边界是「凭据永不出机，提示词与配置可以」——
+ * `searchConfig`（含 apiKey）、`voiceId`、`voiceProviderId`、`enableGoogleSearch` 服务端显式不投影。
+ * 除前四个字段外一律可选：老服务端（只有一期投影）配新手机端时不能白屏。
+ */
 export interface ViewAgent {
   id: string;
   name: string;
   avatar: string;
   role: AgentRole;
+  providerId?: string;
+  modelId?: string;
+  systemPrompt?: string;
+  color?: string;
+  config?: ViewAgentConfig;
+  mentionOnly?: boolean;
+  enablePM?: boolean;
+  commandMode?: 'text' | 'native';
+  isActive?: boolean;
+}
+
+/** 供应商投影：只有 id / name / type / models，**没有** apiKey、baseUrl 与任何其它字段 */
+export interface ViewProviderModel {
+  id: string;
+  name: string;
+}
+
+export interface ViewProvider {
+  id: string;
+  name: string;
+  type: string;
+  models: ViewProviderModel[];
 }
 
 export interface ViewGroup {
@@ -31,6 +76,8 @@ export interface ViewGroup {
   name: string;
   memberIds: string[];
   adminIds?: string[];
+  mentionOnlyIds?: string[];
+  scenario?: string;
 }
 
 export interface ViewSessionIndex {
@@ -74,6 +121,8 @@ export interface BootstrapData {
   sessions: ViewSessionIndex[];
   settings: ViewSettings;
   presence: PresenceState;
+  /** §2.7 新增。老服务端不给，读的地方一律 `?? []`。 */
+  providers?: ViewProvider[];
 }
 
 export interface SessionPage {
@@ -84,6 +133,8 @@ export interface SessionPage {
   total: number;
   from: number;
   messages: Message[];
+  /** §2.7 新增：该会话的禁言表。老服务端不给。 */
+  mutedAgents?: MuteInfo[];
 }
 
 export interface SessionEventData {
@@ -295,6 +346,27 @@ export function sendControl(sessionId: string, enabled: boolean): Promise<{ id: 
   });
 }
 
+/**
+ * 动作通道（PHONE_ACTIONS_PLAN §2.2）。202 → `{ id }`，那个 id 只代表「已转给电脑端」，
+ * 真正的成败要等 SSE 的 `action-result` 按同一个 id 回来（超时见 ACTION_RESULT_TIMEOUT_MS）。
+ * 错误一律抛 ViewerHttpError：400 bad-request（body 里可能带 field）/ 409 not-active-session /
+ * 503 desktop-offline / 429 rate-limited / 401·403 鉴权。
+ */
+export function sendAction<T extends ActionType>(
+  type: T,
+  payload: ActionPayloadMap[T],
+  sessionId?: string
+): Promise<{ id: string }> {
+  const body: { type: T; payload: ActionPayloadMap[T]; sessionId?: string } = { type, payload };
+  // 不带 sessionId 的动作（agent.update / agent.create）不要塞一个 undefined 键进去，
+  // JSON.stringify 会把它整个丢掉、但显式写出来更容易在抓包里看错。
+  if (sessionId) body.sessionId = sessionId;
+  return apiFetch<{ id: string }>('/api/live/action', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // SSE
 // ---------------------------------------------------------------------------
@@ -303,6 +375,10 @@ export interface LiveHandlers {
   onHello?: (data: HelloEventData) => void;
   onSession?: (data: SessionEventData) => void;
   onPresence?: (data: PresenceState) => void;
+  /** 电脑端执行完一个动作后的回执，按 id 匹配本地等待表 */
+  onActionResult?: (data: ActionResult) => void;
+  /** agents / groups / settings 任一被改写；收到后防抖重拉 bootstrap */
+  onCatalog?: (data: CatalogEvent) => void;
   /** open 且不是首次 = 断线后重连上了，调用方该重拉 bootstrap + 当前会话尾部 */
   onReconnect?: () => void;
   onStatusChange?: (connected: boolean) => void;
@@ -345,6 +421,18 @@ export function connectLiveEvents(handlers: LiveHandlers): () => void {
   bind('hello', handlers.onHello);
   bind('session', handlers.onSession);
   bind('presence', handlers.onPresence);
+  // 服务端广播的形状是可信的（同源 + 鉴权过），但 id / ok 缺一不可，
+  // 少了就没法匹配等待表，宁可丢掉也不要拿 undefined 去查 Map。
+  bind('action-result', (data: unknown) => {
+    const r = data as ActionResult | null;
+    if (!r || typeof r.id !== 'string' || typeof r.ok !== 'boolean') return;
+    handlers.onActionResult?.(r);
+  });
+  bind('catalog', (data: unknown) => {
+    const c = data as CatalogEvent | null;
+    if (!c || typeof c.table !== 'string') return;
+    handlers.onCatalog?.(c);
+  });
 
   return () => {
     try {
