@@ -135,7 +135,8 @@ export interface Message {
 
 export interface MemoryConfig {
   enabled: boolean;
-  threshold: number; // e.g. 20 messages
+  threshold: number; // 未归档消息达到 N 条时触发归档（含 keepRecent 那几条）
+  keepRecent?: number; // 归档时保留最近 N 条原文不归档，默认 5
   summaryModelId: string; // e.g. 'gemini-flash'
   summaryProviderId: string;
   excludePM?: boolean; // 总结时排除私讯
@@ -182,8 +183,15 @@ export interface ChatSession {
   yieldedAtCount?: number; // Message count when first agent yielded (for 5-message cooldown)
 
   // Memory System (独立于群组)
-  summary?: string; // Long term memory text
+  summary?: string; // Long term memory text（公共总结）
   adminNotes?: string[]; // Temporary notes from Admins
+
+  // 归档边界：指向「最后一条已归档」的消息。发给模型的历史 = 严格在它之后的消息。
+  // 兜底顺序：按 id 找 → 找不到（消息被删）按 timestamp > summaryCutoffTs → 两者都没有 = 无边界。
+  summaryCutoffId?: string;
+  summaryCutoffTs?: number;
+  // agentId → 该 agent 的私人记忆（归档私讯的产物，只注入该 agent 自己的 memory 层）
+  privateSummaries?: Record<string, string>;
 
   // 辩论/发言顺序模式
   debateConfig?: DebateConfig;

@@ -270,6 +270,107 @@ export const generateSessionName = async (
   }
 };
 
+/**
+ * 归档调用的返回形状。
+ *
+ * HEAD 只返回文本，三条分支都不读 usage，于是总结（归档后是 1+k 次调用）完全不入账。
+ * 归档比 HEAD 贵得多，费用必须可见，所以这里把 usage 一起带出来交给调用方记账。
+ * usage 取不到就不带（不同网关对 usage 字段的支持参差不齐），不影响文本本身。
+ */
+export interface SummaryResult {
+  text: string;
+  usage?: { input: number; output: number };
+}
+
+/**
+ * 把一段 prompt 发给总结模型，返回文本 + usage。
+ * 三条分支（Gemini / Anthropic / OpenAI-compatible）的超时与重试参数沿用 HEAD 的总结路径。
+ * 抛错交给调用方 catch —— 调用方据此判定「本轮归档失败、不推进边界」。
+ */
+const runSummaryCompletion = async (
+  prompt: string,
+  provider: ApiProvider,
+  modelId: string,
+  outputTokens: number
+): Promise<SummaryResult | null> => {
+  if (provider.type === AgentType.GEMINI) {
+    const ai = getGeminiClient(provider);
+    const res = await ai.models.generateContent({
+      model: modelId,
+      contents: prompt,
+      config: { maxOutputTokens: outputTokens }
+    });
+    const text = res.text?.trim();
+    if (!text) return null;
+    const meta: any = (res as any).usageMetadata;
+    const usage = meta && (typeof meta.promptTokenCount === 'number' || typeof meta.candidatesTokenCount === 'number')
+      ? { input: meta.promptTokenCount || 0, output: meta.candidatesTokenCount || 0 }
+      : undefined;
+    return { text, usage };
+  }
+
+  if (provider.type === AgentType.ANTHROPIC) {
+    if (!provider.baseUrl || !provider.apiKey) return null;
+    const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+    const res = await fetchWithTimeout(
+      `${baseUrl}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': provider.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: modelId,
+          max_tokens: outputTokens,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      },
+      30000,
+      1
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const text = json.content?.[0]?.text?.trim();
+    if (!text) return null;
+    const u = json.usage;
+    const usage = u && (typeof u.input_tokens === 'number' || typeof u.output_tokens === 'number')
+      ? { input: u.input_tokens || 0, output: u.output_tokens || 0 }
+      : undefined;
+    return { text, usage };
+  }
+
+  // OpenAI-compatible
+  if (!provider.baseUrl || !provider.apiKey) return null;
+  const baseUrl = provider.baseUrl.replace(/\/+$/, '');
+  const res = await fetchWithTimeout(
+    `${baseUrl}/chat/completions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}` },
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: 'user', content: prompt }],
+        // HEAD 这里写死 2000，忽略了 outputTokens 参数——summaryMaxTokens 设置对 OpenAI 供应商无效。
+        max_tokens: outputTokens
+      })
+    },
+    30000, // 30 second timeout (longer for summary updates)
+    1 // 1 retry
+  );
+  if (!res.ok) return null;
+  const json = await res.json();
+  const text = json.choices?.[0]?.message?.content?.trim();
+  if (!text) return null;
+  const u = json.usage;
+  const usage = u && (typeof u.prompt_tokens === 'number' || typeof u.completion_tokens === 'number')
+    ? { input: u.prompt_tokens || 0, output: u.completion_tokens || 0 }
+    : undefined;
+  return { text, usage };
+};
+
 export const updateSessionSummary = async (
   currentSummary: string | undefined,
   adminNotes: string[] | undefined,
@@ -279,7 +380,7 @@ export const updateSessionSummary = async (
   allAgents: any[], // to resolve names
   excludePM?: boolean,
   maxTokens?: number
-): Promise<string | null> => {
+): Promise<SummaryResult | null> => {
   const outputTokens = maxTokens || 2000;
 
   // 每行带上时间戳（与发给 agent 的历史行同一格式 MM-DD HH:mm，见 services/shared.ts formatMessageTime）。
@@ -299,6 +400,9 @@ export const updateSessionSummary = async (
     [CONVERSATION CHRONICLE TASK]
     You are the archivist for a group chat, responsible for maintaining a detailed conversation record.
     Your goal is to merge new dialogue into the existing archive, creating a comprehensive timeline.
+    This archive REPLACES the messages it covers: once merged, the participants can no longer read the
+    original text — this record is all they will have. Facts, decisions, relationships between
+    characters, and unresolved threads MUST survive the merge, or they are lost for good.
 
     [EXISTING ARCHIVE]
     ${currentSummary || "No previous records."}
@@ -333,64 +437,81 @@ export const updateSessionSummary = async (
   `;
 
   try {
-     if (provider.type === AgentType.GEMINI) {
-        const ai = getGeminiClient(provider);
-        const res = await ai.models.generateContent({
-           model: modelId,
-           contents: prompt,
-           config: { maxOutputTokens: outputTokens }
-        });
-        return res.text?.trim() || null;
-     } else if (provider.type === AgentType.ANTHROPIC) {
-        // Anthropic uses different endpoint and headers
-        if (!provider.baseUrl || !provider.apiKey) return null;
-        const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-        const res = await fetchWithTimeout(
-            `${baseUrl}/messages`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': provider.apiKey,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-dangerous-direct-browser-access': 'true'
-                },
-                body: JSON.stringify({
-                    model: modelId,
-                    max_tokens: outputTokens,
-                    messages: [{ role: 'user', content: prompt }]
-                })
-            },
-            30000,
-            1
-        );
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json.content?.[0]?.text?.trim() || null;
-     } else {
-        // OpenAI-compatible
-        if (!provider.baseUrl || !provider.apiKey) return null;
-        const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-        const res = await fetchWithTimeout(
-            `${baseUrl}/chat/completions`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${provider.apiKey}` },
-                body: JSON.stringify({
-                    model: modelId,
-                    messages: [{ role: 'user', content: prompt }],
-                    max_tokens: 2000
-                })
-            },
-            30000, // 30 second timeout (longer for summary updates)
-            1 // 1 retry
-        );
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json.choices?.[0]?.message?.content?.trim() || null;
-     }
+     return await runSummaryCompletion(prompt, provider, modelId, outputTokens);
   } catch (e) {
       console.error("Summary update failed", e);
       return null;
+  }
+};
+
+/**
+ * 私人记忆归档：把一批私讯合并进某个 agent 自己的私人记忆。
+ *
+ * 只在 `excludePM` 为真时调用（PM 不进公共总结，改由这里各自归档）。
+ * 输入 = 该 agent 已有私人记忆 + 本批 PM 行 + 刚生成的公共总结（只读背景，防止复述）。
+ * transcript 行格式 `[MM-DD HH:mm] A → B: text`，人类一律显示为 User。
+ *
+ * prompt 里的 `[PRIVATE MEMORY TASK]` 是这条路径的标识（公共总结那条是 `[CONVERSATION CHRONICLE TASK]`）。
+ */
+export const updatePrivateSummary = async (
+  existingPrivate: string | undefined,
+  pmMessages: Message[],
+  publicSummary: string | undefined,
+  agentName: string,
+  provider: ApiProvider,
+  modelId: string,
+  allAgents: any[], // to resolve names
+  maxTokens?: number
+): Promise<SummaryResult | null> => {
+  const outputTokens = maxTokens || 2000;
+
+  const nameOf = (id?: string): string => {
+    if (!id) return 'Unknown';
+    if (id === USER_ID) return 'User';
+    const found = allAgents.find((a: any) => a.id === id);
+    return found ? found.name : (id === 'SYSTEM' ? 'System' : 'Unknown');
+  };
+
+  const transcript = pmMessages.map(m => {
+    const from = m.senderId === USER_ID ? 'User' : nameOf(m.senderId);
+    const to = m.pmTargetId === USER_ID ? 'User' : nameOf(m.pmTargetId);
+    return `[${formatMessageTime(m.timestamp)}] ${from} → ${to}: ${m.text}`;
+  }).join('\n');
+
+  const prompt = `
+    [PRIVATE MEMORY TASK]
+    You maintain the PRIVATE memory of one participant of a group chat: ${agentName}.
+    This memory records only what ${agentName} learned through private messages (PM/私讯).
+    Nobody else can read it, and the messages it covers are about to be dropped from the visible history —
+    once merged, ${agentName} can no longer read the original private messages, only this record.
+
+    [EXISTING PRIVATE MEMORY]
+    ${existingPrivate || "No previous private records."}
+
+    [NEW PRIVATE MESSAGES]
+    ${transcript}
+
+    [PUBLIC SUMMARY — READ-ONLY BACKGROUND]
+    ${publicSummary || "None"}
+
+    [RECORDING PRINCIPLES]
+    1. Record ONLY private-message content. The public summary above is background for context only —
+       never restate or copy it into the private memory.
+    2. Preserve promises, secrets, agreements, requests, and anything ${agentName} was asked to keep quiet.
+    3. Say clearly who told ${agentName} what, and who ${agentName} said what to.
+    4. Merge the new private messages into the existing private memory; do NOT discard earlier private records.
+    5. Keep a rough chronological order.
+    6. Write in the same language the private messages are (mainly) written in.
+
+    [OUTPUT]
+    Output ONLY the updated complete private memory, with no additional commentary.
+    Keep it under 400 words (approximately 700 Chinese characters); condense older entries if needed.
+  `;
+
+  try {
+    return await runSummaryCompletion(prompt, provider, modelId, outputTokens);
+  } catch (e) {
+    console.error("Private summary update failed", e);
+    return null;
   }
 };

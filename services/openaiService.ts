@@ -93,7 +93,12 @@ export async function* streamOpenAIReply(
    * see buildQuoteFollowupHint). Never enters the cacheable system message, and the tools
    * array is identical between the two legs so prefix caching still matches.
    */
-  followupHint?: string
+  followupHint?: string,
+  /**
+   * 该 agent 的私人记忆（归档私讯的产物）。位置参数表很长且相邻多为 string，在中间插参数
+   * 会静默错位而 tsc 不报——所以一律追加在最末。为空时 memory 层与 HEAD 逐字节一致。
+   */
+  privateSummary?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -124,7 +129,7 @@ export async function* streamOpenAIReply(
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
-  const memoryContext = buildMemoryContext(summary, adminNotes);
+  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary);
 
   // System Prompt Injection. Only the cacheable tiers (persona/protocols + shared memory)
   // go in the system message: OpenAI's automatic prefix caching matches from the very
@@ -500,7 +505,9 @@ export async function* streamOpenAIResponsesReply(
   hidePreJoinMessages?: Record<string, boolean>,
   signal?: AbortSignal,
   /** Per-turn quote-followup hint; rides the tail input item only (see buildQuoteFollowupHint). */
-  followupHint?: string
+  followupHint?: string,
+  /** 该 agent 的私人记忆；一律追加在参数表最末（中间插参数会静默错位）。为空时 memory 层 byte 不变。 */
+  privateSummary?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -521,7 +528,7 @@ export async function* streamOpenAIResponsesReply(
   const memberList = buildMemberList(allAgents, agent, groupAdminIds, humanDisguise, mentionOnlyIds);
   const attentionInstruction = buildAttentionInstruction(visibleMessages, agent, allAgents, commandMode);
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
-  const memoryContext = buildMemoryContext(summary, adminNotes);
+  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary);
   // `instructions` is the head of the Responses cache prefix — only the cacheable tiers
   // (persona/protocols + shared memory) belong here. Per-turn lines go on the tail turn.
   const systemParts = buildSystemPromptParts(

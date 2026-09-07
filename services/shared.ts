@@ -299,13 +299,71 @@ export function buildSystemPrompt(
 }
 
 /**
- * Build the memory context string from summary and admin notes.
+ * 归档边界那条消息在 `messages` 里的下标；定位不到返回 -1。
+ *
+ * 兜底顺序与 MEMORY_COMPACTION_PLAN §2.1 一致：
+ *   1. 按 `cutoff.id` 找到那条消息 → 就是它；
+ *   2. id 找不到（消息被删了）但有 `cutoff.ts` → 取最后一条 `timestamp <= ts` 的下标。
+ *      这里不能用 `timestamp > ts` 过滤：过滤是全局谓词，会把边界之后、但时间戳恰好
+ *      不大于 ts 的消息一起吞掉（同毫秒的兄弟消息、时钟回拨），它们既不在总结里也不在
+ *      窗口里，静默消失。按下标切则只依赖数组顺序。
+ *   3. 两者都没有 → -1（视为无边界）。
+ *
+ * 分割线定位（App.tsx `archiveDividerAfterId`）与上下文裁剪共用本函数，
+ * 保证「画线的那条」和「模型看到的边界」永远是同一条消息，不会各自漂移。
+ *
+ * 纯函数，不改动入参数组。
  */
-export function buildMemoryContext(summary?: string, adminNotes?: string[]): string {
-  return `
+export function findCutoffIndex(
+  messages: Message[],
+  cutoff?: { id?: string; ts?: number }
+): number {
+  if (!cutoff) return -1;
+  const { id, ts } = cutoff;
+  if (id) {
+    const idx = messages.findIndex(m => m.id === id);
+    if (idx >= 0) return idx;
+  }
+  if (typeof ts === 'number') {
+    let found = -1;
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].timestamp <= ts) found = i;
+    }
+    return found;
+  }
+  return -1;
+}
+
+/**
+ * 归档边界裁剪：返回严格在边界之后的消息。定位不到边界时原样返回（视为无边界）。
+ *
+ * 纯函数，不改动入参数组。
+ */
+export function sliceAfterCutoff(
+  messages: Message[],
+  cutoff?: { id?: string; ts?: number }
+): Message[] {
+  const idx = findCutoffIndex(messages, cutoff);
+  if (idx < 0) return messages;
+  return messages.slice(idx + 1);
+}
+
+/**
+ * Build the memory context string from summary and admin notes.
+ *
+ * `privateSummary` 为空（或全是空白）时输出与 HEAD 逐字节一致——没有私讯的 agent 的
+ * memory 层不能因为这次改造多出任何一个 byte，否则白白打断缓存前缀。
+ */
+export function buildMemoryContext(summary?: string, adminNotes?: string[], privateSummary?: string): string {
+  const shared = `
     [SHARED MEMORY]
     Long-Term Summary: ${summary || "None"}
     Recent Admin Notes: ${adminNotes && adminNotes.length > 0 ? adminNotes.join('; ') : "None"}
+  `;
+  if (!privateSummary || !privateSummary.trim()) return shared;
+  return `${shared}
+    [PRIVATE MEMORY] (only you can see this; other members do not know its contents)
+    ${privateSummary.trim()}
   `;
 }
 

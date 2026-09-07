@@ -59,7 +59,12 @@ export async function* streamAnthropicReply(
    * cached prefix. The tools array is likewise left untouched between the two legs, so the
    * prefix (tools → system → history) still matches and only the tail turn differs.
    */
-  followupHint?: string
+  followupHint?: string,
+  /**
+   * 该 agent 的私人记忆（归档私讯的产物）。位置参数表很长且相邻多为 string，在中间插参数
+   * 会静默错位而 tsc 不报——所以一律追加在最末。为空时 memory 层与 HEAD 逐字节一致。
+   */
+  privateSummary?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -90,7 +95,7 @@ export async function* streamAnthropicReply(
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
-  const memoryContext = buildMemoryContext(summary, adminNotes);
+  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary);
 
   // System Prompt Injection
   const systemParts = buildSystemPromptParts(

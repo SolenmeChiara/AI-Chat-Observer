@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Agent, ApiProvider, GlobalSettings, AgentType, ChatSession, ChatGroup, AgentRole, GeminiMode, SearchEngine, TTSEngineType, TTSVoice, TTSProvider, UserProfile } from '../types';
 import { Trash2, Plus, X, Server, DollarSign, Clock, Eye, EyeOff, MessageSquare, GripVertical, RefreshCw, Sliders, BrainCircuit, User, Upload, Zap, ShieldAlert, Shield, BookOpen, Edit3, ScanEye, Moon, Sun, ChevronDown, ChevronRight, Power, PowerOff, Save, RotateCcw, Search, FolderOpen, Folder, Image as ImageIcon, Volume2, Mic, Dices, Sparkles, Download, Smartphone } from 'lucide-react';
 import { getAvatarForModel, AVATAR_MAP } from '../constants';
@@ -7,6 +7,7 @@ import { fetchRemoteModels } from '../services/modelFetcher';
 import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '../services/ttsService';
 import { isImageGenModel } from '../services/openaiService';
 import { formatSessionAsHtml } from '../services/exportHtml';
+import { sliceAfterCutoff } from '../services/shared';
 import type { DbSnapshot } from '../services/db';
 import PhoneViewerModal from './PhoneViewerModal';
 import { useT } from '../i18n';
@@ -476,6 +477,10 @@ interface SidebarProps {
   onRenameSession: (id: string, name: string) => void;
   // Memory
   onUpdateSummary: (sessionId: string, summary: string) => void;
+  onUpdatePrivateSummary: (sessionId: string, agentId: string, text: string) => void;
+  onArchiveNow: () => void;
+  onResetMemory: (sessionId: string) => void;
+  isArchiving: boolean;
   // 数据备份：JSON 全量导出 / 导入（services/db.ts）
   exportSnapshot: () => Promise<DbSnapshot>;
   importSnapshot: (snapshot: unknown) => Promise<void>;
@@ -493,6 +498,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   sessions, activeSessionId,
   onCreateSession, onSwitchSession, onDeleteSession, onRenameSession,
   onUpdateSummary,
+  onUpdatePrivateSummary, onArchiveNow, onResetMemory, isArchiving,
   exportSnapshot, importSnapshot,
   isOpen, onClose
 }) => {
@@ -507,6 +513,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Agent card collapse state
   const [collapsedAgents, setCollapsedAgents] = useState<Set<string>>(new Set());
+
+  // 记忆面板里展开的那条私人记忆（agentId），同时只展开一条
+  const [expandedPrivateMemoryId, setExpandedPrivateMemoryId] = useState<string | null>(null);
 
   // User profile editing state
   const [expandedProfileId, setExpandedProfileId] = useState<string | null>(null);
@@ -885,6 +894,24 @@ const Sidebar: React.FC<SidebarProps> = ({
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const activeGroup = groups.find(g => g.id === activeGroupId);
 
+  // 「立即归档」按下去到底有没有东西可归档：未归档条数减去要保留的尾巴。
+  // 与 App.tsx runArchive 的 range 计算同一套规则（force 只跳过 threshold 检查，尾巴照留）。
+  // useMemo 而不是每次渲染都算：Sidebar 跟着 App 每个流式 chunk 重渲染，这里的 filter 会
+  // 整份复制一遍消息数组。keepRecent 用 Number.isFinite 守卫，理由同 runArchive。
+  const archivableCount = useMemo(() => {
+    if (!activeSession) return 0;
+    // 记忆没开启时 runArchive 直接 return 'skipped'，按钮不该是可点的死按钮
+    if (!activeGroup?.memoryConfig?.enabled) return 0;
+    const kr = activeGroup?.memoryConfig?.keepRecent;
+    const keep = Number.isFinite(kr as number) ? Math.max(0, kr as number) : 5;
+    const unsummarized = sliceAfterCutoff(
+      activeSession.messages,
+      { id: activeSession.summaryCutoffId, ts: activeSession.summaryCutoffTs }
+    ).filter(m => !m.isStreaming);
+    return Math.max(0, unsummarized.length - keep);
+  }, [activeSession?.messages, activeSession?.summaryCutoffId, activeSession?.summaryCutoffTs,
+      activeGroup?.memoryConfig?.keepRecent, activeGroup?.memoryConfig?.enabled]);
+
   // 展开的群组ID集合
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(activeGroupId ? [activeGroupId] : []));
 
@@ -1110,6 +1137,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                                />
                             </div>
                             <div>
+                               <label className="text-[10px] text-gray-400 block mb-1">{t('保留最近 (条)')}</label>
+                               <input
+                                  type="number" min="0" max="50"
+                                  className="w-full text-xs p-1.5 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
+                                  value={activeGroup.memoryConfig?.keepRecent ?? 5}
+                                  onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { keepRecent: parseInt(e.target.value) })}
+                               />
+                               {/* 阈值 <= 保留条数时归档范围恒为空，运行时会一直跳过。提示但不阻止保存。 */}
+                               {(activeGroup.memoryConfig?.threshold || 20) <= (activeGroup.memoryConfig?.keepRecent ?? 5) && (
+                                  <p className="text-[10px] text-red-500 mt-1">{t('保留条数必须小于总结阈值')}</p>
+                               )}
+                            </div>
+                            <div>
                                <label className="text-[10px] text-gray-400 block mb-1">{t('总结供应商')}</label>
                                <select
                                   className="w-full text-xs p-1.5 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded text-gray-700 dark:text-gray-200"
@@ -1134,7 +1174,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                checked={activeGroup.memoryConfig?.excludePM || false}
                                onChange={(e) => onUpdateGroupMemoryConfig(activeGroup.id, { excludePM: e.target.checked })}
                             />
-                            <span className="text-[10px] text-gray-400">{t('排除私讯')}</span>
+                            <span className="text-[10px] text-gray-400">{t('私讯不进公共总结（各自记入私人记忆）')}</span>
                          </div>
                          {activeGroup.memoryConfig?.summaryProviderId && (
                             <div className="grid grid-cols-2 gap-2">
@@ -1241,12 +1281,66 @@ const Sidebar: React.FC<SidebarProps> = ({
                            <Edit3 size={12}/> {t('当前对话摘要')}
                          </label>
                       </div>
+                      {/* 归档操作：手动跑一次归档 / 整个清掉重来 */}
+                      <div className="flex gap-2 mb-2">
+                         <button
+                            onClick={onArchiveNow}
+                            disabled={isArchiving || archivableCount === 0}
+                            title={archivableCount === 0 ? t('没有可归档的消息') : undefined}
+                            className="flex-1 text-[10px] py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                         >
+                            {isArchiving ? t('归档中…') : (archivableCount === 0 ? t('没有可归档的消息') : t('立即归档'))}
+                         </button>
+                         <button
+                            onClick={() => {
+                               if (window.confirm(t('确定重置本会话的记忆？总结、私人记忆与归档边界都会清空。'))) {
+                                  onResetMemory(activeSession.id);
+                               }
+                            }}
+                            // 归档在途时禁用：归档结束时的函数式提交会把 summary / 边界写回**当时最新**的
+                            // session 上，这中间点的重置会被那次提交无声地盖掉（实测如此）。
+                            disabled={isArchiving}
+                            className="flex-1 text-[10px] py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-600 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                         >
+                            {t('重置记忆')}
+                         </button>
+                      </div>
                       <textarea
                         className="w-full text-xs bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-20 resize-none focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
                         placeholder={t('暂无对话摘要...')}
                         value={activeSession.summary || ''}
                         onChange={(e) => onUpdateSummary(activeSession.id, e.target.value)}
                       />
+                      {/* 私人记忆：按 agent 折叠。没有私人记忆的 agent 不列。 */}
+                      {activeSession.privateSummaries && Object.keys(activeSession.privateSummaries).length > 0 && (
+                         <div className="mt-2">
+                            <label className="text-[10px] text-gray-400 font-bold block mb-1">{t('私人记忆')}</label>
+                            <div className="space-y-1">
+                               {Object.entries(activeSession.privateSummaries).map(([agentId, text]) => {
+                                  const ag = agents.find(a => a.id === agentId);
+                                  const expanded = expandedPrivateMemoryId === agentId;
+                                  return (
+                                     <div key={agentId} className="border border-gray-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                                        <button
+                                           onClick={() => setExpandedPrivateMemoryId(expanded ? null : agentId)}
+                                           className="w-full flex items-center justify-between px-2 py-1.5 bg-gray-50 dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors"
+                                        >
+                                           <span className="text-[10px] text-gray-600 dark:text-gray-300 truncate">{ag?.name || agentId}</span>
+                                           {expanded ? <ChevronDown size={12} className="text-gray-400 shrink-0" /> : <ChevronRight size={12} className="text-gray-400 shrink-0" />}
+                                        </button>
+                                        {expanded && (
+                                           <textarea
+                                              className="w-full text-xs bg-gray-100 dark:bg-zinc-800 border-t border-gray-200 dark:border-zinc-700 p-2 text-gray-600 dark:text-gray-300 h-20 resize-none focus:outline-none custom-scrollbar"
+                                              value={text}
+                                              onChange={(e) => onUpdatePrivateSummary(activeSession.id, agentId, e.target.value)}
+                                           />
+                                        )}
+                                     </div>
+                                  );
+                               })}
+                            </div>
+                         </div>
+                      )}
                       {/* Admin Notes Display */}
                       {activeSession.adminNotes && activeSession.adminNotes.length > 0 && (
                          <div className="bg-amber-50 dark:bg-amber-900/30 p-2 rounded border border-amber-100 dark:border-amber-800 mt-2">
@@ -2282,6 +2376,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     {settings.contextLimit === 0 ? '∞' : `${settings.contextLimit} ${t('条')}`}
                   </span>
                 </div>
+                <p className="text-xs text-gray-400 mt-2">{t('开启记忆归档的群组以归档边界为准，此项不生效')}</p>
              </div>
              <div className="bg-white dark:bg-zinc-900 p-4 rounded-xl border border-gray-200 dark:border-zinc-700 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">

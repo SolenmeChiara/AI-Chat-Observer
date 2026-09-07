@@ -51,6 +51,8 @@ class AIObserverDB extends Dexie {
             memoryConfig: session.memoryConfig || {
               enabled: false,
               threshold: 20,
+              keepRecent: 5,
+              excludePM: true,
               summaryModelId: '',
               summaryProviderId: ''
             },

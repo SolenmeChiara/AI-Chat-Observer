@@ -10,7 +10,7 @@ import StatsPanel from './components/StatsPanel';
 import { streamGeminiReply } from './services/geminiService';
 import { streamOpenAIReply, streamOpenAIResponsesReply, streamImageGeneration, isImageGenModel } from './services/openaiService';
 import { streamAnthropicReply } from './services/anthropicService';
-import { generateSessionName, updateSessionSummary } from './services/summaryService';
+import { generateSessionName, updateSessionSummary, updatePrivateSummary } from './services/summaryService';
 import { AgentType } from './types';
 import { parseFile, compressImage, getBase64Size } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings, exportSnapshot, importSnapshot, getStorageMode } from './services/db';
@@ -20,7 +20,7 @@ import { performSearch, formatSearchResultsForContext, formatSearchResultsForDis
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
-import { buildQuoteFollowupHint } from './services/shared';
+import { buildQuoteFollowupHint, sliceAfterCutoff, findCutoffIndex } from './services/shared';
 import { useLiveBridge, type PresenceReport, type InboxEvent, type ControlEvent } from './services/liveBridge';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
@@ -28,6 +28,12 @@ const formatErrorTimestamp = () => {
   const now = new Date();
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
 };
+
+// 单次归档的消息条数上限。超长老会话（升级后第一次激活时未归档条数 = 全部消息）分批追赶，
+// 避免一次把几千条塞进总结模型的上下文；每批推进一次边界，中途失败也只损失当批。
+const ARCHIVE_BATCH_MAX = 150;
+// 归档失败后的重试冷却：不加这个，每来一条新消息就撞一次失败的模型。
+const ARCHIVE_FAIL_BACKOFF_MS = 60 * 1000;
 
 // 行首伪日志标签的三种 token（都不带 g 标志，test/replace 无 lastIndex 状态）
 const LOG_LABEL_ID = /^\[ID:[^\]\n]*\]\s*/i;
@@ -177,6 +183,17 @@ const App: React.FC = () => {
   const activeGroup = groups.find(g => g.id === activeGroupId) || groups[0];
   const messages = activeSession.messages;
 
+  // 归档分割线画在哪条消息之后：与上下文裁剪共用 findCutoffIndex，两处永远指向同一条消息
+  // （之前是两份各自实现的定位算法，天然漂移点）。没有边界 / 记忆没开 则不画。
+  const archiveDividerAfterId = useMemo<string | undefined>(() => {
+    if (!activeGroup?.memoryConfig?.enabled) return undefined;
+    const idx = findCutoffIndex(activeSession.messages, {
+      id: activeSession.summaryCutoffId,
+      ts: activeSession.summaryCutoffTs
+    });
+    return idx >= 0 ? activeSession.messages[idx].id : undefined;
+  }, [activeSession.messages, activeSession.summaryCutoffId, activeSession.summaryCutoffTs, activeGroup?.memoryConfig?.enabled]);
+
   // 当前群组的成员 (根据 group.memberIds 过滤)
   const sessionMembers = activeGroup?.memberIds
     ? agents.filter(a => activeGroup.memberIds.includes(a.id))
@@ -257,8 +274,21 @@ const App: React.FC = () => {
     disableSearch?: boolean;          // quote 事务专用：第二腿沿用第一腿的 disableSearch
   } | null>(null);
 
-  // Track last message count when summary was triggered (per session)
-  const lastSummaryCountRef = useRef<Map<string, number>>(new Map());
+  // 归档并发保护：正在归档的 sessionId。ref 而不是 state，因为 effect 里要同步读到最新值
+  // （state 更新是异步的，两条消息接连到达会各触发一次 effect，都读到 false 就发两遍）。
+  const summarizingSessionsRef = useRef<Set<string>>(new Set());
+  // sessionId → 上次归档失败的时间戳，ARCHIVE_FAIL_BACKOFF_MS 内不再重试
+  const lastArchiveFailAtRef = useRef<Map<string, number>>(new Map());
+  // 同一件事的 UI 镜像（按钮禁用 / 显示「归档中…」）。ref 不会触发重渲染，所以两份都要有。
+  const [archivingSessionIds, setArchivingSessionIds] = useState<Set<string>>(new Set());
+  // sessionId → 记忆世代号。归档要几秒到几十秒，期间用户可能重置记忆 / 直接编辑摘要或私人
+  // 记忆 / 清空记录，而归档结束时的函数式提交会无条件把这些字段写回去，把用户的手写盖掉。
+  // 归档开始时记下世代号，提交前对不上就整轮作废：手写优先于机器总结。ref 而不是 state，
+  // 因为归档闭包要同步读到最新值（state 快照永远是归档开始那一刻的）。
+  const memoryGenRef = useRef<Map<string, number>>(new Map());
+  const bumpMemoryGen = useCallback((sessionId: string) => {
+    memoryGenRef.current.set(sessionId, (memoryGenRef.current.get(sessionId) || 0) + 1);
+  }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -294,6 +324,8 @@ const App: React.FC = () => {
           memoryConfig: g.memoryConfig || {
             enabled: false,
             threshold: 20,
+            keepRecent: 5,
+            excludePM: true,
             summaryModelId: '',
             summaryProviderId: ''
           }
@@ -456,6 +488,8 @@ const App: React.FC = () => {
       memoryConfig: {
         enabled: false,
         threshold: 20,
+        keepRecent: 5,
+        excludePM: true,
         summaryModelId: '',
         summaryProviderId: ''
       },
@@ -583,7 +617,39 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSummary = (id: string, summary: string) => {
+    bumpMemoryGen(id); // 用户在手改摘要：在途的归档提交时会发现世代变了，整轮作废
     setSessions(prev => prev.map(s => s.id === id ? { ...s, summary } : s));
+  };
+
+  // 私人记忆直接编辑（与公共总结同款交互：直写，不做 draft）
+  const handleUpdatePrivateSummary = (sessionId: string, agentId: string, text: string) => {
+    bumpMemoryGen(sessionId); // 同上：手改私人记忆也要让在途归档作废
+    setSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      const next = { ...(s.privateSummaries || {}) };
+      next[agentId] = text;
+      return { ...s, privateSummaries: next };
+    }));
+  };
+
+  // 「重置记忆」：清空总结、私人记忆与归档边界。adminNotes 不动（那是用户手写的便签）。
+  // 不做「边界回退」——回退边界而不回退总结会造成下次重复归档，要重来就整个清掉。
+  const handleResetMemory = (sessionId: string) => {
+    bumpMemoryGen(sessionId); // 在途归档提交时会作废（按钮已在 isArchiving 时禁用，这是第二道闸）
+    setSessions(prev => prev.map(s => s.id === sessionId ? {
+      ...s,
+      summary: undefined,
+      privateSummaries: undefined,
+      summaryCutoffId: undefined,
+      summaryCutoffTs: undefined
+    } : s));
+    lastArchiveFailAtRef.current.delete(sessionId);
+  };
+
+  // 「立即归档」：不足 threshold 也跑一次。force 只跳过 threshold 检查，尾巴保留、原子提交、
+  // 失败退避一概不变。
+  const handleArchiveNow = () => {
+    runArchive(activeSessionId, { force: true });
   };
 
   const handleStopAll = () => {
@@ -616,11 +682,17 @@ const App: React.FC = () => {
   }, []);
 
   const handleClearMessages = () => {
+    // 在途归档提交时会作废。否则它会把 cutoffId（指向已不存在的消息）与 cutoffTs（早于一切
+    // 新消息）写回来，此后 hasValidCutoff 因 ts 恒真 → 该会话永久失去 contextLimit 兜底。
+    bumpMemoryGen(activeSessionId);
     updateActiveSession(s => ({
       ...s,
       messages: [],
       yieldedAgentIds: [],
       adminNotes: [],
+      // 消息都没了，边界只会指向不存在的消息、ts 兜底又永远小于新消息。summary 按 HEAD 行为保留。
+      summaryCutoffId: undefined,
+      summaryCutoffTs: undefined,
       debateConfig: s.debateConfig ? { ...s.debateConfig, currentTurnIndex: 0 } : s.debateConfig // 同时 ref 在下面重置
     }));
     setTotalCost(0);
@@ -1138,85 +1210,217 @@ const App: React.FC = () => {
     renameOldSessions();
   }, [isDbLoaded, providers, agents, sessions]);
 
-  // --- MEMORY SUMMARIZATION TRIGGER ---
+  // --- MEMORY ARCHIVING (归档) ---
+  //
+  // 归档 = 把「边界之后、尾巴之前」的消息合并进总结，然后把边界推到本批最后一条。
+  // 归档之后模型只看到 `总结 + 边界之后的消息`（见 services/shared.ts sliceAfterCutoff 与
+  // triggerAgentReply 里的 effectiveContextLimit），所以边界一旦推进，被归档的原文就再也
+  // 回不到上下文里——「公共总结 + 全部私人总结都成功」才允许推进边界，任一失败整轮作废。
+  //
+  // 返回值只用于日志与手动按钮，调用方可以忽略。
+  const runArchive = useCallback(async (
+    sessionId: string,
+    opts: { force?: boolean } = {}
+  ): Promise<'ok' | 'skipped' | 'failed'> => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return 'skipped';
+    const group = groups.find(g => g.id === session.groupId);
+    const conf = group?.memoryConfig;
+    if (!conf || !conf.enabled || !conf.summaryModelId) return 'skipped';
+
+    // 并发保护：同一 session 同时只跑一次归档
+    if (summarizingSessionsRef.current.has(sessionId)) {
+      console.log('[Archive] already running for', sessionId);
+      return 'skipped';
+    }
+    // 失败退避：60 s 内不自动重试，避免每来一条消息就撞一次失败的模型。
+    // 手动「立即归档」(force) 无视退避——用户明确按了按钮却静默无反应比多打一次失败请求更糟。
+    const failedAt = lastArchiveFailAtRef.current.get(sessionId) || 0;
+    if (!opts.force && failedAt && Date.now() - failedAt < ARCHIVE_FAIL_BACKOFF_MS) {
+      console.log(`[Archive] backing off, ${Math.round((ARCHIVE_FAIL_BACKOFF_MS - (Date.now() - failedAt)) / 1000)}s left`);
+      return 'skipped';
+    }
+
+    const provider = providers.find(p => p.id === conf.summaryProviderId);
+    if (!provider) {
+      console.error('[Archive] Provider not found:', conf.summaryProviderId);
+      return 'skipped';
+    }
+
+    // 未归档 = 边界之后的非 streaming 消息
+    const unsummarized = sliceAfterCutoff(
+      session.messages,
+      { id: session.summaryCutoffId, ts: session.summaryCutoffTs }
+    ).filter(m => !m.isStreaming);
+
+    const threshold = conf.threshold || 20;
+    if (!opts.force && unsummarized.length < threshold) return 'skipped';
+
+    // 保留尾巴：最近 keepRecent 条永远保留原文。
+    // Number.isFinite 而不是 typeof === 'number'：设置框清空时 parseInt('') 存进来的是 NaN，
+    // 那会让 slice(0, NaN) 退化成空 range，归档从此静默不跑（Sidebar 的 archivableCount 同款守卫）。
+    const keepRecent = Number.isFinite(conf.keepRecent as number) ? Math.max(0, conf.keepRecent as number) : 5;
+    let range = unsummarized.slice(0, Math.max(0, unsummarized.length - keepRecent));
+    // threshold <= keepRecent 时 range 恒为空，这里就是那个配置错误的运行时保护
+    if (range.length === 0) {
+      console.log('[Archive] nothing to archive (range empty after keeping last', keepRecent, ')');
+      return 'skipped';
+    }
+    range = range.slice(0, ARCHIVE_BATCH_MAX);
+
+    // 记忆世代号快照：提交前若发现变了，说明归档期间用户动过这个会话的记忆，整轮作废。
+    const genAtStart = memoryGenRef.current.get(sessionId) || 0;
+
+    summarizingSessionsRef.current.add(sessionId);
+    setArchivingSessionIds(prev => new Set(prev).add(sessionId));
+    console.log(`[Archive] start: ${range.length} msgs (unsummarized=${unsummarized.length}, keepRecent=${keepRecent}, force=${!!opts.force})`);
+
+    try {
+      let cost = 0;
+
+      // 1. 公共总结
+      const publicRange = conf.excludePM ? range.filter(m => !m.pmTargetId) : range;
+      let publicText = session.summary;
+      if (publicRange.length > 0) {
+        const pub = await updateSessionSummary(
+          session.summary,
+          session.adminNotes,
+          publicRange,
+          provider,
+          conf.summaryModelId,
+          agents,
+          conf.excludePM,
+          conf.summaryMaxTokens
+        );
+        if (!pub || !pub.text) throw new Error('public summary returned null');
+        publicText = pub.text;
+        if (pub.usage) cost += calculateCost(pub.usage, provider, conf.summaryModelId);
+      } else {
+        // 整批都是私讯且 excludePM=true：不发这次调用，也不让空 transcript 把已有总结冲掉
+        console.log('[Archive] public range empty (all PM) — keeping existing summary');
+      }
+
+      // 2. 私人总结（仅 excludePM 为真时；没有私讯的归档一次额外调用都不发）
+      const nextPrivate: Record<string, string> = { ...(session.privateSummaries || {}) };
+      let privateCount = 0;
+      if (conf.excludePM) {
+        const pmByAgent = new Map<string, Message[]>();
+        for (const m of range) {
+          if (!m.pmTargetId) continue;
+          // 参与者 = 发送者 + 目标，人类（USER_ID）不生成私人记忆
+          for (const participant of [m.senderId, m.pmTargetId]) {
+            if (!participant || participant === USER_ID) continue;
+            if (!agents.some(a => a.id === participant)) continue;
+            const list = pmByAgent.get(participant) || [];
+            if (!list.includes(m)) list.push(m);
+            pmByAgent.set(participant, list);
+          }
+        }
+        for (const [agentId, pms] of pmByAgent) {
+          const agentName = agents.find(a => a.id === agentId)?.name || agentId;
+          const res = await updatePrivateSummary(
+            session.privateSummaries?.[agentId],
+            pms,
+            publicText,
+            agentName,
+            provider,
+            conf.summaryModelId,
+            agents,
+            conf.summaryMaxTokens
+          );
+          if (!res || !res.text) throw new Error(`private summary for ${agentName} returned null`);
+          nextPrivate[agentId] = res.text;
+          privateCount++;
+          if (res.usage) cost += calculateCost(res.usage, provider, conf.summaryModelId);
+        }
+      }
+
+      // 3. 世代校验。归档期间用户改过这个会话的记忆（重置 / 编辑摘要 / 编辑私人记忆 / 清空
+      //    记录）就整轮作废：一个字段都不写、边界不推进。用户的手写优先于机器总结。
+      //    这不是失败，所以**不记失败退避**——下一条消息就能重跑；但费用照记，钱已经花了。
+      if ((memoryGenRef.current.get(sessionId) || 0) !== genAtStart) {
+        if (cost > 0) setTotalCost(prev => prev + cost);
+        lastArchiveFailAtRef.current.delete(sessionId);
+        console.log(`[Archive] discarded: memory changed during archive (session ${sessionId})`);
+        return 'skipped';
+      }
+
+      // 4. 原子提交。归档是异步的，期间会有新消息追加——只把记忆相关字段合并到**当时最新**的
+      //    session 上，绝不能用归档开始时的快照整体覆盖，否则归档期间的消息会丢。
+      const lastArchived = range[range.length - 1];
+      let commitLogged = false; // StrictMode 会重跑 updater，两条日志各只打一次
+      setSessions(prev => {
+        const target = prev.find(s => s.id === sessionId);
+        // 额外保险：新边界那条消息已经不在了（消息被删 / 清空，且没走上面那些 handler）→ 同样
+        // 作废。否则会写进一个指向不存在消息的 cutoffId + 早于一切新消息的 cutoffTs，
+        // 让 hasValidCutoff 恒真、该会话永久失去 contextLimit 兜底。
+        if (!target || !target.messages.some(m => m.id === lastArchived.id)) {
+          if (!commitLogged) {
+            commitLogged = true;
+            console.log(`[Archive] discarded: memory changed during archive (session ${sessionId})`);
+          }
+          return prev;
+        }
+        if (!commitLogged) {
+          commitLogged = true;
+          console.log(`[Archive] done: cutoff → ${lastArchived.id}, private summaries: ${privateCount}, cost: $${cost.toFixed(6)}`);
+        }
+        return prev.map(s => s.id === sessionId ? {
+          ...s,
+          summary: publicText,
+          privateSummaries: privateCount > 0 ? nextPrivate : s.privateSummaries,
+          adminNotes: [], // Clear notes after processing
+          summaryCutoffId: lastArchived.id,
+          summaryCutoffTs: lastArchived.timestamp
+        } : s);
+      });
+
+      if (cost > 0) setTotalCost(prev => prev + cost);
+      lastArchiveFailAtRef.current.delete(sessionId);
+      return 'ok';
+    } catch (err) {
+      // 边界不推进，本轮作废，等下次触发（且 60 s 内不重试）
+      lastArchiveFailAtRef.current.set(sessionId, Date.now());
+      console.error('[Archive] failed, cutoff NOT advanced:', err);
+      return 'failed';
+    } finally {
+      summarizingSessionsRef.current.delete(sessionId);
+      setArchivingSessionIds(prev => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+  }, [sessions, groups, providers, agents]);
+
+  // --- MEMORY ARCHIVE TRIGGER ---
+  // 归档完成后若未归档条数仍 ≥ threshold（老会话追赶），summaryCutoffId 变化会让本 effect
+  // 再跑一次，逐批追上。runArchive 故意不进依赖数组：它每次 sessions 变化都会重建，进了
+  // 依赖数组就等于每次 setSessions 都重跑一遍 effect；而 effect 闭包捕获的本来就是本次渲染
+  // 的 runArchive，sessions 永远是新的。
   useEffect(() => {
-    const checkAndSummarize = async () => {
-        // 从群组获取记忆配置
-        const conf = activeGroup?.memoryConfig;
-        if (!conf || !conf.enabled || !conf.summaryModelId) {
-            // Debug: Log why summary is not enabled
-            if (activeSession.messages.length > 0 && activeSession.messages.length % 10 === 0) {
-                console.log('[Summary] Not configured:', {
-                    hasConf: !!conf,
-                    enabled: conf?.enabled,
-                    modelId: conf?.summaryModelId,
-                    providerId: conf?.summaryProviderId
-                });
-            }
-            return;
-        }
-
-        const count = activeSession.messages.length;
-        const lastCount = lastSummaryCountRef.current.get(activeSessionId) || 0;
-        const shouldTrigger = count >= lastCount + conf.threshold;
-
-        console.log(`[Summary] Message count: ${count}, lastSummary: ${lastCount}, threshold: ${conf.threshold}, trigger: ${shouldTrigger}`);
-
-        if (shouldTrigger) {
-            // Trigger Summarization
-            const provider = providers.find(p => p.id === conf.summaryProviderId);
-            if (!provider) {
-                console.error('[Summary] Provider not found:', conf.summaryProviderId);
-                return;
-            }
-
-            // Update last summary count immediately to prevent duplicate triggers
-            lastSummaryCountRef.current.set(activeSessionId, count);
-
-            // Take recent messages (from last summary point)
-            let recent = activeSession.messages.slice(lastCount);
-            if (conf.excludePM) {
-              const beforeCount = recent.length;
-              recent = recent.filter(m => !m.pmTargetId);
-              console.log(`[Summary] excludePM: filtered ${beforeCount - recent.length} PM messages (${beforeCount} → ${recent.length})`);
-            }
-            const notes = activeSession.adminNotes;
-
-            console.log("[Summary] Triggering with", recent.length, "messages, provider:", provider.name, "model:", conf.summaryModelId);
-
-            try {
-                const newSummary = await updateSessionSummary(
-                    activeSession.summary,
-                    notes,
-                    recent,
-                    provider,
-                    conf.summaryModelId,
-                    agents,
-                    conf.excludePM,
-                    conf.summaryMaxTokens
-                );
-
-                if (newSummary) {
-                    console.log("[Summary] Updated successfully:", newSummary.substring(0, 100) + "...");
-                    setSessions(prev => prev.map(s => s.id === activeSessionId ? {
-                        ...s,
-                        summary: newSummary,
-                        adminNotes: [] // Clear notes after processing
-                    }: s));
-                } else {
-                    console.error('[Summary] updateSessionSummary returned null');
-                    // Reset count so it can retry
-                    lastSummaryCountRef.current.set(activeSessionId, lastCount);
-                }
-            } catch (err) {
-                console.error('[Summary] Error:', err);
-                // Reset count so it can retry
-                lastSummaryCountRef.current.set(activeSessionId, lastCount);
-            }
-        }
-    };
-    checkAndSummarize();
-  }, [activeSession.messages.length, activeGroup?.memoryConfig, activeSessionId, providers, agents]);
+    const conf = activeGroup?.memoryConfig;
+    if (!conf || !conf.enabled || !conf.summaryModelId) {
+      if (activeSession.messages.length > 0 && activeSession.messages.length % 10 === 0) {
+        console.log('[Archive] Not configured:', {
+          hasConf: !!conf,
+          enabled: conf?.enabled,
+          modelId: conf?.summaryModelId,
+          providerId: conf?.summaryProviderId
+        });
+      }
+      return;
+    }
+    runArchive(activeSessionId, {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeSession.messages.length,
+    activeSession.summaryCutoffId,
+    activeGroup?.memoryConfig,
+    activeSessionId,
+    providers,
+    agents
+  ]);
 
 
   // --- CORE LOGIC ---
@@ -1373,6 +1577,9 @@ const App: React.FC = () => {
       const currentGroup = groups.find(g => g.id === activeSession.groupId);
       let scenario = currentGroup?.scenario || "";
       const summary = activeSession.summary;
+      // 该 agent 自己的私人记忆（归档私讯的产物）。只进它自己的 memory 层，没有就是 undefined，
+      // 此时 buildMemoryContext 的输出与 HEAD 逐字节一致。
+      const privateSummary = activeSession.privateSummaries?.[agent.id];
 
       // 辩论模式：注入角色阵营信息到 scenario
       const debateCfg = activeSession.debateConfig;
@@ -1398,16 +1605,42 @@ const App: React.FC = () => {
         : agents.filter(a => a.isActive !== false);
       const adminNotes = activeSession.adminNotes;
 
+      // --- 归档边界裁剪 ---
+      // 群组开启记忆且本会话有**有效**边界 → 历史 = 边界之后的消息，contextLimit 不再参与
+      // （effectiveContextLimit 传 0，四个 adapter 内的 `contextLimit > 0` 守卫会自动跳过量化切片）。
+      // 「有效」= id 还能在消息里找到，或者 id 找不到但有 ts 兜底。两者都不成立（比如边界那条
+      // 被删且没有 ts）就退回既有 contextLimit 窗口，行为与 HEAD 一致——绝不能让一个失效的边界
+      // 变成「不切片」，那会把整段历史原样发出去。
+      const cutoffId = activeSession.summaryCutoffId;
+      const cutoffTs = activeSession.summaryCutoffTs;
+      const hasValidCutoff = !!currentGroup?.memoryConfig?.enabled && (
+        (!!cutoffId && messages.some(m => m.id === cutoffId)) || typeof cutoffTs === 'number'
+      );
+      const baseMessages = hasValidCutoff
+        ? sliceAfterCutoff(messages, { id: cutoffId, ts: cutoffTs })
+        : messages;
+      // 安全阀：总结供应商持续坏掉时边界永远不推进，而「边界之后」= 全部新消息，历史会无上限
+      // 增长（HEAD 至少有 contextLimit 封顶）。未归档条数冲过 max(threshold*3, 60) 就退回
+      // contextLimit 窗口。baseMessages 仍是边界之后的切片，adapter 的量化窗口在它上面再切一刀，
+      // 所以历史有界；边界之前的内容照旧只存在于总结里。归档一旦成功、条数掉回来就自动恢复。
+      const archiveThreshold = currentGroup?.memoryConfig?.threshold || 20;
+      const archiveRunaway = hasValidCutoff && baseMessages.length > Math.max(archiveThreshold * 3, 60);
+      if (archiveRunaway) {
+        console.warn(`[Archive] runaway: ${baseMessages.length} unsummarized messages, falling back to contextLimit window`);
+      }
+      const useCutoffWindow = hasValidCutoff && !archiveRunaway;
+      const effectiveContextLimit = useCutoffWindow ? 0 : settings.contextLimit;
+
       // --- VISION PROXY PREPROCESSING ---
       // If agent has vision proxy enabled, convert images to text descriptions
-      let processedMessages = messages;
+      let processedMessages = baseMessages;
 
       if (agent.config.visionProxyEnabled && agent.config.visionProxyProviderId) {
         const visionProvider = providers.find(p => p.id === agent.config.visionProxyProviderId);
 
         if (visionProvider && visionProvider.apiKey) {
           // Find messages with image attachments (now supports multiple)
-          const messagesWithImages = messages.filter(m =>
+          const messagesWithImages = baseMessages.filter(m =>
             m.attachments?.some(att => att.type === 'image')
           );
 
@@ -1474,7 +1707,8 @@ const App: React.FC = () => {
             }
 
             // Replace image attachments with text descriptions
-            processedMessages = messages.map(msg => {
+            // （在已裁剪的 baseMessages 上 map，否则这里会把归档边界之前的消息又放回来）
+            processedMessages = baseMessages.map(msg => {
               if (!msg.attachments?.some(att => att.type === 'image')) return msg;
 
               const newAttachments = msg.attachments.map((att, idx) => {
@@ -1521,7 +1755,11 @@ const App: React.FC = () => {
         // Build context prompt, truncated to fit API limit (32k chars)
         const IMG_PROMPT_LIMIT = 30000;
         const visibleMsgs = processedMessages.filter(m => !m.isStreaming);
-        const contextWindow = visibleMsgs.slice(-(settings.contextLimit || 20));
+        // 边界有效时 processedMessages 已经是「边界之后」的全部消息，不再二次切片
+        // （HEAD 的 `|| 20` 兜底只在没有边界、contextLimit 又为 0/∞ 时还起作用）。
+        // 用 useCutoffWindow 而不是 hasValidCutoff：安全阀触发时这条路径也要退回窗口切片，
+        // 否则归档持续失败的会话会把无上限的历史塞进图片提示词。
+        const contextWindow = useCutoffWindow ? visibleMsgs : visibleMsgs.slice(-(settings.contextLimit || 20));
         let header = '';
         if (agent.systemPrompt) header += `[System] ${agent.systemPrompt}\n`;
         if (scenario) header += `[Scenario] ${scenario}\n`;
@@ -1632,7 +1870,7 @@ const App: React.FC = () => {
 
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(
-          agent, agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
+          agent, agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           {
             apiKey: provider.apiKey,
             geminiMode: provider.geminiMode,
@@ -1642,31 +1880,31 @@ const App: React.FC = () => {
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
           agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint
+          abortController.signal, followupHint, privateSummary
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
         streamGenerator = streamAnthropicReply(
-          agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
+          agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint
+          abortController.signal, followupHint, privateSummary
         );
       } else if (provider.openaiApiMode === 'responses') {
         console.log(`[${agent.name}] 📡 Using OpenAI Responses API`);
         streamGenerator = streamOpenAIResponsesReply(
-          agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
+          agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint
+          abortController.signal, followupHint, privateSummary
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
         streamGenerator = streamOpenAIReply(
-          agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, settings.contextLimit,
+          agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint
+          abortController.signal, followupHint, privateSummary
         );
       }
 
@@ -2659,7 +2897,8 @@ const App: React.FC = () => {
           abortControllers.current.delete(agentId);
       }
     }
-  }, [agents, providers, groups, messages, settings, processingAgents, activeSession.mutedAgentIds, activeSession.groupId, activeSession.summary, activeSession.adminNotes, activeSessionId, sessions]);
+    // 归档边界推进后旧闭包还在发全量历史 —— 三个记忆字段必须在依赖数组里
+  }, [agents, providers, groups, messages, settings, processingAgents, activeSession.mutedAgentIds, activeSession.groupId, activeSession.summary, activeSession.adminNotes, activeSession.summaryCutoffId, activeSession.summaryCutoffTs, activeSession.privateSummaries, activeSessionId, sessions]);
 
 
   // --- USER ACTION ---
@@ -3559,6 +3798,10 @@ const App: React.FC = () => {
         onCreateSession={handleCreateSession} onSwitchSession={handleSwitchSession}
         onDeleteSession={handleDeleteSession} onRenameSession={handleRenameSession}
         onUpdateSummary={handleUpdateSummary}
+        onUpdatePrivateSummary={handleUpdatePrivateSummary}
+        onArchiveNow={handleArchiveNow}
+        onResetMemory={handleResetMemory}
+        isArchiving={archivingSessionIds.has(activeSessionId)}
         exportSnapshot={exportSnapshot} importSnapshot={importSnapshot}
         isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)}
       />
@@ -3772,8 +4015,8 @@ const App: React.FC = () => {
            
            <div className="max-w-4xl mx-auto w-full">
              {messages.map((msg) => (
+               <React.Fragment key={msg.id}>
                <ChatBubble
-                  key={msg.id}
                   message={msg}
                   sender={agents.find(a => a.id === msg.senderId)}
                   allAgents={sessionMembers}
@@ -3787,6 +4030,15 @@ const App: React.FC = () => {
                   onStopTTS={handleStopTTS}
                   currentPlayingMessageId={currentPlayingMessageId || undefined}
                />
+               {/* 归档边界：这条之后的内容才是模型还看得见原文的部分。样式抄 ChatBubble 的 isSystem 胶囊。 */}
+               {archiveDividerAfterId === msg.id && (
+                 <div className="flex w-full mb-6 justify-center">
+                   <span className="text-xs bg-gray-100 dark:bg-zinc-900 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full border border-gray-200 dark:border-zinc-700">
+                     {tt('以上内容已归档进记忆')}
+                   </span>
+                 </div>
+               )}
+               </React.Fragment>
              ))}
              
              <div ref={messagesEndRef} />
