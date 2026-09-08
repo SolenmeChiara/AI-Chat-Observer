@@ -23,10 +23,13 @@ import {
   Loader2,
   Menu,
   Monitor,
+  MonitorOff,
   Moon,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
-  Send,
+  SendHorizontal,
   Smartphone,
   Sun,
   UserCog,
@@ -258,6 +261,8 @@ const ViewerApp: React.FC = () => {
   const [muteTick, setMuteTick] = useState(0);
   const [pmTargetId, setPmTargetId] = useState<string | null>(null);
   const [showPmPicker, setShowPmPicker] = useState(false);
+  /** 输入区左侧「+」展开的小面板（发图片 / 私讯给…）。六期把两颗方钮并成了一颗。 */
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [replyTo, setReplyTo] = useState<{ id: string; name: string; text: string } | null>(null);
   /** 待发的图片（已压好），最多 ACTION_LIMITS.attachmentsPerMessage 张 */
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
@@ -765,6 +770,7 @@ const ViewerApp: React.FC = () => {
     setReplyTo(null);
     setPmTargetId(null);
     setShowPmPicker(false);
+    setShowPlusMenu(false);
     fetchSessionTail(viewingSessionId, TAIL_SIZE)
       .then(page => {
         if (cancelled || viewingRef.current !== viewingSessionId) return;
@@ -904,25 +910,72 @@ const ViewerApp: React.FC = () => {
     if (rest.length !== pending.length) setPending(rest);
   }, [win, pending]);
 
-  // --- 视口高度：软键盘弹起时把界面压到可见区里 ---
+  // --- 视口高度 / 偏移：软键盘弹起时把界面钉在可见区里 ---
   //
   // 100dvh 只扣浏览器 UI，不扣键盘：iOS 上键盘一起来，输入区就被顶到屏幕外面去了。
-  // visualViewport 才是「现在能看见的那块」。整个界面的高度改跟这个 CSS 变量走。
+  // visualViewport 才是「现在能看见的那块」，高度跟着 --vvh 走。
+  //
+  // 光缩高度还不够（Sol 真机撞到过）：iOS 弹键盘时 Safari 还会把**窗口本身**往下滚
+  // （visualViewport.offsetTop > 0）好让聚焦的输入框进入视野。只缩高不跟偏移的话，
+  // 根容器整个被滚出去，屏幕上半截是输入区、下半截是 body 的空白。
+  // 所以 --vvo 记下 offsetTop，根容器 `position:fixed + translateY(--vvo)` 跟着可视视口平移；
+  // 再把 html/body 锁成不可滚，从源头减少这种「窗口自己跑了」的机会。
+  //
+  // html/body 的锁是 mount 时用内联样式加、unmount 时按原值还回去 —— 不进 src/index.css，
+  // 那份样式表电脑端也在用。
+  const nearBottomRef = useRef(true);
   useEffect(() => {
+    const de = document.documentElement;
+    const body = document.body;
+    const saved = {
+      deOverflow: de.style.overflow,
+      deHeight: de.style.height,
+      deOverscroll: de.style.overscrollBehavior,
+      bodyOverflow: body.style.overflow,
+      bodyHeight: body.style.height,
+      bodyOverscroll: body.style.overscrollBehavior,
+    };
+    de.style.overflow = 'hidden';
+    de.style.height = '100%';
+    de.style.overscrollBehavior = 'none';
+    body.style.overflow = 'hidden';
+    body.style.height = '100%';
+    body.style.overscrollBehavior = 'none';
+
     const vv = window.visualViewport;
-    if (!vv) return;
+    let baseHeight = vv ? Math.round(vv.height * vv.scale) : 0;
+    let lastHeight = baseHeight;
     const apply = () => {
+      if (!vv) return;
       // 捏合放大时 vv.height 会跟着缩水，乘回 scale 才是布局视口那么高，
       // 免得两指一放大整个界面就被压扁（本项目 meta viewport 禁了缩放，这是给别的入口兜底）
-      document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height * vv.scale)}px`);
+      const h = Math.round(vv.height * vv.scale);
+      de.style.setProperty('--vvh', `${h}px`);
+      de.style.setProperty('--vvo', `${Math.max(0, Math.round(vv.offsetTop))}px`);
+      if (h > baseHeight) baseHeight = h; // 地址栏收起来之类，基准跟着涨
+      if (h !== lastHeight) {
+        const grew = h >= baseHeight - 1;
+        lastHeight = h;
+        // 键盘收起：窗口可能还停在被顶下去的位置，归零
+        if (grew && (window.scrollY !== 0 || window.scrollX !== 0)) window.scrollTo(0, 0);
+        // 视口一变高矮，原本贴底的列表要重新贴底
+        if (nearBottomRef.current) requestAnimationFrame(() => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }));
+      }
     };
     apply();
-    vv.addEventListener('resize', apply);
-    vv.addEventListener('scroll', apply);
+    vv?.addEventListener('resize', apply);
+    vv?.addEventListener('scroll', apply);
     return () => {
-      vv.removeEventListener('resize', apply);
-      vv.removeEventListener('scroll', apply);
-      document.documentElement.style.removeProperty('--vvh');
+      vv?.removeEventListener('resize', apply);
+      vv?.removeEventListener('scroll', apply);
+      de.style.removeProperty('--vvh');
+      de.style.removeProperty('--vvo');
+      de.style.overflow = saved.deOverflow;
+      de.style.height = saved.deHeight;
+      de.style.overscrollBehavior = saved.deOverscroll;
+      body.style.overflow = saved.bodyOverflow;
+      body.style.height = saved.bodyHeight;
+      body.style.overscrollBehavior = saved.bodyOverscroll;
     };
   }, []);
 
@@ -955,6 +1008,7 @@ const ViewerApp: React.FC = () => {
     const container = scrollContainerRef.current;
     if (!container) return;
     const near = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+    nearBottomRef.current = near;
     setIsNearBottom(near);
     setShowScrollButton(!near && displayMessages.length > 0);
   }, [displayMessages.length]);
@@ -965,6 +1019,11 @@ const ViewerApp: React.FC = () => {
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
+
+  // 视口变化的处理函数在 effect 闭包里，读不到 state，用 ref 同步一份
+  useEffect(() => {
+    nearBottomRef.current = isNearBottom;
+  }, [isNearBottom]);
 
   // 流式增量不改条数只改最后一条的长度，所以这里要把「最后一条的长度」也算进依赖
   const lastMessage = displayMessages[displayMessages.length - 1];
@@ -1112,6 +1171,7 @@ const ViewerApp: React.FC = () => {
     setSendError('');
     setShowMentionPopup(false);
     setShowPmPicker(false);
+    setShowPlusMenu(false);
     const outgoing = drafts;
     // 先乐观显示。走 message.send 之后落盘 id 由电脑端生成，回执里不一定带得回来，
     // 所以占位的撤销条件比 inbox 时代宽一点（见 pending 清理 effect）。
@@ -1524,8 +1584,14 @@ const ViewerApp: React.FC = () => {
 
   const pmTarget = pmTargetId ? sessionMembers.find(a => a.id === pmTargetId) || null : null;
 
-  /** 头部右端那句只读状态 */
+  /** 侧边栏底部那句只读状态（头部原来也用它，六期换成了播放键） */
   const linkText = desktopReachable ? t('在线') : link === 'connecting' ? t('正在连接...') : t('离线');
+  /** 头部播放键的无障碍标签 */
+  const autoPlayLabel = !desktopReachable
+    ? t('电脑端离线')
+    : presence?.isAutoPlay
+      ? t('暂停自动播放')
+      : t('开始自动播放');
 
   const sidebarTitle =
     sidebarPage === 'members'
@@ -1546,19 +1612,32 @@ const ViewerApp: React.FC = () => {
     <I18nProvider locale={lang}>
       {/* 高度走 --vvh（visualViewport 实测值）而不是 .h-screen：
           src/index.css 里 .h-screen 是 `100dvh !important`，dvh 不扣软键盘，
-          键盘一弹起来输入区就跑到屏幕外面去了。没有 visualViewport 的浏览器落回 100dvh。 */}
+          键盘一弹起来输入区就跑到屏幕外面去了。没有 visualViewport 的浏览器落回 100dvh。
+          position:fixed + translateY(--vvo)：iOS 弹键盘时 Safari 会把窗口本身往下滚，
+          根容器得跟着可视视口平移，否则整块界面被滚出屏幕（详见上面 --vvo 那个 effect）。
+          顺带一提，transform 会让内部 position:fixed 的东西（侧边栏 / toast / 灯箱）
+          以这个容器为基准 —— 正好也是我们要的「贴住可视区」。 */}
       <div
-        className="flex flex-col bg-gray-50 dark:bg-black overflow-hidden relative"
-        style={{ height: 'var(--vvh, 100dvh)' }}
+        className="flex flex-col bg-gray-50 dark:bg-black overflow-hidden"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: 'var(--vvh, 100dvh)',
+          transform: 'translateY(var(--vvo, 0px))',
+        }}
         onTouchStart={handleRootTouchStart}
         onTouchEnd={handleRootTouchEnd}
         onTouchCancel={() => {
           openSwipeRef.current = null;
         }}
       >
-        {/* 头部只剩三样：44×44 的菜单键、会话标题、只读的在线状态。
+        {/* 头部三样：44×44 的菜单键、会话标题、44×44 的自动播放键。
             三期这里塞了会话下拉 + 两颗 32px 圆钮 + 两颗 20px 胶囊，Sol 在真机上够不着——
-            所有能点的东西都搬进侧边栏，那边每行 ≥52px。 */}
+            能点的东西都搬进了侧边栏。六期把只读的「● 在线」换成播放键：
+            Sol 的原话是「你给右上角加一个 auto play 开关吧」，这是全屏最常用的一个动作，
+            为它专门开一次侧边栏太亏。侧边栏那行开关保留，两处同一个 state、同一条 sendControl。 */}
         <header className="shrink-0 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 pl-0.5 pr-3">
           <div className="flex items-center gap-1">
             <button
@@ -1574,16 +1653,30 @@ const ViewerApp: React.FC = () => {
               {currentSession?.name || t('未命名会话')}
             </h1>
 
-            {/* SSE 断了就等于不知道电脑那边什么情况，别再报「在线」；
-                还没握上手的那一小会儿也别急着报「离线」，用中性的「正在连接」占位 */}
-            <span className="shrink-0 flex items-center gap-1.5 text-[12px] text-gray-500 dark:text-gray-400">
-              {link === 'offline' ? (
-                <Loader2 size={11} className="animate-spin text-amber-500 shrink-0" />
+            {/* 自动播放键。四态：pending 转圈禁用 / 电脑离线灰色禁用 / 播放中 ⏸ / 暂停中 ▶。
+                SSE 断了就等于不知道电脑那边什么情况，一律按「够不着」处理（禁用），
+                完整的在线/离线/正在连接仍写在侧边栏底部。 */}
+            <button
+              onClick={() => void handleToggleAutoPlay()}
+              disabled={!desktopReachable || controlPending}
+              aria-label={autoPlayLabel}
+              title={autoPlayLabel}
+              className={`shrink-0 w-11 h-11 flex items-center justify-center rounded-xl ${
+                desktopReachable
+                  ? 'text-emerald-500 active:bg-gray-100 dark:active:bg-zinc-800'
+                  : 'text-gray-400 dark:text-gray-600'
+              } disabled:opacity-60`}
+            >
+              {controlPending ? (
+                <Loader2 size={20} className="animate-spin" />
+              ) : !desktopReachable ? (
+                <MonitorOff size={20} />
+              ) : presence?.isAutoPlay ? (
+                <Pause size={20} />
               ) : (
-                <span className={`w-2 h-2 rounded-full shrink-0 ${desktopReachable ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                <Play size={20} />
               )}
-              {linkText}
-            </span>
+            </button>
           </div>
         </header>
 
@@ -1735,6 +1828,61 @@ const ViewerApp: React.FC = () => {
               </div>
             )}
 
+            {/* 「+」面板：贴着输入区上沿弹，两行都是 ≥48px 的整行命中区。
+                背后一层透明遮罩接「点空白处收起」；它盖住了「+」本身，所以再点一下「+」同样是收起。
+                遮罩是 div 不是 button：不进无障碍焦点顺序，也不算一个可点控件。 */}
+            {showPlusMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  aria-hidden="true"
+                  onClick={() => setShowPlusMenu(false)}
+                />
+                <div className="absolute bottom-full left-0 mb-2 z-50 w-60 max-w-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 shadow-xl rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      fileInputRef.current?.click();
+                    }}
+                    disabled={sending || preparingImages || drafts.length >= ACTION_LIMITS.attachmentsPerMessage}
+                    className="w-full min-h-[48px] flex items-center gap-3 px-4 text-left text-[15px] text-gray-700 dark:text-gray-200 disabled:opacity-40 active:bg-gray-100 dark:active:bg-zinc-800"
+                  >
+                    {preparingImages ? (
+                      <Loader2 size={18} className="shrink-0 animate-spin text-gray-400" />
+                    ) : (
+                      <ImagePlus size={18} className="shrink-0 text-gray-400" />
+                    )}
+                    <span className="truncate">{t('发图片')}</span>
+                    {drafts.length > 0 && (
+                      <span className="ml-auto shrink-0 text-[12px] text-gray-400">
+                        {drafts.length}/{ACTION_LIMITS.attachmentsPerMessage}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      setShowMentionPopup(false);
+                      setShowPmPicker(true);
+                    }}
+                    disabled={sessionMembers.length === 0}
+                    className="w-full min-h-[48px] flex items-center gap-3 px-4 text-left text-[15px] text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-zinc-800 disabled:opacity-40 active:bg-gray-100 dark:active:bg-zinc-800"
+                  >
+                    <UserCog
+                      size={18}
+                      className={`shrink-0 ${pmTargetId ? 'text-violet-500' : 'text-gray-400'}`}
+                    />
+                    <span className="truncate">{t('私讯给…')}</span>
+                    {pmTarget && (
+                      <span className="ml-auto min-w-0 truncate text-[12px] text-violet-500">{pmTarget.name}</span>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+
             {/* 私讯目标选择器。列表和 @提及弹窗同一套样式，位置也一样（贴着输入区上沿弹）。 */}
             {showPmPicker && (
               <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 shadow-xl rounded-xl w-64 max-h-56 overflow-y-auto overscroll-contain z-50">
@@ -1843,8 +1991,9 @@ const ViewerApp: React.FC = () => {
               }}
               className="relative flex items-end gap-1.5"
             >
-              {/* 图片键。accept="image/*" + multiple：iOS 上点它会给「拍照 / 照片图库 / 浏览」三选一。
-                  input 本身藏起来，因为它自己的样式在各家浏览器上长得都不一样，也不可能做到 44px。 */}
+              {/* 隐藏的 file input。accept="image/*" + multiple：iOS 上触发它会给
+                  「拍照 / 照片图库 / 浏览」三选一。input 本身藏起来，因为它自己的样式
+                  在各家浏览器上长得都不一样，也不可能做到 44px。 */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1856,35 +2005,28 @@ const ViewerApp: React.FC = () => {
                   e.target.value = ''; // 同一张图连选两次也要触发 change
                 }}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={
-                  !canSend || sending || preparingImages || drafts.length >= ACTION_LIMITS.attachmentsPerMessage
-                }
-                aria-label={t('添加图片')}
-                title={t('添加图片')}
-                className="shrink-0 w-11 h-11 rounded-xl border flex items-center justify-center transition-colors disabled:opacity-40 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-gray-400"
-              >
-                {preparingImages ? <Loader2 size={18} className="animate-spin" /> : <ImagePlus size={18} />}
-              </button>
 
+              {/* 一颗「+」代替五期那两颗方钮。Sol 的真机反馈是输入区「有点乱」——
+                  两颗 44px 方钮加输入框在 360 宽下占掉一半。少用的两个动作收进面板，
+                  常用的输入框就宽了 44px。面板里两行都是 ≥48px 的整行命中区。 */}
               <button
                 type="button"
                 onClick={() => {
-                  setShowPmPicker(v => !v);
+                  setShowPlusMenu(v => !v);
                   setShowMentionPopup(false);
+                  setShowPmPicker(false);
                 }}
-                disabled={!canSend || sessionMembers.length === 0}
-                aria-label={t('私讯给…')}
-                title={t('私讯给…')}
+                disabled={!canSend}
+                aria-expanded={showPlusMenu}
+                aria-label={t('更多')}
+                title={t('更多')}
                 className={`shrink-0 w-11 h-11 rounded-xl border flex items-center justify-center transition-colors disabled:opacity-40 ${
-                  pmTargetId
-                    ? 'bg-violet-100 dark:bg-violet-900/40 border-violet-300 dark:border-violet-800 text-violet-700 dark:text-violet-300'
+                  showPlusMenu
+                    ? 'bg-gray-200 dark:bg-zinc-700 border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-200'
                     : 'bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-gray-400'
                 }`}
               >
-                <UserCog size={18} />
+                {preparingImages ? <Loader2 size={20} className="animate-spin" /> : <Plus size={20} />}
               </button>
 
               <div className="relative flex-1 min-w-0">
@@ -1893,21 +2035,28 @@ const ViewerApp: React.FC = () => {
                   value={inputText}
                   onChange={handleInputChange}
                   onKeyDown={handleInputKeyDown}
+                  onFocus={() => {
+                    // iOS 弹键盘时 Safari 会把窗口本身往下滚。根容器已经跟着
+                    // visualViewport 走了，这里再把窗口归零兑一道底。
+                    requestAnimationFrame(() => window.scrollTo(0, 0));
+                  }}
                   disabled={!canSend}
                   rows={1}
                   placeholder={canSend ? t('说点什么...') : sendBlockedReason}
                   className="w-full bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl pl-4 pr-14 py-3 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600 resize-none overflow-y-auto disabled:opacity-60"
                   style={{ minHeight: '52px', maxHeight: '140px' }}
                 />
+                {/* 发送键。lucide 的 Send 本身是个斜着的纸飞机，塔在小方块里看着歪且偏心
+                    （Sol 真机反馈），换成水平向右的 SendHorizontal，44×44 内 flex 居中，不加任何旋转。 */}
                 <button
                   type="submit"
                   disabled={
                     !canSend || (!inputText.trim() && drafts.length === 0) || sending || preparingImages
                   }
                   aria-label={t('发送')}
-                  className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 disabled:opacity-30 shadow-sm"
+                  className="absolute right-1 bottom-1 w-11 h-11 flex items-center justify-center bg-zinc-900 dark:bg-white rounded-xl text-white dark:text-zinc-900 disabled:opacity-30 shadow-sm"
                 >
-                  {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  {sending ? <Loader2 size={20} className="animate-spin" /> : <SendHorizontal size={20} />}
                 </button>
               </div>
             </form>

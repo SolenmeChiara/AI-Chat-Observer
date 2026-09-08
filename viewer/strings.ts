@@ -23,6 +23,10 @@ const en: Record<string, string> = {
   '在线': 'Online',
   '离线': 'Offline',
   '自动播放': 'Auto-play',
+  // 六期：头部右上角的自动播放键（图标键，文案只进 aria-label / title）
+  '开始自动播放': 'Start auto-play',
+  '暂停自动播放': 'Pause auto-play',
+  '电脑端离线': 'The computer is offline',
   '正在生成': 'Generating',
   '未命名会话': 'Untitled session',
 
@@ -191,6 +195,10 @@ const en: Record<string, string> = {
   '取消回复': 'Cancel reply',
   '长按消息可以引用回复': 'Long-press a message to quote it',
   '消息为空或太长（上限 20000 字）': 'Message is empty or too long (20000 chars max)',
+
+  // 发送区：「+」面板（六期：图片键与私讯键并成一颗）
+  '更多': 'More',
+  '发图片': 'Send a photo',
 
   // 发送区：图片
   '添加图片': 'Add image',

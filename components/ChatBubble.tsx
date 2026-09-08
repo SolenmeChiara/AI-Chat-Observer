@@ -196,6 +196,25 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
   // compact 且是连续消息时不重画头像，但要留出同宽占位，否则整组消息的左边缘会错开
   const hideIdentity = !!compact && !!continued;
 
+  // ---- compact（手机）下的图片布局 ----
+  //
+  // 非 compact 一律走 HEAD 的老路径（图片挤在气泡里、150×200 上限），下面这些量在电脑端全是空的。
+  // compact 下图片整块搬到气泡外面：Sol 的真机反馈是「自己发的图片消息是一个巨大的深色圆角框
+  // 把图包在中间」——那个框就是 bg-zinc-900 的气泡。纯图片消息干脆不画气泡，图本身就是圆角卡片；
+  // 文字 + 图片则把网格贴在气泡下方 4px，同侧对齐。文档附件的渲染一点没动，仍在气泡里。
+  const compactImages = compact ? (message.attachments || []).filter(att => att.type === 'image') : [];
+  const compactDocs = compact ? (message.attachments || []).filter(att => att.type === 'document') : [];
+  /** 气泡里还有别的东西要画吗（正文 / 打字指示 / 文档附件）；没有就整个气泡不渲染 */
+  const compactBubbleHasBody = !!message.text?.trim() || !!isStreaming || compactDocs.length > 0;
+  const bareImages = compact && compactImages.length > 0 && !compactBubbleHasBody;
+
+  // 1 张：按比例摆，最高 360px；2–3 张一行等分、4 张 2×2、5 张以上 3 列，
+  // 一律正方形裁切（object-cover）；超过 9 张只画前 9 张，最后一格右下角标 +N。
+  // 点击沿用组件既有的灯箱（裁切图点开看的是原图）。
+  const compactImageCols = compactImages.length <= 3 ? compactImages.length : compactImages.length === 4 ? 2 : 3;
+  const compactImageShown = compactImages.slice(0, 9);
+  const compactImageMore = compactImages.length - compactImageShown.length;
+
   return (
     <div
       className={`flex w-full ${outerSpacing} group ${isUser ? 'justify-end' : 'justify-start'}`}
@@ -268,6 +287,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           </details>
         )}
 
+        {!bareImages && (
         <div
           className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm relative prose prose-sm dark:prose-invert max-w-full overflow-hidden
             ${isUser
@@ -280,10 +300,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
           style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
         >
           {/* Attachments (Multiple) */}
-          {message.attachments && message.attachments.length > 0 && (
+          {/* compact 下图片不在气泡里画（搬到气泡外面去了），只剩文档时这个容器才有意义 */}
+          {message.attachments && message.attachments.length > 0 && (!compact || compactDocs.length > 0) && (
             <div className="mb-3 space-y-2">
               {/* Images */}
-              {message.attachments.filter(att => att.type === 'image').length > 0 && (
+              {!compact && message.attachments.filter(att => att.type === 'image').length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {message.attachments.filter(att => att.type === 'image').map((att, idx) => (
                     <img
@@ -332,7 +353,47 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, sender, allAgents, use
             />
           )}
         </div>
-        
+        )}
+
+        {/* compact 的图片块。宽度上限 72% 列宽（单张与网格同一档，横向不会顶到头像列）；
+            bareImages 时它就是整条消息，否则贴在气泡下方 4px。 */}
+        {compact && compactImages.length > 0 && (
+          <div className={`max-w-[72%] ${bareImages ? '' : 'mt-1'}`}>
+            {compactImages.length === 1 ? (
+              <img
+                src={compactImages[0].content}
+                alt="Image 1"
+                draggable={false}
+                className="rounded-2xl max-w-full max-h-[360px] w-auto object-contain cursor-pointer"
+                onClick={() => setLightboxSrc(compactImages[0].content)}
+              />
+            ) : (
+              <div
+                className={`grid gap-1 rounded-2xl overflow-hidden ${
+                  compactImageCols === 2 ? 'grid-cols-2' : 'grid-cols-3'
+                }`}
+              >
+                {compactImageShown.map((att, idx) => (
+                  <div key={idx} className="relative aspect-square bg-black/5 dark:bg-white/10">
+                    <img
+                      src={att.content}
+                      alt={`Image ${idx + 1}`}
+                      draggable={false}
+                      className="w-full h-full object-cover cursor-pointer"
+                      onClick={() => setLightboxSrc(att.content)}
+                    />
+                    {compactImageMore > 0 && idx === compactImageShown.length - 1 && (
+                      <span className="pointer-events-none absolute bottom-1 right-1 rounded-md bg-black/60 text-white text-[11px] font-semibold leading-none px-1.5 py-1">
+                        +{compactImageMore}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* compact 下这一整行不渲染：时间戳已经并进名字行，操作栏在 readOnly 下本来就是空的 */}
         {!compact && (
         <div className="flex items-center gap-2 mt-1 mx-1 h-4">
