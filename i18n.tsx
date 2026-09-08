@@ -159,6 +159,14 @@ const en: Record<string, string> = {
   '导出全部会话': 'Export All Sessions',
   '导出网页(带图)': 'Export Web Page (with images)',
   '完整数据备份（可原样还原）': 'Full Data Backup (restorable)',
+
+  // Sidebar - 一次性维护：清理历史思考标签
+  '把历史消息正文里的 <thinking> 草稿移进折叠思维链': 'Move inline <thinking> drafts out of old message bodies into the collapsible thought chain',
+  '清理历史思考标签': 'Clean Up Legacy Thinking Tags',
+  '有角色正在生成，稍后再试': 'An agent is generating right now — try again in a moment',
+  '没有检测到内联思考标签，无需清理': 'No inline thinking tags found — nothing to clean up.',
+  '检测到': 'Found',
+  '条消息的正文里含有思考标签。清理后这些内容会移进折叠的思维链，正文只留真正的发言。确定继续吗？': 'message(s) whose body contains thinking tags. Cleaning moves that content into the collapsible thought chain and leaves only the actual reply in the body. Continue?',
   '导出 JSON 备份': 'Export JSON Backup',
   '导入 JSON 备份': 'Import JSON Backup',
   '导出备份失败': 'Backup export failed',

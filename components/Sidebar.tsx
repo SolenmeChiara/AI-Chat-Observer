@@ -481,6 +481,9 @@ interface SidebarProps {
   onArchiveNow: () => void;
   onResetMemory: (sessionId: string) => void;
   isArchiving: boolean;
+  // 一次性维护动作：把历史消息正文里内联的 <thinking> 草稿剥进思维链（扫全部群全部会话）
+  onCleanThinkTags: () => void;
+  isAnyAgentGenerating: boolean;
   // 数据备份：JSON 全量导出 / 导入（services/db.ts）
   exportSnapshot: () => Promise<DbSnapshot>;
   importSnapshot: (snapshot: unknown) => Promise<void>;
@@ -499,6 +502,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onCreateSession, onSwitchSession, onDeleteSession, onRenameSession,
   onUpdateSummary,
   onUpdatePrivateSummary, onArchiveNow, onResetMemory, isArchiving,
+  onCleanThinkTags, isAnyAgentGenerating,
   exportSnapshot, importSnapshot,
   isOpen, onClose
 }) => {
@@ -2555,6 +2559,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                          if (file) void handleImportBackupFile(file);
                        }}
                      />
+                   </div>
+
+                   {/* 一次性维护：清理历史消息正文里内联的思考标签 */}
+                   <div className="mt-4 pt-4 border-t border-gray-200 dark:border-zinc-700">
+                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('把历史消息正文里的 <thinking> 草稿移进折叠思维链')}</p>
+                     <button
+                       onClick={onCleanThinkTags}
+                       disabled={isAnyAgentGenerating}
+                       title={isAnyAgentGenerating ? t('有角色正在生成，稍后再试') : undefined}
+                       className="w-full py-2 border border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                     >
+                       {t('清理历史思考标签')}
+                     </button>
                    </div>
 
                    {/* 手机观众模式：扫码在手机上实时看这台电脑正在跑的群聊 */}

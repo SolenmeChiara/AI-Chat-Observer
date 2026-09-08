@@ -22,7 +22,11 @@ import { safeTruncate } from './textUtils';
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper: Detect Gemini 3+ models (use thinking_level instead of thinkingBudget)
-function isGemini3Model(modelId: string): boolean {
+// 导出给 App.tsx 的思考标签门禁用：思考块重建（本文件 192-197 行）的条件是
+// isGemini3 && reasoningText && reasoningSignature && !hasIncompleteThinking，**没有**
+// enableReasoning 这道条件 —— 所以只要模型是 Gemini 3，哪怕 enableReasoning 关着，
+// 也不能往 reasoningText 里掺没签过名的文字。
+export function isGemini3Model(modelId: string): boolean {
   const lower = modelId.toLowerCase();
   return lower.includes('gemini-3') || lower.includes('gemini3');
 }

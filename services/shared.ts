@@ -272,6 +272,19 @@ Your previous attempt this turn called \`reply\` to quote the message with id ${
 }
 
 /**
+ * Per-turn hint for the "thought-only" followup leg: the previous attempt produced only a
+ * thinking block — an inline <thinking>…</thinking> draft that services/thinkTags.ts stripped
+ * out of the body — and no reply text at all, so nothing was posted. A NATIVE reasoning stream
+ * does not get this leg: a native thinking model truncated by max_tokens mid-thought would just
+ * repeat the same failure at double the cost (see App.tsx hasReasoningThisTurn).
+ * Same contract as buildQuoteFollowupHint: perTurn layer only, never stable/memory.
+ */
+export function buildThoughtOnlyFollowupHint(): string {
+  return `[THOUGHT ONLY]
+Your previous turn contained only a thinking block and no reply text. Write your actual reply now; a thinking block is optional but the reply text is required.`;
+}
+
+/**
  * Assemble the full system prompt as one string (stable + memory + perTurn).
  *
  * LEGACY — currently unused by the chat path and kept only for compatibility with any

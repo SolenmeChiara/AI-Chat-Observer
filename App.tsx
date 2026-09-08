@@ -7,7 +7,7 @@ import Sidebar from './components/Sidebar';
 import RightSidebar from './components/RightSidebar';
 import ChatBubble from './components/ChatBubble';
 import StatsPanel from './components/StatsPanel';
-import { streamGeminiReply } from './services/geminiService';
+import { streamGeminiReply, isGemini3Model } from './services/geminiService';
 import { streamOpenAIReply, streamOpenAIResponsesReply, streamImageGeneration, isImageGenModel } from './services/openaiService';
 import { streamAnthropicReply } from './services/anthropicService';
 import { generateSessionName, updateSessionSummary, updatePrivateSummary } from './services/summaryService';
@@ -20,7 +20,8 @@ import { performSearch, formatSearchResultsForContext, formatSearchResultsForDis
 import { speak, stopTTS, setPlaybackStateCallback, DEFAULT_TTS_PROVIDERS } from './services/ttsService';
 import { parseEntertainmentCommands, formatEntertainmentMessage, EntertainmentCommand, rollDice, drawTarot } from './services/entertainmentService';
 import { isCapabilityAvailable, getCommandMode, type CapabilityContext } from './services/capabilities';
-import { buildQuoteFollowupHint, sliceAfterCutoff, findCutoffIndex } from './services/shared';
+import { buildQuoteFollowupHint, buildThoughtOnlyFollowupHint, sliceAfterCutoff, findCutoffIndex } from './services/shared';
+import { withThinkTagParsing, extractThinkTags, hasThinkTag } from './services/thinkTags';
 import { useLiveBridge, postActionResult, type PresenceReport, type InboxEvent, type ControlEvent } from './services/liveBridge';
 import {
   SESSION_SCOPED_ACTIONS,
@@ -277,6 +278,11 @@ const App: React.FC = () => {
   // 复用搜索事务这套三件套的理由：autoplay 闸门、切会话挂起/恢复、清空消息时的清理
   // 全部现成，语义对 quote 事务同样成立。quote 事务只有 'followup' 一种状态（没有
   // 「请求进行中」阶段——第一腿结束的那一刻就直接进 followup）。
+  //
+  // 2026-09-08：同一种事务多了第二种触发原因 thoughtOnly ——「只想不说」的回合（被
+  // services/thinkTags.ts 从正文里剥走的 <thinking> 草稿；原生思考流不算），正文为空但思考不空。
+  // 机制完全复用，只有第二腿的 per-turn 提示换成 [THOUGHT ONLY]。两种原因可以同时成立，
+  // 此时 quoteReplyToId 与 thoughtOnly 都填，两条提示都带。
   const searchTxnRef = useRef<{
     kind?: 'search' | 'quote';        // 缺省（旧写法）= 'search'
     status: 'searching' | 'followup';
@@ -284,6 +290,7 @@ const App: React.FC = () => {
     sessionId: string;
     query?: string;                   // search 事务专用
     quoteReplyToId?: string;          // quote 事务专用：第二腿要带上的引用目标
+    thoughtOnly?: boolean;            // quote 事务专用：第一腿「只想不说」，第二腿带 [THOUGHT ONLY] 提示
     disableSearch?: boolean;          // quote 事务专用：第二腿沿用第一腿的 disableSearch
   } | null>(null);
 
@@ -677,6 +684,43 @@ const App: React.FC = () => {
       summaryCutoffTs: undefined
     } : s));
     lastArchiveFailAtRef.current.delete(sessionId);
+  };
+
+  // 「清理历史思考标签」：一次性动作，扫全部群全部会话。2026-09-08 之前落库的消息里，
+  // 模型写在正文里的 <thinking>…</thinking> 草稿是原样存着的（别的 agent 读得到、界面上
+  // 尖括号裸露、归档总结也吸得进去）。这里把它剥进 reasoningText，与新回合的待遇对齐。
+  //
+  // 跳过带 reasoningSignature 的消息：那份 reasoningText 会被 anthropicService /
+  // geminiService 回填成带签名的思考块，往里掺一段没签过名的文字，重建出来的块对不上签名
+  // 会被上游 400 拒（门禁同 withThinkTagParsing）。这类消息宁可留着标签。
+  // 用户消息、系统消息、搜索结果消息都不在范围内。
+  // !m.isStreaming：按钮已经用 isAnyAgentGenerating 挡住了活体流式消息，但页面崩溃/断电
+  // 会在库里留下 isStreaming 的半截幽灵消息，那种消息的 <thinking> 多半没闭合，剥完整段
+  // 正文都会进 reasoning、气泡正文变空。这类消息一律不动。
+  const isThinkTagCleanable = (m: Message): boolean =>
+    m.senderId !== USER_ID && !m.isSystem && !m.isSearchResult && !m.isStreaming
+    && !m.reasoningSignature && hasThinkTag(m.text || '');
+
+  const handleCleanThinkTags = () => {
+    const hits = sessions.reduce((n, s) => n + (s.messages || []).filter(isThinkTagCleanable).length, 0);
+    if (hits === 0) {
+      alert(t('没有检测到内联思考标签，无需清理'));
+      return;
+    }
+    if (!window.confirm(`${t('检测到')} ${hits} ${t('条消息的正文里含有思考标签。清理后这些内容会移进折叠的思维链，正文只留真正的发言。确定继续吗？')}`)) return;
+    setSessions(prev => prev.map(s => {
+      if (!(s.messages || []).some(isThinkTagCleanable)) return s;
+      return {
+        ...s,
+        messages: s.messages.map(m => {
+          if (!isThinkTagCleanable(m)) return m;
+          const { text, reasoning } = extractThinkTags(m.text);
+          const merged = [m.reasoningText, reasoning].filter(x => x && x.trim()).join('\n\n');
+          return { ...m, text: text.trim(), reasoningText: merged || undefined };
+        }),
+      };
+    }));
+    console.log(`[ThinkTags] Cleaned ${hits} legacy message(s) across ${sessions.length} session(s)`);
   };
 
   // 「立即归档」：不足 threshold 也跑一次。force 只跳过 threshold 检查，尾巴保留、原子提交、
@@ -1561,7 +1605,13 @@ const App: React.FC = () => {
   // 它同时是三件事：① 预置 detectedReplyId，产出的消息一定带上这条引用；② 让四个 adapter
   // 在 per-turn 层收到 [QUOTE ATTACHED] 提示；③ 作为「本次不是续写腿」的否定条件，保证
   // 第二腿再空也只走 PASS，绝不出现第三腿。
-  const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false, retryCount: number = 0, opts?: { quoteReplyToId?: string }) => {
+  //
+  // opts.thoughtOnly：同一条续写腿的第二种触发原因（2026-09-08）。第一腿只产出了思考
+  // （被 thinkTags 从正文里剥走的 <thinking> 草稿；原生思考流不算）而正文为空，旧路径会
+  // 记「格式输出错误，视为 PASS」——思考白做还被判 PASS。它只做上面的 ②③ 两件事
+  // （提示换成 [THOUGHT ONLY]、同样堵死第三腿），不预置引用。两个原因可以同时成立，
+  // 此时两条提示都带上。
+  const triggerAgentReply = useCallback(async (agentId: string, disableSearch: boolean = false, retryCount: number = 0, opts?: { quoteReplyToId?: string; thoughtOnly?: boolean }) => {
     const agent = agents.find(a => a.id === agentId);
     const agentName = agent?.name || agentId;
 
@@ -1999,7 +2049,11 @@ const App: React.FC = () => {
 
       // 引用续写腿的 per-turn 提示（只进 perTurn 层，不碰 stable/memory，也不动 tools 数组
       // ——两腿的缓存前缀必须逐字节一致，否则 Anthropic 侧整段前缀 miss）。
-      const followupHint = opts?.quoteReplyToId ? buildQuoteFollowupHint(opts.quoteReplyToId) : undefined;
+      // 两个原因可以同时成立（既 quote-only 又 thought-only），提示两条都带。
+      const followupHintParts: string[] = [];
+      if (opts?.quoteReplyToId) followupHintParts.push(buildQuoteFollowupHint(opts.quoteReplyToId));
+      if (opts?.thoughtOnly) followupHintParts.push(buildThoughtOnlyFollowupHint());
+      const followupHint = followupHintParts.length > 0 ? followupHintParts.join('\n') : undefined;
 
       if (provider.type === AgentType.GEMINI) {
         streamGenerator = streamGeminiReply(
@@ -2039,6 +2093,42 @@ const App: React.FC = () => {
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
           abortController.signal, followupHint, privateSummary
         );
+      }
+
+      // 正文里内联的 <think>/<thinking>/<antThinking> 草稿：剥出来当思维链（对用户折叠展示、
+      // 对其他 agent 隐藏），正文里一个字都不留。放在这里是因为四个适配器的产物在这一点上
+      // 汇合，套一次覆盖全部。效果是 accumulatedText 里永远没有草稿 → 草稿里的
+      // {{SEARCH:}}/{{PASS}} 不会被命令正则当真，落库 text 干净，shared.ts 拼给别人的
+      // 上下文本来就不带 reasoningText。
+      //
+      // 门禁：带 signature 的 reasoningText 会被回填成上游的思考块
+      // （anthropicService.ts:176-181 的 thinking+signature、geminiService.ts:192-197 的
+      // thought+thoughtSignature）。把标签里剥出来的普通文字混进那份 reasoningText，重建的
+      // 块与签名对不上，下一轮请求会被上游 400 拒。所以这两条路径一律不套：
+      //   - Anthropic + enableReasoning：重建条件是 enableReasoning && reasoningText &&
+      //     reasoningSignature（anthropicService.ts:112/116/176），门禁取其中的 enableReasoning
+      //     一项，是真实条件的超集；
+      //   - Gemini：重建的真实条件是 isGemini3 && reasoningText && reasoningSignature &&
+      //     !hasIncompleteThinking（geminiService.ts:192），**不看** enableReasoning，所以光
+      //     判 enableReasoning 拦不住 —— 必须把 isGemini3Model 也算进门禁。反过来 enableReasoning
+      //     这一项是多拦的（非 G3 开了 reasoning 也不会重建），保守无害。
+      // 开了原生思考通道的模型本来也不会再往正文里写标签，跳过没有代价。
+      // ⚠️ 已知残留（审查记录，未修）：geminiService.ts:423/438 捕获 thoughtSignature 是
+      // 无条件的，App.tsx 落库时也无条件写。于是「非 G3 Gemini + enableReasoning 关」这一档
+      // 会被包装器写入无签名来源的 reasoningText，却同时存下一个真签名；日后把这个 agent 换成
+      // Gemini 3 模型，那条历史消息就会命中 192 行重建 → 400。要根治得给签名捕获加 isGemini3
+      // 守卫（或对全部 Gemini 都不套包装器），属结构性改动，另行决定。
+      // OpenAI 两条轨始终套：`<think>` 中转站（DeepSeek R1 等）就靠它，而 OpenAI 侧的
+      // reasoning 从来不带签名回填。
+      const rebuildsSignedThinking =
+        (provider.type === AgentType.ANTHROPIC && !!agent.config.enableReasoning)
+        || (provider.type === AgentType.GEMINI && (!!agent.config.enableReasoning || isGemini3Model(agent.modelId)));
+      // 本流有没有真的从正文标签里剥出过思考。thought-only 续写腿只认它 ——
+      // 理由见下面 hasReasoningThisTurn 处的注释。门禁挡掉的两条路径不套包装器，
+      // stripped 恒为 false，那两条路径也就永远不会触发 thought-only 腿。
+      const thinkTagReport = { stripped: false };
+      if (!rebuildsSignedThinking) {
+        streamGenerator = withThinkTagParsing(streamGenerator, thinkTagReport);
       }
 
       let accumulatedText = "";
@@ -2658,6 +2748,20 @@ const App: React.FC = () => {
       // the same agent is re-asked once with the quote carried forward. Decided below, acted on
       // right after (before the isPass branch), because the action is "neither PASS nor speak".
       let isQuoteOnlyTurn = false;
+      // Thought-only turn: the model wrote an inline <thinking> draft and no reply text. Same
+      // followup machinery as the quote-only turn, different per-turn hint. Only a draft that
+      // withThinkTagParsing stripped out of the BODY counts — a native reasoning stream does
+      // not (see hasReasoningThisTurn below for why).
+      let isThoughtOnlyTurn = false;
+      // 只认「解析器从 <thinking> 标签里剥出来的」思考，**不认**原生思考通道
+      // （DeepSeek reasoning_content / OpenRouter delta.reasoning / Responses 轨的
+      // reasoning summary / Anthropic thinking）。原生思考模型在思考阶段就被 max_tokens
+      // 截断、content 为空是个老场景，正确处理一直是 PASS；按 accumulatedReasoning 非空去
+      // 续写一腿，只会用同样的参数重复同一次失败并把钱花两遍。标签思考则相反 —— 模型确实
+      // 想完了，只是把发言写丢了，带 [THOUGHT ONLY] 再问一次通常就有正文。
+      const hasReasoningThisTurn = thinkTagReport.stripped;
+      // 「本次已经是续写腿」的统一判据：两种原因任一成立都算，保证第二腿再空也只走 PASS。
+      const isFollowupLeg = !!opts?.quoteReplyToId || !!opts?.thoughtOnly;
       if (isNativeCommandMode) {
         // Native: strip the same instruction markers the finalText cleanup removes (below),
         // then a turn is a format error ONLY when nothing remains AND there is no {{PASS}}
@@ -2690,15 +2794,22 @@ const App: React.FC = () => {
         //   - !searchTxnRef.current: never clobber a live search transaction (in practice
         //     impossible — the autoplay gate + the followup effect both clear it before this
         //     agent could be triggered — but overwriting it would hang the rotation forever).
-        isQuoteOnlyTurn = isFormatError && !!detectedReplyId && !opts?.quoteReplyToId && !searchTxnRef.current;
-        if (isFormatError && !isQuoteOnlyTurn) isPass = true;
+        isQuoteOnlyTurn = isFormatError && !!detectedReplyId && !isFollowupLeg && !searchTxnRef.current;
+        // 同一个空回合的第二种原因：只想不说。守卫与 quote-only 完全一致。两者可以同时成立
+        // （既调了 reply 又只写了思考），事务按 quote 登记，两条提示都带。
+        isThoughtOnlyTurn = isFormatError && hasReasoningThisTurn && !isFollowupLeg && !searchTxnRef.current;
+        if (isFormatError && !isQuoteOnlyTurn && !isThoughtOnlyTurn) isPass = true;
         // When a tool call arrived with empty text, isPass stays false → speak branch →
         // empty bubble + the search transaction runs (the followup effect re-triggers the reply).
       } else {
         // 记录是否是格式错误导致的 PASS（isPass 此时仍为 false，但没有提取到内容）
         isFormatError = !extractedContent && !isPass;
+        // 文本轨的「只想不说」：在 isPass 被抬起来之前判。模型把整个回合写成了
+        // <thinking>…</thinking>，剥完连 {{RESPONSE:}} 都没有 —— 这不是格式错误该 PASS，
+        // 而是话说了一半，续写一腿。守卫与原生轨一致。
+        isThoughtOnlyTurn = isFormatError && hasReasoningThisTurn && !isFollowupLeg && !searchTxnRef.current;
         // If no valid RESPONSE/PM content found, treat as PASS
-        if (!extractedContent || isPass) {
+        if (!isThoughtOnlyTurn && (!extractedContent || isPass)) {
           isPass = true;
         }
       }
@@ -2713,8 +2824,13 @@ const App: React.FC = () => {
       //   - autoplay 由事务闸门挡住：删占位气泡会让 messages 变化触发一次
       //     autoplay effect，闸门在所有触发路径之前，所以没人能插话；
       //   - finally 照常释放锁（return 不跳过 finally），消费者 effect 随后放行。
-      if (isQuoteOnlyTurn) {
-        console.log(`[QuoteTxn] Quote-only turn, re-asking ${agentId} for the message body (quote → ${detectedReplyId})`);
+      // 2026-09-08：同一条腿多了第二种触发原因 thought-only（只产出思考、正文为空）。
+      // 副作用差分、守卫、计费一律与 quote-only 相同，只有 per-turn 提示不同；两者同时
+      // 成立时按 quote 登记（引用必须传下去），提示两条都带。第一腿的思考不保留 ——
+      // 占位气泡连同它的 reasoningText 一起删掉，第二腿重新想。
+      if (isQuoteOnlyTurn || isThoughtOnlyTurn) {
+        const reasons = [isQuoteOnlyTurn ? `quote → ${detectedReplyId}` : '', isThoughtOnlyTurn ? 'thought-only' : ''].filter(Boolean).join(', ');
+        console.log(`[QuoteTxn] Empty turn (${reasons}), re-asking ${agentId} for the message body`);
         // 第一腿的 token 照常入账：它是一次完整请求（prefill 全额、输出只有一个 tool_use
         // 块），跳过它会让「一回合两次请求」的真实成本在总花费里凭空消失。
         setTotalCost(prev => prev + calculateCost(accumulatedUsage, provider, agent.modelId));
@@ -2727,7 +2843,8 @@ const App: React.FC = () => {
           status: 'followup',
           agentId,
           sessionId: capturedSessionId,
-          quoteReplyToId: detectedReplyId,
+          quoteReplyToId: isQuoteOnlyTurn ? detectedReplyId : undefined,
+          thoughtOnly: isThoughtOnlyTurn || undefined,
           disableSearch,
         };
         return;
@@ -3680,7 +3797,8 @@ const App: React.FC = () => {
   // Since 2026-09-06 it also consumes the quote transaction (kind: 'quote'): a native-track
   // turn that called `reply` and produced no prose. Same machinery, different second leg —
   // the agent is re-asked with the quote carried forward and a per-turn hint, instead of
-  // being asked to respond to search results.
+  // being asked to respond to search results. Since 2026-09-08 that same transaction also
+  // carries thoughtOnly: a turn that produced only a thinking block and no reply text.
   useEffect(() => {
     const txn = searchTxnRef.current;
     if (!txn || txn.status !== 'followup') return;
@@ -3693,8 +3811,9 @@ const App: React.FC = () => {
       if (searchTxnRef.current !== txn) return;
       searchTxnRef.current = null;
       if (txn.kind === 'quote') {
-        console.log(`[QuoteTxn] Quote-only turn, re-asking ${txn.agentId} for the message body`);
-        triggerAgentReply(txn.agentId, txn.disableSearch ?? false, 0, { quoteReplyToId: txn.quoteReplyToId });
+        const why = txn.thoughtOnly ? (txn.quoteReplyToId ? 'quote-only + thought-only' : 'thought-only') : 'quote-only';
+        console.log(`[QuoteTxn] ${why} turn, re-asking ${txn.agentId} for the message body`);
+        triggerAgentReply(txn.agentId, txn.disableSearch ?? false, 0, { quoteReplyToId: txn.quoteReplyToId, thoughtOnly: txn.thoughtOnly });
       } else {
         console.log(`[SearchTxn] Results landed, triggering ${txn.agentId} to respond (search disabled this turn)`);
         triggerAgentReply(txn.agentId, true);
@@ -4142,6 +4261,8 @@ const App: React.FC = () => {
         onArchiveNow={handleArchiveNow}
         onResetMemory={handleResetMemory}
         isArchiving={archivingSessionIds.has(activeSessionId)}
+        onCleanThinkTags={handleCleanThinkTags}
+        isAnyAgentGenerating={processingAgents.size > 0}
         exportSnapshot={exportSnapshot} importSnapshot={importSnapshot}
         isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)}
       />

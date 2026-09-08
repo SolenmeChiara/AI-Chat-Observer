@@ -322,9 +322,11 @@ export async function* streamOpenAIReply(
     let buffer = "";
     let capturedUsage = { input: 0, output: 0 };
 
-    // State for parsing raw <think> tags in content
-    let insideThinkTag = false;
     let receivedDone = false;
+    // 收到过任何一段正文（含思考标签原文）。只用于「流没有 [DONE] 就断了」的判定。
+    // 2026-09-08 前这里挂在「剥掉 <think> 之后还剩正文」上：一个只吐了半截思考标签就
+    // 断线的流会被静默当成正常结束。思考标签的剥离已上移到 withThinkTagParsing，这里
+    // 回归字面语义 —— 上游给过字节就算收到过内容，断流照常报错。
     let hasReceivedContent = false;
 
     // Native tool_calls accumulation, keyed by delta.tool_calls[].index. `name` usually
@@ -384,30 +386,13 @@ export async function* streamOpenAIReply(
                  }
              }
 
-             // 2. Standard Content (check for <think> tags if not using dedicated field)
+             // 2. Standard Content — 原样下发。正文里内联的 <think>/<thinking>/<antThinking>
+             // 标签不在这里剥：那份「很基础」的解析器接不住跨 chunk 切开的标签（`<thi` + `nking>`
+             // 就漏），而且只有这一个适配器有。已统一上移到 services/thinkTags.ts 的
+             // withThinkTagParsing，由 App.tsx 在四个适配器的出口处单点套上。
              if (delta.content) {
-                let text = delta.content;
-
-                // Very basic streaming parser for <think>...</think>
-                if (text.includes('<think>')) {
-                    insideThinkTag = true;
-                    text = text.replace('<think>', '');
-                }
-
-                if (text.includes('</think>')) {
-                    const parts = text.split('</think>');
-                    if (parts[0]) yield { reasoning: parts[0], isComplete: false };
-                    insideThinkTag = false;
-                    if (parts[1]) yield { text: parts[1], isComplete: false };
-                    continue;
-                }
-
-                if (insideThinkTag) {
-                    yield { reasoning: text, isComplete: false };
-                } else {
-                    hasReceivedContent = true;
-                    yield { text: text, isComplete: false };
-                }
+                hasReceivedContent = true;
+                yield { text: delta.content, isComplete: false };
              }
 
              // 3. Native tool call fragments (accumulate; parsed after the stream ends).
