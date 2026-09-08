@@ -12,7 +12,7 @@
 // 任何网络失败都只 console.warn，绝不往上抛——服务端没升级 / 没开局域网时
 // 这些接口全是 404，主界面必须照常能用。
 import { useEffect, useRef } from 'react';
-import { ACTION_TYPES, type ActionEvent, type ActionResult, type ActionType } from '../server/actionContract';
+import { type ActionEvent, type ActionResult, type ActionType } from '../server/actionContract';
 
 export type { ActionEvent, ActionResult, ActionType };
 
@@ -210,12 +210,18 @@ export function useLiveBridge({ enabled, report, onInbox, onControl, onAction }:
           const data = JSON.parse(ev.data) as Partial<ActionEvent>;
           // 逐字段校验：SSE 那头是服务端，但解析出来的仍然是一段外来 JSON，
           // 形状不对就丢掉，绝不让它带着 undefined 走进 App 的分发表。
+          //
+          // **刻意不查 ACTION_TYPES**：这里丢掉的事件是不回执的，手机只能干等 8 秒
+          // 超时。电脑页比服务端旧（浏览器缓存了老 bundle）时，服务端认得的新 type
+          // 在这张表里查不到，一整类动作就变成「电脑端没有回应」，看不出是版本不齐。
+          // 认不认识这个 type 交给 App.tsx 的 handleActionEvent，它的 default 分支
+          // 会回 `unknown-action`，手机上直接显示「电脑端不认识这个动作，可能是旧版本」。
           if (
             !data ||
             typeof data.id !== 'string' ||
             !data.id ||
             typeof data.type !== 'string' ||
-            (ACTION_TYPES as ReadonlyArray<string>).indexOf(data.type) < 0 ||
+            !data.type ||
             !data.payload ||
             typeof data.payload !== 'object' ||
             Array.isArray(data.payload) ||

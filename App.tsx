@@ -3288,12 +3288,26 @@ const App: React.FC = () => {
             reply(false, 'message-not-found');
             return;
           }
+          // 手机传的是纯 base64（契约里不带 data: 前缀，免得 mimeType 有两个来源），
+          // 这里拼回 data URL——types.ts 的 Attachment.content 对图片就是 data URL，
+          // 电脑端本地上传（fileParser.parseFile）产出的也是这个形状，下游一视同仁。
+          // 形状与大小服务端已经验过（含魔数），这里不重复。
+          const rawAtts = payload.attachments;
+          const attachments: Attachment[] | undefined = rawAtts && rawAtts.length > 0
+            ? rawAtts.map(att => ({
+                type: 'image' as const,
+                content: `data:${att.mimeType};base64,${att.data}`,
+                mimeType: att.mimeType,
+                ...(att.fileName ? { fileName: att.fileName } : {})
+              }))
+            : undefined;
           // 用动作 id 当消息 id：SSE 重连后服务端若重推同一条，appendUserMessage 会去重
           const ok = h.appendUserMessage(sessionId, {
             id: evt.id,
             text: payload.text,
             pmTargetId: payload.pmTargetId,
             replyToId: payload.replyToId,
+            attachments,
             parseCommands: !!payload.parseCommands
           });
           reply(ok, ok ? undefined : 'append-failed', ok ? { messageId: evt.id } : undefined);

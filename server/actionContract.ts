@@ -49,7 +49,32 @@ export const ACTION_LIMITS = {
   muteMaxMinutes: 10080, // 7 天；0 = 永久
   maxTokensMax: 200000,
   reasoningBudgetMax: 200000,
+  attachmentBytes: 4 * 1024 * 1024, // 单张图片**解码后**的字节上限
+  attachmentsPerMessage: 4,         // 一条 message.send 最多几张图
+  fileName: 200,                    // 附件原始文件名
 } as const;
+
+/**
+ * 带附件的 `message.send` 允许的请求体上限（其余动作仍走 `SMALL_BODY_BYTES` = 64 KB）。
+ * 4 张 × 4 MB 解码后 ≈ 16 MB，base64 膨胀 4/3 ≈ 21.3 MB，再留一点 JSON 外壳的余量。
+ */
+export const ACTION_BODY_BYTES_WITH_ATTACHMENTS = 24 * 1024 * 1024;
+
+/** 附件只收这四种图片类型（`data` 的魔数必须与之对得上，服务端会验）。 */
+export const ACTION_ATTACHMENT_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
+
+export type ActionAttachmentMimeType = (typeof ACTION_ATTACHMENT_MIME_TYPES)[number];
+
+/**
+ * 手机上传的图片附件。
+ * `data` 是**纯 base64**，不带 `data:image/…;base64,` 前缀——前缀里的 mimeType 会和这里的字段打架，
+ * 只留一个来源。电脑端拼回 data URL 再交给 `appendUserMessage`。
+ */
+export interface ActionAttachment {
+  mimeType: ActionAttachmentMimeType;
+  data: string;
+  fileName?: string;
+}
 
 /** 独立于 inbox / control 的限流桶：每个来源地址每分钟最多 30 次动作。 */
 export const ACTION_RATE_WINDOW_MS = 60_000;
@@ -65,6 +90,12 @@ export interface MessageSendPayload {
   pmTargetId?: string;   // 群成员 agentId；手机端不需要给 'user'
   replyToId?: string;
   parseCommands?: boolean; // 默认 false，与 inbox 一致
+  /**
+   * 图片附件（≤ ACTION_LIMITS.attachmentsPerMessage 张）。
+   * 有附件时 `text` 允许是空串——「只发图不说话」是手机上很常见的一发，
+   * 与电脑端 `handleUserSend`（`!inputText.trim() && attachments.length === 0` 才拦）一致。
+   */
+  attachments?: ActionAttachment[];
 }
 
 export type EmptyPayload = Record<string, never>;

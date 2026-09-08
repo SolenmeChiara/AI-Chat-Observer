@@ -191,6 +191,15 @@ const en: Record<string, string> = {
   '取消回复': 'Cancel reply',
   '长按消息可以引用回复': 'Long-press a message to quote it',
   '消息为空或太长（上限 20000 字）': 'Message is empty or too long (20000 chars max)',
+
+  // 发送区：图片
+  '添加图片': 'Add image',
+  '移除图片': 'Remove image',
+  '图片': 'Image',
+  '最多只能发 4 张图': 'Up to 4 images per message',
+  '只能发图片': 'Images only',
+  '图片太大了（单张上限 4 MB）': 'Image is too large (4 MB max each)',
+  '这张图读不出来': 'Could not read this image',
 };
 
 export function makeViewerT(locale: ViewerLocale): (key: string) => string {

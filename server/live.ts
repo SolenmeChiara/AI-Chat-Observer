@@ -30,6 +30,8 @@ import {
   type Role,
 } from './http';
 import {
+  ACTION_ATTACHMENT_MIME_TYPES,
+  ACTION_BODY_BYTES_WITH_ATTACHMENTS,
   ACTION_LIMITS,
   ACTION_MAX_PER_WINDOW,
   ACTION_RATE_WINDOW_MS,
@@ -477,7 +479,7 @@ const SESSION_TARGET_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>(['se
 
 /** 每个 type 允许出现的 payload 键。白名单之外一律 400，键名进响应体的 field。 */
 const ACTION_PAYLOAD_KEYS: Record<ActionType, string[]> = {
-  'message.send': ['text', 'pmTargetId', 'replyToId', 'parseCommands'],
+  'message.send': ['text', 'pmTargetId', 'replyToId', 'parseCommands', 'attachments'],
   'session.switch': [],
   'group.member.add': ['agentId'],
   'group.member.remove': ['agentId'],
@@ -513,6 +515,76 @@ function badOptionalBool(v: unknown): boolean {
 
 function badOptionalInt(v: unknown, min: number, max: number): boolean {
   return v !== undefined && (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max);
+}
+
+// --- 图片附件（message.send）---
+
+/** 标准 base64（不是 base64url，也不接受换行/空格）：只有这些字符 + 末尾至多两个 `=`，且总长是 4 的倍数。 */
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** 从 base64 长度反推解码后字节数，不用真的把几 MB 解出来。调用前先确认它是合法 base64。 */
+function base64DecodedBytes(data: string): number {
+  let pad = 0;
+  if (data.endsWith('==')) pad = 2;
+  else if (data.endsWith('=')) pad = 1;
+  return (data.length / 4) * 3 - pad;
+}
+
+/**
+ * 魔数与 mimeType 是否对得上。只解前 12 字节（16 个 base64 字符）就够：
+ * WEBP 要看到第 8–11 字节的 'WEBP'，是四种里最长的一条。
+ *
+ * 为什么要验：手机端是可信的，但 lan 角色不只有我们自己的手机页——
+ * 谁拿到 token 都能 POST。mimeType 与内容不符的图会一路存进会话文件，
+ * 再被当成 `image/png` 喂给上游视觉模型，是一条不该开的口子。
+ */
+function magicMatches(mimeType: string, data: string): boolean {
+  let head: Buffer;
+  try {
+    head = Buffer.from(data.slice(0, 16), 'base64');
+  } catch {
+    return false;
+  }
+  if (head.length < 12) return false;
+  switch (mimeType) {
+    case 'image/jpeg':
+      return head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+    case 'image/png':
+      return head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47;
+    case 'image/webp':
+      return head.toString('latin1', 0, 4) === 'RIFF' && head.toString('latin1', 8, 12) === 'WEBP';
+    case 'image/gif':
+      return head.toString('latin1', 0, 4) === 'GIF8';
+    default:
+      return false;
+  }
+}
+
+/**
+ * 校验 message.send 的 attachments。返回出错字段名（`attachments` 或 `attachments[i].xxx`），全对返回 null。
+ * 与别的校验一样**只做形状**：图片能不能解码、宽高多少，服务端一概不管。
+ */
+function validateAttachments(value: unknown): string | null {
+  if (!Array.isArray(value)) return 'attachments';
+  if (value.length > ACTION_LIMITS.attachmentsPerMessage) return 'attachments';
+  const allowedMimes = ACTION_ATTACHMENT_MIME_TYPES as ReadonlyArray<string>;
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    const at = (field: string) => `attachments[${i}].${field}`;
+    if (!isPlainObject(item)) return `attachments[${i}]`;
+    for (const key of Object.keys(item)) {
+      if (key !== 'mimeType' && key !== 'data' && key !== 'fileName') return at(key);
+    }
+    if (typeof item.mimeType !== 'string' || allowedMimes.indexOf(item.mimeType) < 0) return at('mimeType');
+    const data = item.data;
+    if (typeof data !== 'string' || data.length === 0 || data.length % 4 !== 0 || !BASE64_RE.test(data)) {
+      return at('data');
+    }
+    if (base64DecodedBytes(data) > ACTION_LIMITS.attachmentBytes) return at('data');
+    if (!magicMatches(item.mimeType, data)) return at('data');
+    if (badOptionalString(item.fileName, ACTION_LIMITS.fileName)) return at('fileName');
+  }
+  return null;
 }
 
 /**
@@ -572,8 +644,17 @@ function validateActionPayload(type: ActionType, payload: Record<string, unknown
   }
   switch (type) {
     case 'message.send': {
+      // 附件先验：下面「正文能不能是空」要看有没有图
+      let attachmentCount = 0;
+      if (payload.attachments !== undefined) {
+        const bad = validateAttachments(payload.attachments);
+        if (bad) return bad;
+        attachmentCount = (payload.attachments as unknown[]).length;
+      }
       const text = payload.text;
-      if (typeof text !== 'string' || !text.trim() || text.length > ACTION_LIMITS.text) return 'text';
+      if (typeof text !== 'string' || text.length > ACTION_LIMITS.text) return 'text';
+      // 只发图不说话是合法的；一个字没有又一张图没有才是空消息
+      if (!text.trim() && attachmentCount === 0) return 'text';
       if (badOptionalId(payload.pmTargetId)) return 'pmTargetId';
       if (badOptionalId(payload.replyToId)) return 'replyToId';
       if (badOptionalBool(payload.parseCommands)) return 'parseCommands';
@@ -636,9 +717,12 @@ async function handleAction(req: IncomingMessage, res: ServerResponse): Promise<
     sendJson(res, 400, { error: 'expected content-type: application/json' });
     return;
   }
+  // 带图片的 message.send 可以有二十几 MB（4 张 × 4 MB 解码后，base64 再膨胀 4/3），
+  // 所以这里按大上限读；解析出 type / payload 之后再收窄——**放宽只对带附件的
+  // message.send 生效**，别的 type、或没有附件的 message.send 超过 64 KB 仍旧 400 body。
   let raw: string;
   try {
-    raw = await readBody(req, SMALL_BODY_BYTES);
+    raw = await readBody(req, ACTION_BODY_BYTES_WITH_ATTACHMENTS);
   } catch (err: any) {
     sendJson(res, err?.statusCode === 413 ? 413 : 400, { error: err?.message || 'failed to read request body' });
     return;
@@ -666,6 +750,16 @@ async function handleAction(req: IncomingMessage, res: ServerResponse): Promise<
   if (!isPlainObject(payload)) {
     sendJson(res, 400, { error: 'bad-request', field: 'payload' });
     return;
+  }
+  // 收窄：只有真的带了图的 message.send 才允许超过 SMALL_BODY_BYTES。
+  // 这里只看「是不是非空数组」，每一项合不合法交给下面的 validateActionPayload
+  // （它报的 field 更具体，比笼统的 body 好排查）。
+  if (Buffer.byteLength(raw) > SMALL_BODY_BYTES) {
+    const atts = payload.attachments;
+    if (type !== 'message.send' || !Array.isArray(atts) || atts.length === 0) {
+      sendJson(res, 400, { error: 'bad-request', field: 'body' });
+      return;
+    }
   }
   const scoped = SESSION_SCOPED_ACTIONS.has(type);
   const sessionId = typeof parsed.sessionId === 'string' ? parsed.sessionId : '';

@@ -55,7 +55,7 @@
 
 | type | sessionId | payload | 服务端校验 | 电脑端执行 |
 |---|---|---|---|---|
-| `message.send` | 必填 | `{ text: string; pmTargetId?: string; replyToId?: string; parseCommands?: boolean }` | text 非空 ≤ 20000 字符；id 字段 ≤ 128 | `appendUserMessage(sessionId, {...})`；pmTargetId 必须是群成员或 `'user'`，否则失败 |
+| `message.send` | 必填 | `{ text: string; pmTargetId?: string; replyToId?: string; parseCommands?: boolean; attachments?: { mimeType; data; fileName? }[] }` | text ≤ 20000 字符（**有附件时允许空**，一个字没有又一张图没有才算空消息）；id 字段 ≤ 128；附件见下 | `appendUserMessage(sessionId, {...})`；pmTargetId 必须是群成员或 `'user'`，否则失败；附件拼成 data URL 后当 `Attachment{type:'image'}` 传下去 |
 | `session.switch` | 必填（目标） | `{}` | — | `handleSwitchSession(sessionId)`（会话不存在 → 失败）。注意它会 `setIsAutoPlay(false)`，与电脑端行为一致 |
 | `group.member.add` | 必填 | `{ agentId }` | id ≤ 128 | `handleActivateAgent(agentId)`；agent 不存在 → 失败 |
 | `group.member.remove` | 必填 | `{ agentId }` | 同上 | `handleRemoveAgent(agentId)` |
@@ -66,6 +66,12 @@
 | `agent.create` | 不带 | `{ providerId; modelId; name?: string; systemPrompt?: string; joinActiveGroup?: boolean }` | 同上限 | 复用 `handleAddAgentFromRightSidebar` 的构造逻辑（抽成可复用函数），再 patch name/prompt；`joinActiveGroup` 为真时随后 `handleActivateAgent` |
 | `group.create` | 不带 | `{ name?: string }` | name ≤ 100；空白名按未给处理 | `handleCreateGroup({ name })`：建群 + 第一条会话并切过去；回 `data: { groupId, sessionId }`（四期后追加，见 §8.7） |
 | `session.create` | 不带 | `{ groupId: string; name?: string }` | groupId 必填 ≤ 128；name 同上 | `handleCreateSession(groupId, { name })`；群不存在 → `group-not-found`；回 `data: { sessionId }`（见 §8.7） |
+
+`attachments`（§8.8 加）：≤ 4 张；每项只许 `mimeType` / `data` / `fileName` 三个键；`mimeType` ∈ `image/jpeg|png|webp|gif`；
+`data` 是**纯 base64**（不带 `data:` 前缀，长度是 4 的倍数、字符集为标准 base64），解码后 ≤ 4 MB，且**魔数必须与 mimeType 对得上**
+（JPEG `FF D8 FF` / PNG `89 50 4E 47` / WEBP `RIFF….WEBP` / GIF `GIF8`）；`fileName` ≤ 200 字。
+任一不合格 → 400 `field=attachments[i].xxx`。请求体上限：**只有带附件的 `message.send`** 放宽到 `ACTION_BODY_BYTES_WITH_ATTACHMENTS`（24 MB），
+其余动作与无附件的 `message.send` 仍是 64 KB（超了 400 `field=body`），超 24 MB 是 413。
 
 `AgentPatch` 白名单（2.4）之外的任何键（尤其 `searchConfig`、`voiceId`、`providerId` 以外的凭据类）一律 400。
 
@@ -344,3 +350,90 @@ App.tsx 新增 `applyRemoteAgentPatch(agentId, patch)`：
 - 群标题行现在要分 44px 给「+」，长群名在 360 宽下更早开始 `truncate`（仍是省略号，不是硬截）。
 - `session.create` 与 `handleCreateSession` 一样用 `Date.now().toString()` 当会话 id，同一毫秒连发两条会撞 id（既有写法，未改）。
 - §8.6 第 1 条（多个电脑标签页 = 动作执行多遍）对这两个动作同样成立，而且更贵：会建出两个群。
+
+### 8.8 图片上传（2026-09-08，基线 `20b38db`）
+
+手机端此前只能发纯文字：想让 AI 看一张图，得跑回电脑上传。这一轮把 `message.send` 的图片附件补齐，
+四层（契约 / 服务端 / 电脑端 / 手机端）一起动。顺带修了一个与图片无关但同源的坑（见「顺带修」）。
+
+**做了什么**
+
+- 契约 `server/actionContract.ts`：`MessageSendPayload` 加 `attachments?: ActionAttachment[]`
+  （`{ mimeType: 'image/jpeg'|'image/png'|'image/webp'|'image/gif'; data: 纯 base64; fileName? }`——
+  刻意不带 `data:` 前缀，前缀里的 mimeType 会和字段本身打架，只留一个来源）；
+  `ACTION_LIMITS` 加 `attachmentBytes`(4 MB) / `attachmentsPerMessage`(4) / `fileName`(200)；
+  新常量 `ACTION_BODY_BYTES_WITH_ATTACHMENTS = 24 MB`。
+- 服务端 `server/live.ts`：`handleAction` 改成按 24 MB 读 body，解析出 type / payload 之后再收窄——
+  **只有真的带了非空 attachments 数组的 `message.send`** 才允许超过 64 KB，别的一律 400 `field=body`（放宽前的行为原样保留）。
+  新增 `validateAttachments()`：数组长度、键白名单、mimeType 白名单、base64 合法性（正则 + 长度 % 4）、
+  由长度反推的解码字节数、**魔数与 mimeType 比对**、fileName 长度。魔数这一条是给「拿到 token 的不是我们自己的手机页」准备的：
+  mimeType 与内容不符的图会一路存进会话文件，再被当成 `image/png` 喂给上游视觉模型。
+  `message.send` 的 text 校验放宽为「有附件时允许空串」，与电脑端 `handleUserSend` 的
+  `!inputText.trim() && attachments.length === 0` 一致。
+- 电脑端 `App.tsx`：`message.send` 分支把每项拼成 `Attachment { type:'image', content:'data:<mime>;base64,<data>', mimeType, fileName }`
+  再交给 `appendUserMessage`（它本来就收 `attachments`）。形状与大小服务端已经验过，这里不重复。
+- 手机端：新文件 `viewer/imageUpload.ts`（`compressImageForUpload`）——**没有**复用 `services/fileParser.ts`
+  的 `compressImage`，因为那个模块顶层就 `import pdfjs-dist` + `mammoth`，一 import 就把 PDF/DOCX 解析器拖进 viewer chunk。
+  精简版的规则：长边 ≤ 1600px、优先 webp（canvas 不支持才退 jpeg）、目标 ≤ 1 MB（先限尺寸再降质量）、
+  **GIF 原样发**（canvas 重编码只留第一帧，动图就没了；代价是不压缩，超 4 MB 直接拒绝）。
+  `viewer/ViewerApp.tsx`：输入区左侧加一颗 44×44 的图片键（`ImagePlus`，触发隐藏的
+  `<input type=file accept="image/*" multiple>`，iOS 上会给「拍照 / 图库」选项）；输入框上方加缩略图条
+  （64×64 缩略图，右上角一个 24px 的删除圆点、**命中区 44×44**，`overflow-x:auto`）；
+  `handleSend` 带上 attachments，乐观占位气泡用本地 data URL 显示；失败时图和文字一起还回输入区
+  （`PendingAction.draftAttachments`）。`strings.ts` 中英各补 7 条。
+
+**顺带修：`unknown-action` 不再变成「电脑端没有回应」**
+
+Sol 在真机上撞到一类哑火：电脑页的 bundle 比服务端旧时，服务端认得的新 type 在电脑端那份 `ACTION_TYPES` 里查不到，
+`services/liveBridge.ts` 的 `action` 监听会 warn 一句然后**丢掉事件、不回执**，手机只能干等 8 秒超时，
+提示是「电脑端没有回应」——看不出是版本不齐。改成 liveBridge 只校验「id 非空 / type 是非空字符串 / payload 是普通对象」，
+认不认识这个 type 交给 `App.tsx` 的 `handleActionEvent`，它的 `default` 分支回 `unknown-action`
+（这个短码手机端早就有文案：「电脑端不认识这个操作，可能版本太旧」）。
+
+**与设计稿 / 任务书的偏离**
+
+1. 任务书没写「text 可以为空」要服务端配合，但手机端「只发图不说话」必须让服务端放行，
+   所以 `validateActionPayload` 的 text 分支改了（原来是 `!text.trim()` 一律 400）。空文本 + 空附件仍然 400 `field=text`。
+2. 满 4 张时图片键**禁用**，不是「点了再 toast」。超出 4 张的 toast 仍然会出——一次多选 5 张就走这条路。
+3. 缩略图的删除键 44×44 命中区**压在图片右上角内部**（不越出边界），而不是外挂在角上：
+   缩略图条是 `overflow-x:auto`，越界的部分会被裁剪线切掉。可见圆点仍是 24px。
+4. 「发送中缩略图删除键禁用」这条写了（`disabled={sending}`），但实际观察不到：
+   缩略图在发送那一刻就被乐观清空了，删除键此时不存在。只有失败还回来之后才可能同时存在，而同一 key 的动作不会并发。
+5. 4 张 64px 缩略图在 390/360 宽下都排得开（`scrollWidth === clientWidth`），横向滚动不会真的触发；
+   `overflow-x:auto` 是给更窄的屏 / 更大字号兜底的。
+
+**验了什么**（临时端口 5940 / mock 上游 5942 / 回归 mock 实例 5945·5946，临时 `ACO_DATA_DIR` + 假 key，headless Edge CDP 5941）
+
+- 静态：`tsc --noEmit` 与 `tsc --noEmit -p tsconfig.node.json` 各 exit 0；`vite build` exit 0。
+  ViewerApp chunk 67.04 kB → 72.40 kB（gzip 22.43 → 24.31），主 chunk 145.08 kB 未变——没把 pdf/docx 解析器拖进来。
+- 闸门（28 条 + 1 条 413）：合法 JPEG / 只发图不说话 / 空数组 / 大 PNG（body > 64 KB）/ GIF / 4 张 / fileName 200 /
+  解码正好 4 MB 都 202；5 张、非数组、项不是对象、mimeType 不白名单、魔数不符（两向）、非 base64、长度非 4 倍数、
+  空串、非字符串、解码 > 4 MB、fileName 201、未知键、空 text 各自 400 且 field 指对；
+  无附件 100 KB 正文 / `attachments:[]` + 100 KB / `agent.update` 100 KB / `agent.create` 100 KB 全部 400 `field=body`；
+  `agent.update` 正常 202；35 MB body 413。
+- 端到端：手机选 3000×2000 PNG + 200×200 两帧 GIF + 文字 → 缩略图条 → 发送 → 电脑页出现两张内联图 →
+  会话文件里两项附件（第一张 image/webp、长边 1600、26 KB；GIF 与源文件**逐字节一致**，fileName 保住）→
+  手机上真消息顶掉占位、图走 `/api/view/sessions/…/attachments/…?token=` 并真的加载出来 →
+  `agent.trigger` 点名 Alice，mock 上游收到的请求体里出现 `image:image/webp` 与 `image:image/gif` 两个块。
+  失败路径（电脑端回执被改写成 `ok:false`）→ 两张图和文字都还回输入区，占位撤掉，磁盘上那条其实写进去了（证明是回执被改）。
+  私讯 + 图片 → 落盘带 `pmTargetId=agent-a` 与 1 张附件。
+- 界面：390/360 × 中/英四组，共 30 余张截图；机器体检 <44px 可点元素 0、横向溢出 0；
+  软键盘压 300px 时引用条 + 私讯条 + 缩略图条 + 输入框四样仍全在可视区。
+- `unknown-action`：临时给契约加一个 `agent.ping`（服务端认、分发表里没有）做 A/B——
+  新 liveBridge 12 ms 内回 `{ok:false,error:'unknown-action'}`；把旧的 `ACTION_TYPES` 过滤加回去后 6 秒内没有任何回执。临时改动已全部撤掉。
+- 回归：同一台真服务端 + 同一份种子数据下，HEAD 与本轮的 15 条气泡哈希**逐条一致**、header 哈希一致；
+  composer 哈希变了（HEAD 在 mock 实例上仍是 `959b137592a4b15a`，本轮是 `5c990e15690fca62`），
+  差异段就是新插入的隐藏 file input + 图片键那一段，别处一字未动。
+
+**遗留**
+
+- viewer 的乐观占位撤销条件是「同发送者 + 同正文 + 同私讯目标 + 2 分钟内」（三期就这样）。
+  两分钟内发两条一模一样的消息，第二条的占位会被第一条的真消息提前顶掉——加了图之后这条更容易撞上（连发两张同样的图配同一句话）。本轮没动它。
+- 压缩全在主线程做（canvas + toDataURL）。3000×2000 在 headless 上约 1 秒，真机低端 SoC 上会更久；
+  这期间图片键转圈禁用，但页面其余部分也会跟着卡一下。要根治得上 OffscreenCanvas + Worker。
+- `compressImageForUpload` 对 HEIC 依赖浏览器 canvas 解得开（Safari 可以）。解不开时报 `decode-failed`，
+  文案是「这张图读不出来」，没有更具体的引导。
+- 附件走的是内联 base64，一条 4 张图的消息会让会话 JSON 直接大几 MB；
+  `/api/view` 那边有投影（图片换成 URL），但电脑端本地那份仍然是整块 base64（既有设计，未改）。
+- 服务端对带附件的请求先按 24 MB 读进内存再判——拿到 token 的客户端可以用 24 MB 的垃圾体逼服务端分配一次内存。
+  限流桶挡不住（400 在限流之前返回）。lan 角色本来就是「拿到 token 就算自己人」，这里只是把成本从 64 KB 抬到 24 MB。

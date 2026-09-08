@@ -7,7 +7,7 @@
 // 不做 hover-only 交互、不做 Enter 发送（手机软键盘的 Enter 是换行）。
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Agent, Message, MuteInfo } from '../types';
+import { Agent, Attachment, Message, MuteInfo } from '../types';
 import { USER_ID } from '../constants';
 import { I18nProvider } from '../i18n';
 import ChatBubble from '../components/ChatBubble';
@@ -19,6 +19,7 @@ import {
   ChevronRight,
   ChevronUp,
   CornerUpLeft,
+  ImagePlus,
   Loader2,
   Menu,
   Monitor,
@@ -32,8 +33,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { ACTION_RESULT_TIMEOUT_MS, type ActionResult, type ActionType } from '../server/actionContract';
+import { ACTION_LIMITS, ACTION_RESULT_TIMEOUT_MS, type ActionResult, type ActionType } from '../server/actionContract';
 import { makeViewerT } from './strings';
+import { ImagePrepError, compressImageForUpload, type DraftAttachment } from './imageUpload';
 import MembersPanel from './panels/MembersPanel';
 import AgentEditPanel from './panels/AgentEditPanel';
 import AgentCreatePanel from './panels/AgentCreatePanel';
@@ -103,6 +105,8 @@ interface PendingAction {
   /** message.send 专用：失败时要撤掉的乐观占位与要还回输入框的原文 */
   draftMessageId?: string;
   draftText?: string;
+  /** message.send 专用：失败时要还回缩略图条的那几张图（已经压好了，不用重选重压） */
+  draftAttachments?: DraftAttachment[];
   /** session.switch 专用：成功后手机自己也要跟过去的那个会话 */
   targetSessionId?: string;
 }
@@ -255,6 +259,10 @@ const ViewerApp: React.FC = () => {
   const [pmTargetId, setPmTargetId] = useState<string | null>(null);
   const [showPmPicker, setShowPmPicker] = useState(false);
   const [replyTo, setReplyTo] = useState<{ id: string; name: string; text: string } | null>(null);
+  /** 待发的图片（已压好），最多 ACTION_LIMITS.attachmentsPerMessage 张 */
+  const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
+  /** 正在压缩选中的图片：这期间图片键转圈并禁用（大图在手机上要一两秒） */
+  const [preparingImages, setPreparingImages] = useState(false);
 
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -263,6 +271,7 @@ const ViewerApp: React.FC = () => {
   const messageListRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // SSE 回调是「渲染之外」触发的，闭包会锁死旧 state（App.tsx:2908-2915 记过同样的坑），
   // 所以凡是回调要读的 state 都在渲染期同步进 ref。
@@ -564,6 +573,10 @@ const ViewerApp: React.FC = () => {
           setPending(prev => prev.filter(m => m.id !== entry.draftMessageId));
           // 文本还回输入框，但别覆盖用户在这几秒里新打的字
           if (entry.draftText) setInputText(prev => (prev.trim() ? prev : entry.draftText || ''));
+          // 图也还回缩略图条。同理别覆盖用户这几秒里新选的图；
+          // 真要合并的话还得处理「加起来超过 4 张」，得不偿失。
+          const back = entry.draftAttachments;
+          if (back && back.length > 0) setDrafts(prev => (prev.length > 0 ? prev : back));
         }
       }
       return true;
@@ -590,7 +603,9 @@ const ViewerApp: React.FC = () => {
    * 同一个 key 有动作在飞时直接拒绝，避免手指连点发出两份。
    */
   const runAction = useCallback(
-    async <T extends ActionType>(opts: RunActionOptions<T> & { draftMessageId?: string; draftText?: string }): Promise<boolean> => {
+    async <T extends ActionType>(
+      opts: RunActionOptions<T> & { draftMessageId?: string; draftText?: string; draftAttachments?: DraftAttachment[] }
+    ): Promise<boolean> => {
       for (const p of pendingActionsRef.current.values()) {
         if (p.key === opts.key) return false;
       }
@@ -602,6 +617,7 @@ const ViewerApp: React.FC = () => {
         at: Date.now(),
         draftMessageId: opts.draftMessageId,
         draftText: opts.draftText,
+        draftAttachments: opts.draftAttachments,
         // session.switch 的 sessionId 就是「要切去的那个」（不是「当前那个」），
         // 收尾时手机自己也得挪过去，所以在这儿留一份
         targetSessionId: opts.type === 'session.switch' ? opts.sessionId : undefined,
@@ -1033,18 +1049,80 @@ const ViewerApp: React.FC = () => {
     [boot]
   );
 
+  /** 压缩失败的短码 → 人话 */
+  const describeImageError = useCallback(
+    (code: string): string => {
+      switch (code) {
+        case 'not-an-image':
+          return t('只能发图片');
+        case 'too-large':
+          return t('图片太大了（单张上限 4 MB）');
+        default:
+          return t('这张图读不出来');
+      }
+    },
+    [t]
+  );
+
+  /**
+   * 选完图：一张张压（webp/jpeg，长边 ≤ 1600，目标 ≤ 1 MB；GIF 原样），压好一张显示一张。
+   * 超过 4 张的部分直接丢掉并出 toast——不静默截断，不然用户以为都选上了。
+   */
+  const handlePickImages = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const room = ACTION_LIMITS.attachmentsPerMessage - drafts.length;
+      const chosen = Array.from(files);
+      if (room <= 0) {
+        pushToast('err', t('最多只能发 4 张图'));
+        return;
+      }
+      if (chosen.length > room) pushToast('err', t('最多只能发 4 张图'));
+      setPreparingImages(true);
+      try {
+        for (const file of chosen.slice(0, room)) {
+          try {
+            const att = await compressImageForUpload(file);
+            setDrafts(prev =>
+              prev.length >= ACTION_LIMITS.attachmentsPerMessage ? prev : [...prev, att]
+            );
+          } catch (err) {
+            const code = err instanceof ImagePrepError ? err.code : 'decode-failed';
+            pushToast('err', joinToast(file.name || t('图片'), describeImageError(code)));
+          }
+        }
+      } finally {
+        setPreparingImages(false);
+      }
+    },
+    [drafts.length, pushToast, t, joinToast, describeImageError]
+  );
+
+  const removeDraft = useCallback((id: string) => {
+    setDrafts(prev => prev.filter(d => d.id !== id));
+  }, []);
+
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     const sid = viewingRef.current;
-    if (!text || !sid || !canSend || sending) return;
+    // 只发图不说话是允许的（服务端同样放行），一个字没有又一张图没有才拦
+    if ((!text && drafts.length === 0) || !sid || !canSend || sending || preparingImages) return;
 
     setSending(true);
     setSendError('');
     setShowMentionPopup(false);
     setShowPmPicker(false);
+    const outgoing = drafts;
     // 先乐观显示。走 message.send 之后落盘 id 由电脑端生成，回执里不一定带得回来，
     // 所以占位的撤销条件比 inbox 时代宽一点（见 pending 清理 effect）。
+    // 占位气泡里的图用本地 data URL；真消息回来时附件已经被服务端投影成 URL 了。
     const localId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticAtts: Attachment[] = outgoing.map(d => ({
+      type: 'image' as const,
+      content: d.dataUrl,
+      mimeType: d.mimeType,
+      ...(d.fileName ? { fileName: d.fileName } : {}),
+    }));
     const optimistic: Message = {
       id: localId,
       senderId: USER_ID,
@@ -1052,9 +1130,11 @@ const ViewerApp: React.FC = () => {
       timestamp: Date.now(),
       ...(pmTargetId ? { pmTargetId } : {}),
       ...(replyTo ? { replyToId: replyTo.id } : {}),
+      ...(optimisticAtts.length > 0 ? { attachments: optimisticAtts } : {}),
     };
     setPending(prev => [...prev, optimistic]);
     setInputText('');
+    setDrafts([]);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
     const accepted = await runAction({
@@ -1063,6 +1143,15 @@ const ViewerApp: React.FC = () => {
         text,
         ...(pmTargetId ? { pmTargetId } : {}),
         ...(replyTo ? { replyToId: replyTo.id } : {}),
+        ...(outgoing.length > 0
+          ? {
+              attachments: outgoing.map(d => ({
+                mimeType: d.mimeType,
+                data: d.data,
+                ...(d.fileName ? { fileName: d.fileName } : {}),
+              })),
+            }
+          : {}),
         // §4：手机端一律不解析 {{ROLL}} 之类的指令，与原来的 inbox 行为一致
         parseCommands: false,
       },
@@ -1071,6 +1160,7 @@ const ViewerApp: React.FC = () => {
       label: t('发送消息'),
       draftMessageId: localId,
       draftText: text,
+      draftAttachments: outgoing,
     });
 
     if (accepted) {
@@ -1079,9 +1169,10 @@ const ViewerApp: React.FC = () => {
     } else {
       setPending(prev => prev.filter(m => m.id !== localId));
       setInputText(prev => (prev.trim() ? prev : text)); // 失败不吞文本
+      if (outgoing.length > 0) setDrafts(prev => (prev.length > 0 ? prev : outgoing)); // 也不吞图
     }
     setSending(false);
-  }, [inputText, canSend, sending, pmTargetId, replyTo, runAction, t]);
+  }, [inputText, drafts, canSend, sending, preparingImages, pmTargetId, replyTo, runAction, t]);
 
   // --- 长按气泡 = 引用回复 ---
 
@@ -1717,6 +1808,34 @@ const ViewerApp: React.FC = () => {
               </div>
             )}
 
+            {/* 待发图片的缩略图条。缩略图 64×64，删除键的**命中区**是 44×44（压在图右上角那一块，
+                不越出边界——外面就是 overflow-x-auto 的裁剪线），可见的圆点只有 24px。
+                四张 64px 在 360 宽下其实还排得开，overflow-x-auto 是给更窄的屏 / 更大字号兜底的。 */}
+            {drafts.length > 0 && (
+              <div className="mb-2 flex gap-2 overflow-x-auto">
+                {drafts.map(d => (
+                  <div key={d.id} className="relative shrink-0 w-16 h-16">
+                    <img
+                      src={d.dataUrl}
+                      alt={d.fileName || ''}
+                      className="w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeDraft(d.id)}
+                      disabled={sending}
+                      aria-label={t('移除图片')}
+                      className="absolute top-0 right-0 w-11 h-11 flex items-start justify-end p-0.5 disabled:opacity-40"
+                    >
+                      <span className="w-6 h-6 rounded-full bg-zinc-900/85 dark:bg-white/90 text-white dark:text-zinc-900 flex items-center justify-center shadow">
+                        <X size={14} />
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <form
               onSubmit={e => {
                 e.preventDefault();
@@ -1724,6 +1843,32 @@ const ViewerApp: React.FC = () => {
               }}
               className="relative flex items-end gap-1.5"
             >
+              {/* 图片键。accept="image/*" + multiple：iOS 上点它会给「拍照 / 照片图库 / 浏览」三选一。
+                  input 本身藏起来，因为它自己的样式在各家浏览器上长得都不一样，也不可能做到 44px。 */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => {
+                  void handlePickImages(e.target.files);
+                  e.target.value = ''; // 同一张图连选两次也要触发 change
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={
+                  !canSend || sending || preparingImages || drafts.length >= ACTION_LIMITS.attachmentsPerMessage
+                }
+                aria-label={t('添加图片')}
+                title={t('添加图片')}
+                className="shrink-0 w-11 h-11 rounded-xl border flex items-center justify-center transition-colors disabled:opacity-40 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-gray-400"
+              >
+                {preparingImages ? <Loader2 size={18} className="animate-spin" /> : <ImagePlus size={18} />}
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -1756,7 +1901,9 @@ const ViewerApp: React.FC = () => {
                 />
                 <button
                   type="submit"
-                  disabled={!canSend || !inputText.trim() || sending}
+                  disabled={
+                    !canSend || (!inputText.trim() && drafts.length === 0) || sending || preparingImages
+                  }
                   aria-label={t('发送')}
                   className="absolute right-2 bottom-2 p-2 bg-zinc-900 dark:bg-white rounded-lg text-white dark:text-zinc-900 disabled:opacity-30 shadow-sm"
                 >
