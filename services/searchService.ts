@@ -120,11 +120,39 @@ async function searchWithMetaso(query: string, apiKey: string): Promise<SearchRe
   }));
 }
 
+// 模型偶尔会把整个查询词包在引号里（实测出现过 """关键词""" 这种三引号），
+// Tavily / Serper 会把它当精确短语匹配，几乎必空。这里只剥「整体包裹」的成对符号，
+// 词中间的引号（如 foo "bar" baz）是有意的短语搜索，保留。
+const WRAP_PAIRS: ReadonlyArray<[string, string]> = [
+  ['"', '"'], ["'", "'"], ['`', '`'],
+  ['“', '”'], ['‘', '’'], ['「', '」'], ['『', '』'], ['《', '》'], ['【', '】'],
+];
+export function normalizeSearchQuery(raw: string): string {
+  let q = raw.trim();
+  let changed = true;
+  while (changed && q.length > 1) {
+    changed = false;
+    for (const [open, close] of WRAP_PAIRS) {
+      if (q.length >= open.length + close.length && q.startsWith(open) && q.endsWith(close)) {
+        q = q.slice(open.length, q.length - close.length).trim();
+        changed = true;
+      }
+    }
+  }
+  // 不对称残留（如 """foo" 或 `foo）也剥掉首尾的孤立引号
+  q = q.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '').trim();
+  return q || raw.trim();
+}
+
 // 主搜索函数
 export async function performSearch(
-  query: string,
+  rawQuery: string,
   config: SearchConfig
 ): Promise<SearchResponse> {
+  const query = normalizeSearchQuery(rawQuery);
+  if (query !== rawQuery.trim()) {
+    console.log('[Search] normalized query:', JSON.stringify(rawQuery), '→', JSON.stringify(query));
+  }
   if (!config.enabled || !config.apiKey) {
     return { query, results: [], error: '搜索未启用或未配置 API Key' };
   }
