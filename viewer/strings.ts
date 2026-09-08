@@ -38,6 +38,15 @@ const en: Record<string, string> = {
   '跟随': 'Auto',
   '编辑角色': 'Edit agent',
   '让电脑切到这个会话': 'Open on the computer',
+  // 五期：新建群 / 新建对话
+  '新建群组': 'New group',
+  '新建对话': 'New session',
+  '在这个群新建对话': 'New session in this group',
+  '取消': 'Cancel',
+  // 默认名的预览（placeholder 拼成「对话 3」/ "Chat 3"）。电脑端真正落盘的名字按**它自己**的
+  // 语言生成，两端语言不同时预览和结果会差一个词，这是预览不是承诺。
+  '群组': 'Group',
+  '对话': 'Chat',
   '电脑端': 'Computer',
   '电脑端正在播放': 'The computer is playing',
   '电脑端已暂停': 'The computer is paused',
@@ -101,6 +110,7 @@ const en: Record<string, string> = {
   '这个模型不在该供应商下': 'that model does not belong to this provider',
   '找不到这个供应商': 'provider not found',
   '找不到这个会话': 'session not found',
+  '找不到这个群组': 'group not found',
   '要引用的那条消息不在了': 'the quoted message is gone',
   'TA 不在当前群里': 'they are not in the current group',
   'TA 已经在群里了': 'they are already in the group',

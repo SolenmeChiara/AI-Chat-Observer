@@ -31,7 +31,9 @@ import {
   type AgentMutePayload,
   type AgentPatch,
   type AgentUpdatePayload,
+  type GroupCreatePayload,
   type MessageSendPayload,
+  type SessionCreatePayload,
 } from './server/actionContract';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
@@ -487,13 +489,20 @@ const App: React.FC = () => {
   };
 
   // --- GROUP MANAGEMENT ---
-  const handleCreateGroup = () => {
+  /**
+   * 建一个群 + 它的第一条会话，并切过去。
+   * `opts.name` 是手机远程新建时带的名字（PHONE_ACTIONS_PLAN §2.3 `group.create`）；
+   * 电脑端那颗按钮不给，沿用默认名「群组 N」。返回新 id 是因为两个 id 都是这里用
+   * `Date.now()` 现造的，调用方（handleActionEvent）没有别的办法知道它们——
+   * setState 是异步的，回去查 state 一定扑空。电脑端的调用方忽略返回值即可。
+   */
+  const handleCreateGroup = (opts?: { name?: string }) => {
     const newGroupId = Date.now().toString();
     const newSessionId = `${newGroupId}-session-1`;
 
     const newGroup: ChatGroup = {
       id: newGroupId,
-      name: `${t('群组')} ${groups.length + 1}`,
+      name: opts?.name?.trim() || `${t('群组')} ${groups.length + 1}`,
       memberIds: agents.filter(a => a.isActive !== false && a.providerId && a.modelId).map(a => a.id),
       scenario: DEFAULT_GROUP_SCENARIO,
       memoryConfig: {
@@ -524,6 +533,7 @@ const App: React.FC = () => {
     setSessions(prev => [...prev, newSession]);
     setActiveGroupId(newGroupId);
     setActiveSessionId(newSessionId);
+    return { groupId: newGroupId, sessionId: newSessionId };
   };
 
   const handleDeleteGroup = (id: string) => {
@@ -577,12 +587,13 @@ const App: React.FC = () => {
   };
 
   // --- SESSION MANAGEMENT ---
-  const handleCreateSession = (groupId: string) => {
+  /** `opts.name` 同 handleCreateGroup：手机远程新建时带，电脑端不带。返回新会话 id。 */
+  const handleCreateSession = (groupId: string, opts?: { name?: string }) => {
     const groupSessions = sessions.filter(s => s.groupId === groupId);
     const newSession: ChatSession = {
       id: Date.now().toString(),
       groupId: groupId,
-      name: `${t('对话')} ${groupSessions.length + 1}`,
+      name: opts?.name?.trim() || `${t('对话')} ${groupSessions.length + 1}`,
       messages: [],
       lastUpdated: Date.now(),
       isAutoRenamed: false,
@@ -592,6 +603,11 @@ const App: React.FC = () => {
     };
     setSessions(prev => [...prev, newSession]);
     setActiveSessionId(newSession.id);
+    // 新会话在别的群里就把 activeGroupId 一起带过去，同 handleSwitchSession（PHONE_ACTIONS_PLAN §8.3.4）：
+    // 少这一句就是「读的是 B 群的会话、操作的是 A 群」。电脑端本来也够得着这条路
+    // （Sidebar 的折叠箭头能展开非活跃群，再点它的「新建对话」），只是手机的每群「+」把它变成了主路径。
+    if (groupId !== activeGroupId) setActiveGroupId(groupId);
+    return { sessionId: newSession.id };
   };
 
   const handleDeleteSession = (id: string) => {
@@ -3218,11 +3234,13 @@ const App: React.FC = () => {
 
   const actionHandlersRef = useRef({
     appendUserMessage, handleSwitchSession, addAgentToActiveGroup, handleRemoveAgent,
-    handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel
+    handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel,
+    handleCreateGroup, handleCreateSession
   });
   actionHandlersRef.current = {
     appendUserMessage, handleSwitchSession, addAgentToActiveGroup, handleRemoveAgent,
-    handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel
+    handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel,
+    handleCreateGroup, handleCreateSession
   };
 
   const handleActionEvent = useCallback((evt: ActionEvent) => {
@@ -3363,6 +3381,24 @@ const App: React.FC = () => {
           // 直接给对象而不是 id：新 agent 还没进 state，用 id 查一定扑空
           if (payload.joinActiveGroup) h.addAgentToActiveGroup(r.agent);
           reply(true, undefined, { agentId: r.agent.id });
+          return;
+        }
+        case 'group.create': {
+          const payload = evt.payload as GroupCreatePayload;
+          // 没有可失败的语义前置条件：成员就是「全部启用且配了供应商/模型的 agent」，
+          // 一个都没有也照样建（和电脑端点那颗按钮一模一样，建出来是个空群）。
+          const r = h.handleCreateGroup({ name: payload.name });
+          // 两个 id 都回：手机要用 sessionId 把视图挪到新群的第一条会话上
+          reply(true, undefined, { groupId: r.groupId, sessionId: r.sessionId });
+          return;
+        }
+        case 'session.create': {
+          const payload = evt.payload as SessionCreatePayload;
+          // 不是会话级动作（群是 payload 显式给的），所以上面那道 activeSessionId 比对不管这里，
+          // 群存不存在得自己判：handleCreateSession 不查，会造出一条挂在幽灵群下的孤儿会话。
+          if (!st.groups.some(g => g.id === payload.groupId)) { reply(false, 'group-not-found'); return; }
+          const r = h.handleCreateSession(payload.groupId, { name: payload.name });
+          reply(true, undefined, { sessionId: r.sessionId });
           return;
         }
         default:

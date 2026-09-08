@@ -64,6 +64,8 @@
 | `agent.trigger` | 必填 | `{ agentId }` | — | `triggerAgentReply(agentId)`；agent 不是群成员或正在处理中 → 失败 |
 | `agent.update` | 不带 | `{ agentId; patch: AgentPatch }` | patch 只允许 2.4 的白名单键，未知键 400；systemPrompt ≤ 64000 字符；name ≤ 100 | 新增 App 层 `applyRemoteAgentPatch`（2.4） |
 | `agent.create` | 不带 | `{ providerId; modelId; name?: string; systemPrompt?: string; joinActiveGroup?: boolean }` | 同上限 | 复用 `handleAddAgentFromRightSidebar` 的构造逻辑（抽成可复用函数），再 patch name/prompt；`joinActiveGroup` 为真时随后 `handleActivateAgent` |
+| `group.create` | 不带 | `{ name?: string }` | name ≤ 100；空白名按未给处理 | `handleCreateGroup({ name })`：建群 + 第一条会话并切过去；回 `data: { groupId, sessionId }`（四期后追加，见 §8.7） |
+| `session.create` | 不带 | `{ groupId: string; name?: string }` | groupId 必填 ≤ 128；name 同上 | `handleCreateSession(groupId, { name })`；群不存在 → `group-not-found`；回 `data: { sessionId }`（见 §8.7） |
 
 `AgentPatch` 白名单（2.4）之外的任何键（尤其 `searchConfig`、`voiceId`、`providerId` 以外的凭据类）一律 400。
 
@@ -287,3 +289,58 @@ App.tsx 新增 `applyRemoteAgentPatch(agentId, patch)`：
 8. `agent.trigger` 用会话的 `mutedAgentIds` 判禁言，而手机面板显示的是带 `muteUntil` 的 `mutedAgents`，到期清扫是 60 秒一次的定时器，存在最长 60 秒「手机显示已解禁、点名却回 `agent-muted`」的窗口。
 9. 自动播放关闭时电脑端 `handleStopAll` 会打一条 `AbortError signal is aborted without reason` 的 console.error（一期遗留，与本次无关）。
 10. 「提示词出机」是本次有意的策略变更：持 LAN token 者可以读到全部 agent 的 systemPrompt、群剧本、供应商名与模型清单。凭据仍然零出机。
+
+### 8.7 新建群 / 新建对话（2026-09-08，基线 `5caae72`）
+
+四期把手机的抽屉改成侧边栏之后，会话区还是只读的：能切、能看，不能造。这一轮把 `group.create` 与 `session.create` 两个动作补齐，
+四层（契约 / 服务端 / 电脑端 / 手机端）一起动。
+
+**做了什么**
+
+- 契约 `server/actionContract.ts`：`ACTION_TYPES` 加两条（都**不**进 `SESSION_SCOPED_ACTIONS`——`session.create` 的群是
+  payload 里显式给的，不要求电脑先切过去）；新增 `GroupCreatePayload { name? }` / `SessionCreatePayload { groupId; name? }`；
+  `ActionResult.data` 加 `groupId?`（`group.create` 同时回新群和它第一条会话的 id）。
+- 服务端 `server/live.ts`：`ACTION_PAYLOAD_KEYS` 两条白名单、`validateActionPayload` 两个分支（name 走 `badOptionalString(≤100)`，
+  groupId 走 `badId`）、`ACTION_RESULT_DATA_KEYS` 加 `groupId`。**空白名不算错**：服务端只判长度，电脑端 `trim()` 后为空就用自己的默认名，
+  与压根不给这个键同一条路径。
+- 电脑端 `App.tsx`：`handleCreateGroup(opts?)` / `handleCreateSession(groupId, opts?)` 加可选名字，并**改成有返回值**
+  （`{ groupId, sessionId }` / `{ sessionId }`）——两个 id 都是 handler 内部用 `Date.now()` 现造的，setState 又是异步的，
+  不返回的话 `handleActionEvent` 没有任何办法知道新 id。现有调用方忽略返回值。
+  `handleActionEvent` 加两个分支：`group.create` 无语义前置条件（成员就是「全部启用且配了供应商/模型的 agent」，一个都没有也照建）；
+  `session.create` 先查群在不在，不在回新短码 `group-not-found`。
+- 手机端 `viewer/panels/SessionsPanel.tsx`：每个群标题行右侧一颗 44×44 的「+」，会话区末尾一行 ≥52px 的「新建群组」；
+  点任一入口在该位置**就地展开**一个小表单（名字输入框 + 创建 / 取消，两颗都 ≥44px），同一时刻只展开一个；
+  placeholder 是按手机本地数据算的默认名预览（「对话 N」/「群组 N」）；空名不发 `name`。
+  `ViewerApp.tsx` 的 `settleAction` 里两个新类型共用一段收尾：开「跟随电脑」+ `setViewingSessionId(data.sessionId)` + 收侧边栏 + toast；
+  `describeActionCode` 补 `group-not-found`。`strings.ts` 中英各补 7 条。
+
+**与设计稿 / 任务书的偏离**
+
+1. `handleCreateSession` 顺手补了 `if (groupId !== activeGroupId) setActiveGroupId(groupId)`。任务书说「其余行为不变」，这一句是加出来的：
+   没有它，手机在非当前群按「+」之后电脑就落进 §8.3.4 修过的那个洞（读 B 群的会话、操作 A 群）。电脑端本来也够得着这条路
+   （Sidebar 的折叠箭头能展开非活跃群再点它的「新建对话」），所以**这一句同时改变了电脑端的行为**，不认可可以单独回滚。
+2. `SessionsPanel` 不再过滤「没有会话的群」。四期滤掉是因为空群没什么可点的；现在每个群标题行都挂着「+」，滤掉的话空群永远建不出会话。
+3. 顺手把 `components/Sidebar.tsx` 的 `onClick={onCreateGroup}` 改成 `onClick={() => onCreateGroup()}`：handler 现在有可选参数，
+   直接当事件回调传会把 MouseEvent 当 `opts` 收进去。
+4. 表单不 autofocus：手机上一聚焦就弹软键盘，把刚展开的表单顶出视野。
+5. 提交失败时表单**留着**（字也留着，直接改完再点一次）；成功时侧边栏整个收起、面板卸载，表单状态自然归零——所以没写「收表单」的代码。
+
+**验了什么**（临时端口 5920 + 临时 `ACO_DATA_DIR` + 假 key，headless Edge CDP 5921，390×844 / 360×780 触摸模拟）
+
+- 静态：`npx tsc --noEmit`、`npx tsc --noEmit -p tsconfig.node.json`、`npx vite build` 三条 exit 0。
+- 闸门（curl 19 条）：两个 type 的超长 name / 缺 groupId / 空 groupId / 超长 groupId / 类型错 / 未知键各自 400 且 `field` 指对；
+  无 desktop 503；有 desktop 202 带 id；`action-result` 带 `data.groupId` 202、未知 data 键 400、超长 groupId 400。
+- 端到端（真服务端 + 真电脑页 + 真手机页）：带名字建对话、空名建对话（落地成电脑端默认名）、新建群组（`groups.json` +1、
+  成员 = 全部启用 agent、`sessions/` +1、电脑切过去、手机 catalog 重拉后侧边栏出现新群）、跨群建对话时电脑 `activeGroupId` 跟着走、
+  手机拿着已删掉的群 id 建对话 → toast 走 `group-not-found`、电脑离线两个入口禁用。
+- 界面：390 / 360 × 中 / 英共 21 张截图；机器体检里侧边栏内 <44px 的可点元素 0、横向溢出 0；pending 时「创建」转圈禁用。
+- 回归：无引用态 composer 哈希仍是 `959b137592a4b15a`；`session.switch` 与 `agent.create` 各跑一次仍通。
+
+**遗留**
+
+- 手机跟到新会话的那一瞬会打一条 `session ... not found` 的 console warning：动作回执比电脑端把会话文件落盘早，
+  `fetchSessionTail` 先 404 一次，随后 `session` 事件回流触发 `runSync` 自愈。用户看到的只是「空会话」这个正确结果。
+- placeholder 里的默认名按**手机**的语言拼，真正落盘的名字按**电脑端**的语言生成；两端语言不同时预览和结果会差一个词。
+- 群标题行现在要分 44px 给「+」，长群名在 360 宽下更早开始 `truncate`（仍是省略号，不是硬截）。
+- `session.create` 与 `handleCreateSession` 一样用 `Date.now().toString()` 当会话 id，同一毫秒连发两条会撞 id（既有写法，未改）。
+- §8.6 第 1 条（多个电脑标签页 = 动作执行多遍）对这两个动作同样成立，而且更贵：会建出两个群。

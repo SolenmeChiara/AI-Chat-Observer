@@ -20,6 +20,8 @@ export const ACTION_TYPES = [
   'agent.trigger',
   'agent.update',
   'agent.create',
+  'group.create',
+  'session.create',
 ] as const;
 
 export type ActionType = (typeof ACTION_TYPES)[number];
@@ -119,6 +121,21 @@ export interface AgentCreatePayload {
   joinActiveGroup?: boolean; // 为真时创建后立即 handleActivateAgent（加入电脑当前群）
 }
 
+/** 新建群组。名字留空（或只有空白）= 用电脑端自己的默认名「群组 N」。 */
+export interface GroupCreatePayload {
+  name?: string;
+}
+
+/**
+ * 在指定群里新建一条会话。
+ * `groupId` 是显式参数而不是「电脑当前群」：手机的会话列表本来就按群分组，
+ * 每个群标题旁边都有一颗「+」，要求先把电脑切过去反而绕。所以它不是会话级动作。
+ */
+export interface SessionCreatePayload {
+  groupId: string;
+  name?: string;
+}
+
 export interface ActionPayloadMap {
   'message.send': MessageSendPayload;
   'session.switch': EmptyPayload;
@@ -129,6 +146,8 @@ export interface ActionPayloadMap {
   'agent.trigger': AgentIdPayload;
   'agent.update': AgentUpdatePayload;
   'agent.create': AgentCreatePayload;
+  'group.create': GroupCreatePayload;
+  'session.create': SessionCreatePayload;
 }
 
 // ---- 线上形状 ----
@@ -155,7 +174,8 @@ export interface ActionResult {
   id: string;
   ok: boolean;
   error?: string;                 // 机器可读短码，如 'not-active-session' | 'agent-not-found' | 'invalid-model' | 'busy'
-  data?: { agentId?: string; messageId?: string; sessionId?: string }; // 只放 id 类信息，不放内容体
+  // 只放 id 类信息，不放内容体。group.create 两个都回：groupId 是新群，sessionId 是它附带的第一条会话。
+  data?: { agentId?: string; messageId?: string; sessionId?: string; groupId?: string };
 }
 
 /** 服务端 → 全部客户端：agents / groups / settings 三张表任一被 PUT 后广播，手机端据此重拉 bootstrap。 */

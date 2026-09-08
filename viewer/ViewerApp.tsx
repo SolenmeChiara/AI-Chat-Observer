@@ -423,6 +423,8 @@ const ViewerApp: React.FC = () => {
           return t('找不到这个供应商');
         case 'session-not-found':
           return t('找不到这个会话');
+        case 'group-not-found':
+          return t('找不到这个群组');
         case 'message-not-found':
           return t('要引用的那条消息不在了');
         case 'not-a-member':
@@ -547,6 +549,14 @@ const ViewerApp: React.FC = () => {
         }
         if (entry.type === 'agent.create' && result.data?.agentId) {
           setEditAgentId(result.data.agentId);
+        }
+        if (entry.type === 'session.create' || entry.type === 'group.create') {
+          // 电脑端建完就自己切过去了（handleCreateSession / handleCreateGroup 都会 setActive*），
+          // 手机跟着走：开「跟随电脑」+ 直接把视图挪到回执里的新会话 id，别等下一个 presence。
+          // 新群 / 新会话本身靠 catalog（groups）与 session 事件回流进列表，这里不用管。
+          setFollowDesktop(true);
+          if (result.data?.sessionId) setViewingSessionId(result.data.sessionId);
+          closeSidebar();
         }
       } else {
         pushToast('err', joinToast(entry.label, t('失败'), describeActionCode(result.error)));
@@ -1851,6 +1861,7 @@ const ViewerApp: React.FC = () => {
                       viewingSessionId={viewingSessionId}
                       disabled={!desktopReachable}
                       isPending={isPending}
+                      runAction={runAction}
                       onPick={handlePickSession}
                       onSwitchDesktop={handleSwitchDesktopSession}
                     />

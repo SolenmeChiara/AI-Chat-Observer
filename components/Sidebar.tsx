@@ -1085,7 +1085,7 @@ const Sidebar: React.FC<SidebarProps> = ({
              })}
 
              {/* 新建群组按钮 */}
-             <button onClick={onCreateGroup} className="w-full py-3 border border-dashed border-gray-300 dark:border-zinc-700 rounded-xl text-gray-500 dark:text-gray-400 text-sm font-medium hover:bg-white dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center justify-center gap-2">
+             <button onClick={() => onCreateGroup()} className="w-full py-3 border border-dashed border-gray-300 dark:border-zinc-700 rounded-xl text-gray-500 dark:text-gray-400 text-sm font-medium hover:bg-white dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center justify-center gap-2">
               <Plus size={16} /> {t('新建群组')}
             </button>
 

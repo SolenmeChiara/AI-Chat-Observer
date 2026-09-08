@@ -62,7 +62,7 @@ const RATE_SWEEP_WINDOW_MS = Math.max(INBOX_WINDOW_MS, ACTION_RATE_WINDOW_MS);
 /** action-result 里 error 短码的长度上限（机器可读短码，不是给人看的文案）。 */
 const ACTION_ERROR_MAX = 200;
 /** action-result 的 data 只允许这几个 id 类字段，别的一律 400。 */
-const ACTION_RESULT_DATA_KEYS = ['agentId', 'messageId', 'sessionId'];
+const ACTION_RESULT_DATA_KEYS = ['agentId', 'messageId', 'sessionId', 'groupId'];
 
 const serverStartedAt = Date.now();
 
@@ -486,6 +486,8 @@ const ACTION_PAYLOAD_KEYS: Record<ActionType, string[]> = {
   'agent.trigger': ['agentId'],
   'agent.update': ['agentId', 'patch'],
   'agent.create': ['providerId', 'modelId', 'name', 'systemPrompt', 'joinActiveGroup'],
+  'group.create': ['name'],
+  'session.create': ['groupId', 'name'],
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -607,6 +609,16 @@ function validateActionPayload(type: ActionType, payload: Record<string, unknown
       if (badOptionalString(payload.name, ACTION_LIMITS.name)) return 'name';
       if (badOptionalString(payload.systemPrompt, ACTION_LIMITS.systemPrompt)) return 'systemPrompt';
       if (badOptionalBool(payload.joinActiveGroup)) return 'joinActiveGroup';
+      return null;
+    }
+    case 'group.create':
+      // name 可选。给了空串或全空白不算错：电脑端 trim 完发现是空的就用自己的默认名「群组 N」，
+      // 和压根不给这个键是同一条路径。这里只管长度。
+      return badOptionalString(payload.name, ACTION_LIMITS.name) ? 'name' : null;
+    case 'session.create': {
+      // 不是会话级动作：groupId 在 payload 里显式给，服务端只判形状，群存不存在交给电脑端
+      if (badId(payload.groupId)) return 'groupId';
+      if (badOptionalString(payload.name, ACTION_LIMITS.name)) return 'name';
       return null;
     }
     default:
