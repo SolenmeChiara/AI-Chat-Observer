@@ -2624,9 +2624,11 @@ const App: React.FC = () => {
              updateThisSession(s => ({ ...s, adminNotes: [] }));
          }
          else if (detectedAdminAction.type === 'MUTE') {
-             // Find target agent by Name
-             const targetName = detectedAdminAction.target.trim();
-             const targetAgent = agents.find(a => a.name.toLowerCase().includes(targetName.toLowerCase()));
+             // Find target agent by Name. Exact match first: with substring-only matching,
+             // "Claude Fable 5" can resolve to "Claude Fable 5.1" (same-prefix agent names).
+             const targetName = detectedAdminAction.target.trim().toLowerCase();
+             const targetAgent = agents.find(a => a.name.toLowerCase() === targetName)
+                 ?? agents.find(a => a.name.toLowerCase().includes(targetName));
 
              if (targetAgent && targetAgent.id !== USER_ID) {
                  // PERMISSION CHECK
@@ -2641,8 +2643,10 @@ const App: React.FC = () => {
              }
          }
          else if (detectedAdminAction.type === 'UNMUTE') {
-             const targetName = detectedAdminAction.target.trim();
-             const targetAgent = agents.find(a => a.name.toLowerCase().includes(targetName.toLowerCase()));
+             // Exact match first — same same-prefix trap as MUTE above.
+             const targetName = detectedAdminAction.target.trim().toLowerCase();
+             const targetAgent = agents.find(a => a.name.toLowerCase() === targetName)
+                 ?? agents.find(a => a.name.toLowerCase().includes(targetName));
 
              if (targetAgent) {
                  handleUnmuteAgent(targetAgent.id);
