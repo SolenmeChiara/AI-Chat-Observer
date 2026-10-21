@@ -31,6 +31,42 @@ export function isGemini3Model(modelId: string): boolean {
   return lower.includes('gemini-3') || lower.includes('gemini3');
 }
 
+// Helper: Detect Gemini 4+ models (gemini-4-argon and later).
+// Kept separate from isGemini3Model on purpose — G4 differs from G3 in ways that matter here
+// (docs: https://ai.google.dev/gemini-api/docs/thinking "Controlling thinking" table,
+//  https://ai.google.dev/gemini-api/docs/latest-model, verified live against v1beta generateContent):
+//   - thinking_level: only low / medium / high (MINIMAL → 400 "not supported for this model");
+//   - temperature / top_p / top_k are ignored by the server ("Remove temperature, top_p, and top_k");
+//   - the thoughtSignature rides on the final answer part (text or functionCall), not on a
+//     thought part — so it is replayed on the text part (see the history loop below); missing
+//     signatures on text-only history are accepted (no hasIncompleteThinking fallback needed);
+//   - built-in tools + function calling combo is supported like G3 (docs/tool-combination:
+//     "supported for Gemini 4 and Gemini 3 models"), same includeServerSideToolInvocations flag.
+// Matches "gemini-4…", "gemini4…", "google/gemini-4…", and any later major (5, 6…), which is a
+// safer default than falling back to the Gemini 2.5 thinkingBudget path.
+export function isGemini4PlusModel(modelId: string): boolean {
+  const m = modelId.toLowerCase().match(/gemini-?(\d+)/);
+  return !!m && parseInt(m[1], 10) >= 4;
+}
+
+// Helper: Map agent reasoning knobs to a Gemini 4 thinking_level (low / medium / high only).
+// adaptive mode → the effort selector; manual mode → budget tiers mirroring openaiService's
+// mapBudgetToEffort, so the default budget (8000) lands on MEDIUM = the model's own default.
+function mapToGemini4ThinkingLevel(
+  mode: string | undefined, effort: string | undefined, budget: number
+): 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (mode === 'adaptive') {
+    switch (effort || 'high') {
+      case 'none': case 'minimal': case 'low': return 'LOW';
+      case 'medium': return 'MEDIUM';
+      default: return 'HIGH'; // high / xhigh / max
+    }
+  }
+  if (budget < 4000) return 'LOW';
+  if (budget < 16000) return 'MEDIUM';
+  return 'HIGH';
+}
+
 // Helper: Detect Gemini image generation models (can output text + images)
 function isGeminiImageModel(modelId: string): boolean {
   return modelId.toLowerCase().includes('-image');
@@ -161,6 +197,7 @@ export async function* streamGeminiReply(
 
   // Detect if we're using Gemini 3 (needs thought signatures for multi-turn)
   const isGemini3 = isGemini3Model(modelId);
+  const isGemini4 = isGemini4PlusModel(modelId);
 
   // Check if any of agent's messages have incomplete thinking (has reasoning but no signature)
   // For Gemini 3, this would cause errors, so we need to handle it
@@ -211,7 +248,16 @@ export async function* streamGeminiReply(
     // Document Attachments (multiple)
     textContent = appendDocumentAttachments(textContent, m);
 
-    parts.push({ text: textContent });
+    // Gemini 4: the signature was emitted on the answer part itself (generateContent has no
+    // dedicated thought blocks — docs/thinking#signatures), so put it back on the text part.
+    // Independent of reasoningText: LOW/MEDIUM turns carry a signature but no thought summary.
+    // Verified live: signature on a reformatted text part, or a signature minted by a G3
+    // model, is accepted; a missing one on text-only history is accepted too.
+    if (isGemini4 && isSelf && m.reasoningSignature) {
+      parts.push({ text: textContent, thoughtSignature: m.reasoningSignature });
+    } else {
+      parts.push({ text: textContent });
+    }
 
     // Image Parts (multiple)
     if (m.attachments) {
@@ -266,7 +312,10 @@ export async function* streamGeminiReply(
 
       // Build config object
       // Note: Gemini 3 recommends using default temperature (1.0) for thinking mode
-      const effectiveTemp = isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature;
+      // Gemini 4 ignores sampling params server-side (docs/latest-model: "Remove temperature,
+      // top_p, and top_k"), so they are simply not sent for G4.
+      const effectiveTemp = isGemini4 ? null
+        : (isGemini3 && agent.config.enableReasoning ? 1.0 : agent.config.temperature);
       const isImageModel = isGeminiImageModel(modelId);
       // Assemble tools: googleSearch grounding (if enabled) plus native functionDeclarations
       // (if this agent is in native command mode).
@@ -288,7 +337,9 @@ export async function* streamGeminiReply(
           )
         : [];
       const wantsBoth = enableGoogleSearch && nativeFnDecls.length > 0;
-      const canCombine = isGemini3 && geminiConfig.geminiMode !== 'vertex';
+      // docs/tool-combination: "supported for Gemini 4 and Gemini 3 models" (verified live on
+      // gemini-4-argon: same 400 without the flag, 200 with it).
+      const canCombine = (isGemini3 || isGemini4) && geminiConfig.geminiMode !== 'vertex';
       let includeServerSideToolInvocations = false;
       const toolList: any[] = [];
       if (wantsBoth && canCombine) {
@@ -301,7 +352,7 @@ export async function* streamGeminiReply(
         if (nativeFnDecls.length > 0) toolList.push({ functionDeclarations: nativeFnDecls });
       }
       if (wantsBoth && !canCombine) {
-        console.warn(`[${agent.name}] ⚠️ googleSearch grounding + function calling requires Gemini 3 on AI Studio; dropping grounding for this request (model: ${modelId}, mode: ${geminiConfig.geminiMode || 'aistudio'})`);
+        console.warn(`[${agent.name}] ⚠️ googleSearch grounding + function calling requires Gemini 3/4 on AI Studio; dropping grounding for this request (model: ${modelId}, mode: ${geminiConfig.geminiMode || 'aistudio'})`);
       }
 
       const apiConfig: any = {
@@ -312,7 +363,7 @@ export async function* streamGeminiReply(
         ...(isImageModel ? { responseModalities: ['TEXT', 'IMAGE'] } : {}),
       };
       if (effectiveTemp !== null) apiConfig.temperature = effectiveTemp;
-      if (agent.config.topP !== null) apiConfig.topP = agent.config.topP;
+      if (agent.config.topP !== null && !isGemini4) apiConfig.topP = agent.config.topP;
 
       // Add thinkingConfig based on model version
       // Image models have built-in thinking (always on), just need includeThoughts to see it
@@ -326,6 +377,14 @@ export async function* streamGeminiReply(
         if (isGemini3) {
           apiConfig.thinkingConfig = {
             thinkingLevel: mapBudgetToThinkingLevel(agent.config.reasoningBudget || 8000),
+            includeThoughts: true
+          };
+        } else if (isGemini4) {
+          // G4 accepts LOW / MEDIUM / HIGH only (MINIMAL 400s); thinking cannot be switched off.
+          apiConfig.thinkingConfig = {
+            thinkingLevel: mapToGemini4ThinkingLevel(
+              agent.config.reasoningMode, agent.config.effort, agent.config.reasoningBudget || 8000
+            ),
             includeThoughts: true
           };
         } else {
