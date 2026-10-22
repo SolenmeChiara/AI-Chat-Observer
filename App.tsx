@@ -34,8 +34,14 @@ import {
   type AgentUpdatePayload,
   type GroupCreatePayload,
   type MessageSendPayload,
+  type ProfileCreatePayload,
+  type ProfileIdPayload,
+  type ProfileSwitchPayload,
+  type ProfileUpdatePayload,
   type SessionCreatePayload,
+  NARRATOR_PROFILE_ID,
 } from './server/actionContract';
+import * as userProfiles from './services/userProfiles';
 
 // Helper to format timestamp for error messages (HH:MM:SS)
 const formatErrorTimestamp = () => {
@@ -3315,9 +3321,19 @@ const App: React.FC = () => {
     processingAgentIds: [...processingAgents]
   }), [activeGroupId, activeSessionId, isAutoPlay, processingAgents]);
 
+  // 当前身份指针。手机发来的消息要跟着它走（旁白模式 = 系统消息样式），和电脑端输入框同一条规则。
+  // 渲染期同步一份；profile.switch 动作收到时会抢先写一次（见 handleActionEvent），
+  // 免得「手机刚切旁白、紧跟着发一句」时，这句话赶在 setSettings 重渲染之前到达、还按旧身份发出去。
+  const activeProfileIdRef = useRef(settings.activeProfileId);
+  activeProfileIdRef.current = settings.activeProfileId;
+
   // 只把消息塞进 state，不在这里触发任何 agent——接话交给 autoplay effect
   const handleInboxMessage = useCallback((m: InboxEvent) => {
-    const ok = appendUserMessageRef.current(m.sessionId, { id: m.id, text: m.text });
+    const ok = appendUserMessageRef.current(m.sessionId, {
+      id: m.id,
+      text: m.text,
+      asNarrator: activeProfileIdRef.current === NARRATOR_PROFILE_ID
+    });
     if (!ok) console.warn('[live] 手机消息未入流（会话不存在或 id 重复）', m.id, m.sessionId);
   }, []);
 
@@ -3429,7 +3445,10 @@ const App: React.FC = () => {
             pmTargetId: payload.pmTargetId,
             replyToId: payload.replyToId,
             attachments,
-            parseCommands: !!payload.parseCommands
+            parseCommands: !!payload.parseCommands,
+            // 发言身份跟随电脑端当前身份：普通身份一律是 USER_ID（名字 / 人设由 legacy 三件套决定），
+            // 旁白模式要换成 narrator 系统消息——以前这里漏了，电脑切到旁白后手机发的仍是普通用户消息。
+            asNarrator: activeProfileIdRef.current === NARRATOR_PROFILE_ID
           });
           reply(ok, ok ? undefined : 'append-failed', ok ? { messageId: evt.id } : undefined);
           return;
@@ -3534,6 +3553,61 @@ const App: React.FC = () => {
           if (!st.groups.some(g => g.id === payload.groupId)) { reply(false, 'group-not-found'); return; }
           const r = h.handleCreateSession(payload.groupId, { name: payload.name });
           reply(true, undefined, { sessionId: r.sessionId });
+          return;
+        }
+        // --- 用户身份。全局设置，不是会话级动作。逻辑与电脑端侧栏共用 services/userProfiles.ts；
+        // 先拿 ref 里的最新快照判一次语义（判不过就回失败），真正写入走函数式 setSettings，
+        // 不和电脑端同一时刻的编辑互相覆盖。 ---
+        case 'profile.switch': {
+          const { profileId } = evt.payload as ProfileSwitchPayload;
+          const r = userProfiles.switchProfile(st.settings, profileId);
+          if (!r.ok) { reply(false, r.error); return; }
+          setSettings(s => {
+            const next = userProfiles.switchProfile(s, profileId);
+            return next.ok ? next.settings : s;
+          });
+          activeProfileIdRef.current = profileId;
+          reply(true, undefined, { profileId });
+          return;
+        }
+        case 'profile.update': {
+          const payload = evt.payload as ProfileUpdatePayload;
+          const patch: Partial<UserProfile> = {};
+          if (payload.patch.name !== undefined) patch.name = payload.patch.name.trim();
+          if (payload.patch.avatar !== undefined) patch.avatar = payload.patch.avatar;
+          if (payload.patch.persona !== undefined) patch.persona = payload.patch.persona;
+          const r = userProfiles.updateProfile(st.settings, payload.profileId, patch);
+          if (!r.ok) { reply(false, r.error); return; }
+          setSettings(s => {
+            const next = userProfiles.updateProfile(s, payload.profileId, patch);
+            return next.ok ? next.settings : s;
+          });
+          reply(true, undefined, { profileId: payload.profileId });
+          return;
+        }
+        case 'profile.create': {
+          const payload = evt.payload as ProfileCreatePayload;
+          const id = userProfiles.newProfileId();
+          setSettings(s => userProfiles.createProfile(s, {
+            id,
+            name: payload.name?.trim() || t('新身份'),
+            avatar: payload.avatar || s.userAvatar || '',
+            persona: payload.persona || ''
+          }));
+          reply(true, undefined, { profileId: id });
+          return;
+        }
+        case 'profile.delete': {
+          const { profileId } = evt.payload as ProfileIdPayload;
+          const r = userProfiles.deleteProfile(st.settings, profileId);
+          if (!r.ok) { reply(false, r.error); return; }
+          setSettings(s => {
+            const next = userProfiles.deleteProfile(s, profileId);
+            return next.ok ? next.settings : s;
+          });
+          // 删的是当前身份时指针会挪到剩下的第一个，ref 也跟上
+          activeProfileIdRef.current = r.settings.activeProfileId;
+          reply(true, undefined, { profileId });
           return;
         }
         default:
@@ -4326,20 +4400,11 @@ const App: React.FC = () => {
         userProfiles={settings.userProfiles}
         activeProfileId={settings.activeProfileId}
         onSwitchProfile={(profileId) => {
-          if (profileId === 'narrator') {
-            setSettings({ ...settings, activeProfileId: 'narrator' });
-          } else {
-            const profile = (settings.userProfiles || []).find(p => p.id === profileId);
-            if (profile) {
-              setSettings({
-                ...settings,
-                activeProfileId: profileId,
-                userName: profile.name,
-                userAvatar: profile.avatar,
-                userPersona: profile.persona
-              });
-            }
-          }
+          // 与手机 profile.switch 同一个 helper：指针 + legacy 三件套一次写齐，旁白只动指针
+          setSettings(s => {
+            const r = userProfiles.switchProfile(s, profileId);
+            return r.ok ? r.settings : s;
+          });
         }}
       />
 

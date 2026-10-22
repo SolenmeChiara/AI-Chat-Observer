@@ -22,6 +22,10 @@ export const ACTION_TYPES = [
   'agent.create',
   'group.create',
   'session.create',
+  'profile.switch',
+  'profile.create',
+  'profile.update',
+  'profile.delete',
 ] as const;
 
 export type ActionType = (typeof ACTION_TYPES)[number];
@@ -52,7 +56,14 @@ export const ACTION_LIMITS = {
   attachmentBytes: 4 * 1024 * 1024, // 单张图片**解码后**的字节上限
   attachmentsPerMessage: 4,         // 一条 message.send 最多几张图
   fileName: 200,                    // 附件原始文件名
+  persona: 64000,                   // 用户身份的人设正文，与 systemPrompt 同档
+  // 用户身份的头像：手机端会把选的图压成 ≤192px 的小图 data URL（实测十几 KB），
+  // 必须塞得进 64 KB 的 SMALL_BODY_BYTES 请求体。电脑端本地上传的原图可能更大，那条路不经过这里。
+  profileAvatar: 48000,
 } as const;
+
+/** profile.switch 的 profileId 可以是这个特殊值：旁白模式（以系统消息样式发言，不带任何身份）。 */
+export const NARRATOR_PROFILE_ID = 'narrator';
 
 /**
  * 带附件的 `message.send` 允许的请求体上限（其余动作仍走 `SMALL_BODY_BYTES` = 64 KB）。
@@ -167,6 +178,40 @@ export interface SessionCreatePayload {
   name?: string;
 }
 
+/**
+ * 切换当前用户身份。`profileId` 是某个 UserProfile.id，或 NARRATOR_PROFILE_ID（旁白模式）。
+ * 不是会话级动作：身份是全局设置，和电脑端开着哪个会话无关。
+ */
+export interface ProfileSwitchPayload {
+  profileId: string;
+}
+
+/** profile.update 允许修改的字段。isDefault / id 不开放。 */
+export interface ProfilePatch {
+  name?: string;
+  avatar?: string;
+  persona?: string;
+}
+
+export const PROFILE_PATCH_KEYS: ReadonlyArray<keyof ProfilePatch> = ['name', 'avatar', 'persona'];
+
+export interface ProfileUpdatePayload {
+  profileId: string;
+  patch: ProfilePatch;
+}
+
+/** 新建身份。name 留空 = 电脑端默认名「新身份」；avatar 留空 = 沿用当前头像（与电脑端「添加新档案」一致）。 */
+export interface ProfileCreatePayload {
+  name?: string;
+  avatar?: string;
+  persona?: string;
+}
+
+/** 删除身份。最后一个不让删；删的是当前身份时电脑端切到剩下的第一个（与电脑端侧栏一致）。 */
+export interface ProfileIdPayload {
+  profileId: string;
+}
+
 export interface ActionPayloadMap {
   'message.send': MessageSendPayload;
   'session.switch': EmptyPayload;
@@ -179,6 +224,10 @@ export interface ActionPayloadMap {
   'agent.create': AgentCreatePayload;
   'group.create': GroupCreatePayload;
   'session.create': SessionCreatePayload;
+  'profile.switch': ProfileSwitchPayload;
+  'profile.create': ProfileCreatePayload;
+  'profile.update': ProfileUpdatePayload;
+  'profile.delete': ProfileIdPayload;
 }
 
 // ---- 线上形状 ----
@@ -206,7 +255,7 @@ export interface ActionResult {
   ok: boolean;
   error?: string;                 // 机器可读短码，如 'not-active-session' | 'agent-not-found' | 'invalid-model' | 'busy'
   // 只放 id 类信息，不放内容体。group.create 两个都回：groupId 是新群，sessionId 是它附带的第一条会话。
-  data?: { agentId?: string; messageId?: string; sessionId?: string; groupId?: string };
+  data?: { agentId?: string; messageId?: string; sessionId?: string; groupId?: string; profileId?: string };
 }
 
 /** 服务端 → 全部客户端：agents / groups / settings 三张表任一被 PUT 后广播，手机端据此重拉 bootstrap。 */

@@ -149,6 +149,7 @@ App.tsx 新增 `applyRemoteAgentPatch(agentId, patch)`：
 
 - 凭据：`apiKey`（provider / searchConfig / TTS）、`baseUrl`、`lan-token` 永不进 bootstrap / action-result / catalog。验证矩阵必须 grep。
 - 提示词出机：仅 token 持有者（lan 角色）可读；Sol 已知情（本档案即记录）。
+- 人设出机（§8.9 起）：用户身份的 persona 与 activeProfileId 同样进 bootstrap，规则同提示词。新边界一句话：**凭据永不出机，人设与提示词可以**。
 - 动作通道：只有白名单 type；payload 形状与长度在服务端校验；语义（id 存在性、成员关系）在电脑端校验；结果广播只含 ok / error / id。
 - 限流：`action` 独立桶 30/分钟；`rateHits` 无淘汰是既有遗留，本次顺手加「每次命中时清掉窗口外的时间戳，空桶删 key」（一行）。
 - 作用域：会话级动作只作用于电脑当前会话（409）。
@@ -437,3 +438,22 @@ Sol 在真机上撞到一类哑火：电脑页的 bundle 比服务端旧时，�
   `/api/view` 那边有投影（图片换成 URL），但电脑端本地那份仍然是整块 base64（既有设计，未改）。
 - 服务端对带附件的请求先按 24 MB 读进内存再判——拿到 token 的客户端可以用 24 MB 的垃圾体逼服务端分配一次内存。
   限流桶挡不住（400 在限流之前返回）。lan 角色本来就是「拿到 token 就算自己人」，这里只是把成本从 64 KB 抬到 24 MB。
+
+### 8.9 用户身份：切换 / 增删改 + 旁白发言修复（2026-10-22）
+
+**规则变更**：一期「API key 与人设永远不出电脑」放宽为「API key 永不出机，人设可以」（Sol 拍板）。
+
+- 契约（`server/actionContract.ts`）：新增四个非会话级动作 `profile.switch {profileId}`（`'narrator'` = 旁白模式，
+  常量 `NARRATOR_PROFILE_ID`）、`profile.create {name?, avatar?, persona?}`、`profile.update {profileId, patch:{name?,avatar?,persona?}}`、
+  `profile.delete {profileId}`；`ActionResult.data` 加 `profileId`；限额 `persona` 64000、`profileAvatar` 48000
+  （手机把头像压成 ≤192px 小图，要塞进 64 KB 请求体）。
+- 服务端（`server/live.ts`）：形状校验（patch 键白名单、至少一项、改名不许全空白、data URL 头像必须 `data:image/`）；
+  `projectSettings` 多出 `persona` / `isDefault` / `activeProfileId`，仍是挑字段。
+- 电脑端：增删改切的逻辑抽到 `services/userProfiles.ts`（纯函数），侧栏、右栏身份下拉、远程动作三处共用，
+  一律函数式 `setSettings(s => …)`；当前身份变了或被改了，legacy 三件套同一次写入跟上。
+  失败短码 `profile-not-found` / `last-profile`。删当前身份 → 切到剩下第一个（与侧栏原行为一致）。
+- **旁白 bug**：`message.send`（以及老 inbox）入流时从不传 `asNarrator`，电脑切到旁白后手机发的仍是普通用户消息。
+  现在按电脑端当前身份决定（`activeProfileIdRef`，profile.switch 收到时抢先写一次，防「切完立刻发」的竞态）。
+  手机端**不**带 `asNarrator` 字段（服务端仍 400），身份只有一个来源。
+- 手机端：「+」面板第三行「发言身份」→ 选择器（各身份 + 旁白 + 管理身份…）；旁白模式下输入框上方常驻琥珀色提示、占位文案变化；
+  侧边栏「管理」段新增「我的身份」子页（`viewer/panels/ProfilesPanel.tsx`，草稿 / 基线 / catalog 同步照抄 AgentEditPanel）。

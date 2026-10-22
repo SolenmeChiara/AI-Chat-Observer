@@ -8,6 +8,7 @@ import { getBrowserVoices, DEFAULT_TTS_PROVIDERS, fetchProviderVoices } from '..
 import { isImageGenModel } from '../services/openaiService';
 import { formatSessionAsHtml } from '../services/exportHtml';
 import { sliceAfterCutoff } from '../services/shared';
+import * as userProfiles from '../services/userProfiles';
 import type { DbSnapshot } from '../services/db';
 import PhoneViewerModal from './PhoneViewerModal';
 import { useT } from '../i18n';
@@ -824,49 +825,31 @@ const Sidebar: React.FC<SidebarProps> = ({
     if (avatarInputRef.current) avatarInputRef.current.value = '';
   };
 
-  // User Profile Management
+  // User Profile Management —— 逻辑在 services/userProfiles.ts，手机远程动作走的是同一套。
+  // 一律函数式 setSettings：手机可能在同一时刻改了别的身份，拿渲染期快照整份写回会把它吃掉。
   const updateUserProfile = (profileId: string, updates: Partial<UserProfile>) => {
-    const profiles = settings.userProfiles || [];
-    const updatedProfiles = profiles.map(p =>
-      p.id === profileId ? { ...p, ...updates } : p
-    );
-    // Also update legacy fields if this is the active profile
-    const updatedProfile = updatedProfiles.find(p => p.id === profileId);
-    const newSettings: GlobalSettings = { ...settings, userProfiles: updatedProfiles };
-    if (settings.activeProfileId === profileId && updatedProfile) {
-      newSettings.userName = updatedProfile.name;
-      newSettings.userAvatar = updatedProfile.avatar;
-      newSettings.userPersona = updatedProfile.persona;
-    }
-    setSettings(newSettings);
+    setSettings(s => {
+      const r = userProfiles.updateProfile(s, profileId, updates);
+      return r.ok ? r.settings : s;
+    });
   };
 
   const addNewUserProfile = () => {
-    const newId = `user-${Date.now()}`;
-    const newProfile: UserProfile = {
+    const newId = userProfiles.newProfileId();
+    setSettings(s => userProfiles.createProfile(s, {
       id: newId,
       name: t('新身份'),
-      avatar: settings.userAvatar || '',
+      avatar: s.userAvatar || '',
       persona: ''
-    };
-    const profiles = settings.userProfiles || [];
-    setSettings({ ...settings, userProfiles: [...profiles, newProfile] });
+    }));
     setExpandedProfileId(newId);
   };
 
   const deleteUserProfile = (profileId: string) => {
-    const profiles = settings.userProfiles || [];
-    if (profiles.length <= 1) return; // Keep at least one profile
-    const newProfiles = profiles.filter(p => p.id !== profileId);
-    const newSettings: GlobalSettings = { ...settings, userProfiles: newProfiles };
-    // If deleting active profile, switch to first remaining
-    if (settings.activeProfileId === profileId && newProfiles.length > 0) {
-      newSettings.activeProfileId = newProfiles[0].id;
-      newSettings.userName = newProfiles[0].name;
-      newSettings.userAvatar = newProfiles[0].avatar;
-      newSettings.userPersona = newProfiles[0].persona;
-    }
-    setSettings(newSettings);
+    setSettings(s => {
+      const r = userProfiles.deleteProfile(s, profileId);
+      return r.ok ? r.settings : s;
+    });
     if (expandedProfileId === profileId) setExpandedProfileId(null);
   };
 
@@ -2208,16 +2191,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                             {settings.activeProfileId !== profile.id && (
                               <button
                                 className="flex-1 text-xs py-1.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded hover:opacity-90"
-                                onClick={() => setSettings({
-                                  // 与 App.tsx onSwitchProfile 的写入保持一致:指针 + legacy 三件套必须
-                                  // 同时写。只写指针的话,右栏身份卡(读指针)立刻变,而喂给模型的
-                                  // userName/userPersona 和气泡名(读 legacy)不变——「名字变了但没实际
-                                  // 生效,重选一次才好」的 bug 即源于此。
-                                  ...settings,
-                                  activeProfileId: profile.id,
-                                  userName: profile.name,
-                                  userAvatar: profile.avatar,
-                                  userPersona: profile.persona
+                                // 指针 + legacy 三件套必须同时写（switchProfile 负责）。只写指针的话,
+                                // 右栏身份卡(读指针)立刻变,而喂给模型的 userName/userPersona 和气泡名
+                                // (读 legacy)不变——「名字变了但没实际生效,重选一次才好」的 bug 即源于此。
+                                onClick={() => setSettings(s => {
+                                  const r = userProfiles.switchProfile(s, profile.id);
+                                  return r.ok ? r.settings : s;
                                 })}
                               >
                                 {t('设为当前')}

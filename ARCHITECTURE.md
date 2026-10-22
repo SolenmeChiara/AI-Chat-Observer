@@ -497,7 +497,7 @@ Desktop browser (App, localhost)              Phone browser (/viewer, ViewerApp)
 
 **Invariants:**
 *   A session file has exactly one writer: the desktop app. Phone messages never touch disk directly — they travel over SSE to the desktop, which calls `appendUserMessage()` and lets the normal debounced-save path persist them, avoiding a second writer.
-*   `/api/view/*` responses are built from an explicit field whitelist: agents expose only `id`/`name`/`avatar`/`role` — never `systemPrompt`, `model`, `providerId`, `apiKey`, `persona`, or any conversation `summary`/`adminNotes`. Adding a field requires touching this whitelist by hand; forgetting to only under-shares, it never over-shares.
+*   `/api/view/*` responses are built from an explicit field whitelist: agents expose only `id`/`name`/`avatar`/`role` — never `systemPrompt`, `model`, `providerId`, `apiKey`, `persona`, or any conversation `summary`/`adminNotes`. Adding a field requires touching this whitelist by hand; forgetting to only under-shares, it never over-shares. (Since PHONE_ACTIONS_PLAN §2.7 / §8.9 the boundary is "credentials never leave the machine": agent `systemPrompt` and user-profile `persona` + `activeProfileId` are now projected; `apiKey` / `baseUrl` / `searchConfig` still are not.)
 
 **Security design:**
 *   **Host allowlist**: the `loopback` role requires a loopback hostname; the `lan` role (only reachable when LAN mode is on) requires the Host header to be either a bare IP literal or end in `.ts.net` (Tailscale MagicDNS) — both forms defeat DNS rebinding, since an attacker-controlled domain name is neither.

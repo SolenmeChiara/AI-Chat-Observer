@@ -92,10 +92,15 @@ export interface ViewUserProfile {
   id: string;
   name: string;
   avatar: string;
+  /** 人设正文。老服务端不出这个字段（一期规定人设不出电脑），读的地方一律 `?? ''`。 */
+  persona?: string;
+  isDefault?: boolean;
 }
 
 export interface ViewSettings {
   userProfiles: ViewUserProfile[];
+  /** 当前身份：某个 profile id，或 'narrator'（旁白模式）。老服务端不给，空串当「不知道」。 */
+  activeProfileId?: string;
   userName: string;
   userAvatar: string;
   expandAllReasoning: boolean;

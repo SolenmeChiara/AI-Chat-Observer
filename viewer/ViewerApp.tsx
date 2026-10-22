@@ -21,6 +21,7 @@ import {
   CornerUpLeft,
   ImagePlus,
   Loader2,
+  Megaphone,
   Menu,
   Monitor,
   MonitorOff,
@@ -33,16 +34,24 @@ import {
   Smartphone,
   Sun,
   UserCog,
+  UserRound,
   Users,
   X,
 } from 'lucide-react';
-import { ACTION_LIMITS, ACTION_RESULT_TIMEOUT_MS, type ActionResult, type ActionType } from '../server/actionContract';
+import {
+  ACTION_LIMITS,
+  ACTION_RESULT_TIMEOUT_MS,
+  NARRATOR_PROFILE_ID,
+  type ActionResult,
+  type ActionType,
+} from '../server/actionContract';
 import { makeViewerT } from './strings';
 import { ImagePrepError, compressImageForUpload, type DraftAttachment } from './imageUpload';
 import MembersPanel from './panels/MembersPanel';
 import AgentEditPanel from './panels/AgentEditPanel';
 import AgentCreatePanel from './panels/AgentCreatePanel';
 import SessionsPanel from './panels/SessionsPanel';
+import ProfilesPanel from './panels/ProfilesPanel';
 import { SidebarRow, SidebarSection, SidebarSwitch, type RunActionOptions } from './panels/shared';
 import {
   BootstrapData,
@@ -125,7 +134,7 @@ interface Toast {
  * 用「推入子页」而不是三期那种顶部 tab 栏：tab 栏一行挤四个，每个只有 ~80×44，
  * 而子页的返回栏是整条 44px 的行，指头点哪儿都算。
  */
-type SidebarPage = 'home' | 'members' | 'edit' | 'create';
+type SidebarPage = 'home' | 'members' | 'edit' | 'create' | 'profiles';
 
 /** 系统 / 搜索结果消息自成一段，不参与分组（它们走 ChatBubble 的另一条渲染分支） */
 function isStandaloneMessage(m: Message): boolean {
@@ -256,11 +265,15 @@ const ViewerApp: React.FC = () => {
   const [sidebarShown, setSidebarShown] = useState(false);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>('home');
   const [editAgentId, setEditAgentId] = useState<string | null>(null);
+  /** 「我的身份」子页里正在编辑的那个身份 */
+  const [editProfileId, setEditProfileId] = useState<string | null>(null);
   /** 电脑端当前会话的禁言表（成员面板要显示剩余时间） */
   const [activeMuted, setActiveMuted] = useState<MuteInfo[]>([]);
   const [muteTick, setMuteTick] = useState(0);
   const [pmTargetId, setPmTargetId] = useState<string | null>(null);
   const [showPmPicker, setShowPmPicker] = useState(false);
+  /** 发言身份选择器（从「+」面板进），样式与私讯选择器同一套 */
+  const [showProfilePicker, setShowProfilePicker] = useState(false);
   /** 输入区左侧「+」展开的小面板（发图片 / 私讯给…）。六期把两颗方钮并成了一颗。 */
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [replyTo, setReplyTo] = useState<{ id: string; name: string; text: string } | null>(null);
@@ -453,6 +466,10 @@ const ViewerApp: React.FC = () => {
           return t('TA 正在生成，稍后再试');
         case 'append-failed':
           return t('电脑端没能写进这条消息');
+        case 'profile-not-found':
+          return t('找不到这个身份');
+        case 'last-profile':
+          return t('至少要留一个身份');
         case 'internal-error':
           return t('电脑端执行时出错了');
         case 'unknown-action':
@@ -563,6 +580,10 @@ const ViewerApp: React.FC = () => {
         }
         if (entry.type === 'agent.create' && result.data?.agentId) {
           setEditAgentId(result.data.agentId);
+        }
+        if (entry.type === 'profile.create' && result.data?.profileId) {
+          // 新身份要等 catalog 重拉 bootstrap 才进列表；先把选中设上，进来那一刻表单直接展开
+          setEditProfileId(result.data.profileId);
         }
         if (entry.type === 'session.create' || entry.type === 'group.create') {
           // 电脑端建完就自己切过去了（handleCreateSession / handleCreateGroup 都会 setActive*），
@@ -901,7 +922,7 @@ const ViewerApp: React.FC = () => {
       // 不一定拿得到。所以再兜一层：同一个人、同样的正文、同一个私讯目标、时间对得上，就算它到了。
       return !win.messages.some(
         m =>
-          m.senderId === USER_ID &&
+          m.senderId === p.senderId &&
           m.text === p.text &&
           (m.pmTargetId || '') === (p.pmTargetId || '') &&
           m.timestamp >= p.timestamp - 120_000
@@ -1171,8 +1192,11 @@ const ViewerApp: React.FC = () => {
     setSendError('');
     setShowMentionPopup(false);
     setShowPmPicker(false);
+    setShowProfilePicker(false);
     setShowPlusMenu(false);
     const outgoing = drafts;
+    // 发言身份由电脑端按它当前的身份决定（旁白 = 系统消息），这里只是让占位气泡长得和真消息一样
+    const asNarrator = boot?.settings.activeProfileId === NARRATOR_PROFILE_ID;
     // 先乐观显示。走 message.send 之后落盘 id 由电脑端生成，回执里不一定带得回来，
     // 所以占位的撤销条件比 inbox 时代宽一点（见 pending 清理 effect）。
     // 占位气泡里的图用本地 data URL；真消息回来时附件已经被服务端投影成 URL 了。
@@ -1185,7 +1209,8 @@ const ViewerApp: React.FC = () => {
     }));
     const optimistic: Message = {
       id: localId,
-      senderId: USER_ID,
+      senderId: asNarrator ? NARRATOR_PROFILE_ID : USER_ID,
+      ...(asNarrator ? { isSystem: true } : {}),
       text,
       timestamp: Date.now(),
       ...(pmTargetId ? { pmTargetId } : {}),
@@ -1232,7 +1257,7 @@ const ViewerApp: React.FC = () => {
       if (outgoing.length > 0) setDrafts(prev => (prev.length > 0 ? prev : outgoing)); // 也不吞图
     }
     setSending(false);
-  }, [inputText, drafts, canSend, sending, preparingImages, pmTargetId, replyTo, runAction, t]);
+  }, [inputText, drafts, canSend, sending, preparingImages, pmTargetId, replyTo, runAction, t, boot]);
 
   // --- 长按气泡 = 引用回复 ---
 
@@ -1584,6 +1609,22 @@ const ViewerApp: React.FC = () => {
 
   const pmTarget = pmTargetId ? sessionMembers.find(a => a.id === pmTargetId) || null : null;
 
+  /** 电脑端当前的发言身份。老服务端不给 activeProfileId，那时只能按 legacy 的 userName 显示 */
+  const activeProfileId = boot.settings.activeProfileId || '';
+  const isNarratorMode = activeProfileId === NARRATOR_PROFILE_ID;
+  const activeProfile = boot.settings.userProfiles.find(p => p.id === activeProfileId) || null;
+  const speakAsName = isNarratorMode ? t('旁白') : activeProfile?.name || boot.settings.userName || 'User';
+  const switchProfileFromPicker = (profileId: string) => {
+    setShowProfilePicker(false);
+    if (profileId === activeProfileId) return;
+    void runAction({
+      type: 'profile.switch',
+      payload: { profileId },
+      key: 'profile-switch-picker',
+      label: t('切换身份'),
+    });
+  };
+
   /** 侧边栏底部那句只读状态（头部原来也用它，六期换成了播放键） */
   const linkText = desktopReachable ? t('在线') : link === 'connecting' ? t('正在连接...') : t('离线');
   /** 头部播放键的无障碍标签 */
@@ -1600,7 +1641,9 @@ const ViewerApp: React.FC = () => {
         ? t('编辑角色')
         : sidebarPage === 'create'
           ? t('新建角色')
-          : t('菜单');
+          : sidebarPage === 'profiles'
+            ? t('我的身份')
+            : t('菜单');
 
   const themeOptions: Array<{ value: ViewerTheme | null; label: string; Icon: typeof Sun }> = [
     { value: 'light', label: t('浅色'), Icon: Sun },
@@ -1879,8 +1922,101 @@ const ViewerApp: React.FC = () => {
                       <span className="ml-auto min-w-0 truncate text-[12px] text-violet-500">{pmTarget.name}</span>
                     )}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      setShowMentionPopup(false);
+                      setShowPmPicker(false);
+                      setShowProfilePicker(true);
+                    }}
+                    className="w-full min-h-[48px] flex items-center gap-3 px-4 text-left text-[15px] text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-zinc-800 active:bg-gray-100 dark:active:bg-zinc-800"
+                  >
+                    {isNarratorMode ? (
+                      <Megaphone size={18} className="shrink-0 text-amber-500" />
+                    ) : (
+                      <UserRound size={18} className="shrink-0 text-gray-400" />
+                    )}
+                    <span className="truncate">{t('发言身份')}</span>
+                    <span
+                      className={`ml-auto min-w-0 truncate text-[12px] ${
+                        isNarratorMode ? 'text-amber-500' : 'text-gray-400'
+                      }`}
+                    >
+                      {speakAsName}
+                    </span>
+                  </button>
                 </div>
               </>
+            )}
+
+            {/* 发言身份选择器。切换是全局设置（电脑端那边也跟着变），不是只对这一条消息生效。
+                背后同样垫一层透明遮罩接「点空白处收起」。 */}
+            {showProfilePicker && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  aria-hidden="true"
+                  onClick={() => setShowProfilePicker(false)}
+                />
+                <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 shadow-xl rounded-xl w-64 max-w-full max-h-72 overflow-y-auto overscroll-contain z-50">
+                  <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase border-b border-gray-50 dark:border-zinc-700">
+                    {t('发言身份')}
+                  </div>
+                  {boot.settings.userProfiles.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      disabled={!desktopReachable}
+                      onClick={() => switchProfileFromPicker(p.id)}
+                      className="w-full min-h-[44px] text-left px-3 py-2 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 disabled:opacity-40"
+                    >
+                      <img src={p.avatar} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
+                      <span className="truncate">{p.name}</span>
+                      {p.id === activeProfileId && <Check size={14} className="ml-auto shrink-0 text-emerald-500" />}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={!desktopReachable}
+                    onClick={() => switchProfileFromPicker(NARRATOR_PROFILE_ID)}
+                    className="w-full min-h-[44px] text-left px-3 py-2 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 disabled:opacity-40"
+                  >
+                    <Megaphone size={16} className="text-amber-500 shrink-0" />
+                    <span className="truncate">{t('旁白')}</span>
+                    {isNarratorMode && <Check size={14} className="ml-auto shrink-0 text-emerald-500" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfilePicker(false);
+                      setEditProfileId(activeProfile?.id || null);
+                      setSidebarPage('profiles');
+                      openSidebar();
+                    }}
+                    className="w-full min-h-[44px] text-left px-3 py-2 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-zinc-800"
+                  >
+                    <UserCog size={16} className="text-gray-400 shrink-0" />
+                    <span className="truncate">{t('管理身份…')}</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* 旁白模式的常驻提示：发出去是系统消息样式，不是平常的「我」，发之前得一眼看到。点它打开身份选择器。 */}
+            {isNarratorMode && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPlusMenu(false);
+                  setShowPmPicker(false);
+                  setShowProfilePicker(v => !v);
+                }}
+                className="mb-2 flex items-center gap-1.5 w-fit max-w-full min-h-[32px] rounded-full bg-amber-50 dark:bg-amber-900/25 text-amber-700 dark:text-amber-300 px-2.5 text-[11px]"
+              >
+                <Megaphone size={12} className="shrink-0" />
+                <span className="truncate">{t('旁白模式')}</span>
+              </button>
             )}
 
             {/* 私讯目标选择器。列表和 @提及弹窗同一套样式，位置也一样（贴着输入区上沿弹）。 */}
@@ -2015,6 +2151,7 @@ const ViewerApp: React.FC = () => {
                   setShowPlusMenu(v => !v);
                   setShowMentionPopup(false);
                   setShowPmPicker(false);
+                  setShowProfilePicker(false);
                 }}
                 disabled={!canSend}
                 aria-expanded={showPlusMenu}
@@ -2042,7 +2179,7 @@ const ViewerApp: React.FC = () => {
                   }}
                   disabled={!canSend}
                   rows={1}
-                  placeholder={canSend ? t('说点什么...') : sendBlockedReason}
+                  placeholder={canSend ? (isNarratorMode ? t('以旁白身份发言...') : t('说点什么...')) : sendBlockedReason}
                   className="w-full bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl pl-4 pr-14 py-3 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600 resize-none overflow-y-auto disabled:opacity-60"
                   style={{ minHeight: '52px', maxHeight: '140px' }}
                 />
@@ -2237,6 +2374,14 @@ const ViewerApp: React.FC = () => {
                       trailing={<ChevronRight size={16} />}
                       onClick={() => setSidebarPage('create')}
                     />
+                    <SidebarRow
+                      icon={isNarratorMode ? <Megaphone size={16} /> : <UserRound size={16} />}
+                      title={t('我的身份')}
+                      subtitle={speakAsName}
+                      disabled={!desktopReachable}
+                      trailing={<ChevronRight size={16} />}
+                      onClick={() => setSidebarPage('profiles')}
+                    />
 
                     {/* 侧边栏开着时头部被盖住了，状态在这儿再说一遍 */}
                     <div className="mt-3 px-4 py-4 border-t border-gray-100 dark:border-zinc-800 text-[11px] leading-snug break-words text-gray-400 dark:text-gray-500">
@@ -2301,6 +2446,19 @@ const ViewerApp: React.FC = () => {
                     providers={providers}
                     sessionId={activeSessionId}
                     onCreated={() => setSidebarPage('members')}
+                  />
+                )}
+                {sidebarPage === 'profiles' && (
+                  <ProfilesPanel
+                    t={t}
+                    lang={lang}
+                    runAction={runAction}
+                    isPending={isPending}
+                    disabled={!desktopReachable}
+                    profiles={boot.settings.userProfiles}
+                    activeProfileId={activeProfileId}
+                    selectedId={editProfileId}
+                    onSelect={setEditProfileId}
                   />
                 )}
               </div>

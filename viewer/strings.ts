@@ -208,6 +208,29 @@ const en: Record<string, string> = {
   '只能发图片': 'Images only',
   '图片太大了（单张上限 4 MB）': 'Image is too large (4 MB max each)',
   '这张图读不出来': 'Could not read this image',
+
+  // 用户身份（我的身份面板 + 发送区的身份选择）
+  '我的身份': 'My profiles',
+  '发言身份': 'Speak as',
+  '管理身份…': 'Manage profiles…',
+  '设为当前': 'Use',
+  '无人设': 'No persona',
+  '旁白': 'Narrator',
+  '旁白模式': 'Narrator mode',
+  '以系统消息样式发言，不带任何身份': 'Speak as a system message, without any profile',
+  '以旁白身份发言...': 'Speak as the narrator…',
+  '新建身份': 'New profile',
+  '换头像': 'Change avatar',
+  '还原': 'Revert',
+  '人设 / 自我介绍（AI 可见）': 'Persona / bio (visible to AI)',
+  '人设太长（上限 64000 字）': 'Persona is too long (64000 chars max)',
+  '头像太大了': 'Avatar image is too large',
+  '切换身份': 'Switch profile',
+  '保存身份': 'Save profile',
+  '删除身份': 'Delete profile',
+  '至少要留一个身份': 'At least one profile must remain',
+  '电脑端还没有任何身份': 'No profiles on the computer yet',
+  '找不到这个身份': 'Profile not found',
 };
 
 export function makeViewerT(locale: ViewerLocale): (key: string) => string {

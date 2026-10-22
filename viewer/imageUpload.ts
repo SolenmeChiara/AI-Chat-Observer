@@ -172,3 +172,43 @@ export async function compressImageForUpload(file: File): Promise<DraftAttachmen
 
   return { id, mimeType: actualMime, data: parts.data, dataUrl, fileName, bytes };
 }
+
+/** 用户身份头像的边长。气泡里头像最大也就 40px，192 给高分屏留了余量。 */
+export const AVATAR_EDGE = 192;
+
+/**
+ * 把选的图压成一张正方形小头像，返回 data URL（profile.create / profile.update 的 avatar 字段）。
+ *
+ * 和上面 compressImageForUpload 的区别：居中裁成正方形、边长固定 AVATAR_EDGE、GIF 也重编码
+ * （头像只要第一帧）。结果必须塞进 ACTION_LIMITS.profileAvatar——动作请求体只有 64 KB，
+ * 192px 的 webp/jpeg 通常十几 KB，降到最低质量还超的话就报 too-large。
+ */
+export async function compressAvatar(file: File): Promise<string> {
+  if (!file.type || file.type.indexOf('image/') !== 0) throw new ImagePrepError('not-an-image');
+  const sourceUrl = URL.createObjectURL(file);
+  let img: HTMLImageElement;
+  try {
+    img = await loadImage(sourceUrl);
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!w || !h) throw new ImagePrepError('decode-failed');
+
+  const side = Math.min(w, h);
+  const edge = Math.min(AVATAR_EDGE, side);
+  const canvas = document.createElement('canvas');
+  canvas.width = edge;
+  canvas.height = edge;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new ImagePrepError('decode-failed');
+  ctx.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, edge, edge);
+
+  const mime = canEncodeWebp() ? 'image/webp' : 'image/jpeg';
+  for (let quality = 0.85; quality >= 0.35; quality -= 0.15) {
+    const url = canvas.toDataURL(mime, quality);
+    if (url.length <= ACTION_LIMITS.profileAvatar) return url;
+  }
+  throw new ImagePrepError('too-large');
+}

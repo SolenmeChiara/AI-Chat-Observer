@@ -38,6 +38,7 @@ import {
   ACTION_TYPES,
   AGENT_PATCH_CONFIG_KEYS,
   AGENT_PATCH_KEYS,
+  PROFILE_PATCH_KEYS,
   SESSION_SCOPED_ACTIONS,
   type ActionType,
 } from './actionContract';
@@ -64,7 +65,7 @@ const RATE_SWEEP_WINDOW_MS = Math.max(INBOX_WINDOW_MS, ACTION_RATE_WINDOW_MS);
 /** action-result 里 error 短码的长度上限（机器可读短码，不是给人看的文案）。 */
 const ACTION_ERROR_MAX = 200;
 /** action-result 的 data 只允许这几个 id 类字段，别的一律 400。 */
-const ACTION_RESULT_DATA_KEYS = ['agentId', 'messageId', 'sessionId', 'groupId'];
+const ACTION_RESULT_DATA_KEYS = ['agentId', 'messageId', 'sessionId', 'groupId', 'profileId'];
 
 const serverStartedAt = Date.now();
 
@@ -490,6 +491,10 @@ const ACTION_PAYLOAD_KEYS: Record<ActionType, string[]> = {
   'agent.create': ['providerId', 'modelId', 'name', 'systemPrompt', 'joinActiveGroup'],
   'group.create': ['name'],
   'session.create': ['groupId', 'name'],
+  'profile.switch': ['profileId'],
+  'profile.create': ['name', 'avatar', 'persona'],
+  'profile.update': ['profileId', 'patch'],
+  'profile.delete': ['profileId'],
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -634,6 +639,32 @@ function validateAgentPatch(patch: unknown): string | null {
 }
 
 /**
+ * 用户身份的头像：只管长度和一条形状——是 data URL 的话必须是图片。
+ * 别的写法（emoji、http 链接、相对路径）电脑端本来就接受，这里不收窄。
+ */
+function badOptionalProfileAvatar(v: unknown): boolean {
+  if (v === undefined) return false;
+  if (typeof v !== 'string' || v.length > ACTION_LIMITS.profileAvatar) return true;
+  return v.slice(0, 5).toLowerCase() === 'data:' && v.slice(0, 11).toLowerCase() !== 'data:image/';
+}
+
+/** profile.update 的 patch：键白名单 + 每个字段的类型与长度。至少要改一样。 */
+function validateProfilePatch(patch: unknown): string | null {
+  if (!isPlainObject(patch)) return 'patch';
+  const keys = Object.keys(patch);
+  if (keys.length === 0) return 'patch';
+  for (const key of keys) {
+    if ((PROFILE_PATCH_KEYS as ReadonlyArray<string>).indexOf(key) < 0) return `patch.${key}`;
+  }
+  if (badOptionalString(patch.name, ACTION_LIMITS.name)) return 'patch.name';
+  // 名字可以不改，但改了就不能是空的：空名字在气泡和提示词里都没法用
+  if (typeof patch.name === 'string' && !patch.name.trim()) return 'patch.name';
+  if (badOptionalProfileAvatar(patch.avatar)) return 'patch.avatar';
+  if (badOptionalString(patch.persona, ACTION_LIMITS.persona)) return 'patch.persona';
+  return null;
+}
+
+/**
  * 按 type 校验 payload 的形状与长度。**只做形状**：id 存不存在、是不是群成员这类语义
  * 服务端一概不知道（它不读 agents/groups 的内存状态），交给电脑端在执行时判，失败经 action-result 回来。
  */
@@ -702,6 +733,19 @@ function validateActionPayload(type: ActionType, payload: Record<string, unknown
       if (badOptionalString(payload.name, ACTION_LIMITS.name)) return 'name';
       return null;
     }
+    case 'profile.switch':
+    case 'profile.delete':
+      // 'narrator' 也是合法的 id 形状；delete 拿它当 id 会在电脑端报 profile-not-found
+      return badId(payload.profileId) ? 'profileId' : null;
+    case 'profile.update':
+      if (badId(payload.profileId)) return 'profileId';
+      return validateProfilePatch(payload.patch);
+    case 'profile.create':
+      // name 空串 / 全空白不算错，和 group.create 同理：电脑端换成默认名
+      if (badOptionalString(payload.name, ACTION_LIMITS.name)) return 'name';
+      if (badOptionalProfileAvatar(payload.avatar)) return 'avatar';
+      if (badOptionalString(payload.persona, ACTION_LIMITS.persona)) return 'persona';
+      return null;
     default:
       return 'type';
   }
@@ -1178,12 +1222,23 @@ function projectGroup(g: any) {
   };
 }
 
-/** userProfiles 只出 id/name/avatar——persona 是人设，属于「永远不出电脑」的那一类。 */
+/**
+ * 设置投影。一期规定「人设永远不出电脑」，现在手机要能切换与编辑用户身份，边界放宽为
+ * 「凭据永不出机，人设可以」（与 agent 提示词同一条线，PHONE_ACTIONS_PLAN §2.7）。
+ * 仍是挑字段：settings.json 里 TTS / 搜索等配置一概不出门。
+ */
 function projectSettings(s: any) {
   return {
     userProfiles: Array.isArray(s?.userProfiles)
-      ? s.userProfiles.map((p: any) => ({ id: p?.id, name: p?.name, avatar: p?.avatar }))
+      ? s.userProfiles.map((p: any) => ({
+          id: p?.id,
+          name: p?.name,
+          avatar: p?.avatar,
+          persona: typeof p?.persona === 'string' ? p.persona : '',
+          isDefault: !!p?.isDefault,
+        }))
       : [],
+    activeProfileId: typeof s?.activeProfileId === 'string' ? s.activeProfileId : '',
     userName: typeof s?.userName === 'string' ? s.userName : 'User',
     userAvatar: typeof s?.userAvatar === 'string' ? s.userAvatar : '',
     expandAllReasoning: !!s?.expandAllReasoning,
