@@ -270,6 +270,9 @@ export const generateSessionName = async (
   }
 };
 
+/** 总结类请求的超时。一次归档常有一两百条消息，长总结 30 秒写不完，会被掐断后返回 null，边界永远推进不了。 */
+export const SUMMARY_REQUEST_TIMEOUT_MS = 180 * 1000;
+
 /**
  * 归档调用的返回形状。
  *
@@ -328,7 +331,7 @@ const runSummaryCompletion = async (
           messages: [{ role: 'user', content: prompt }]
         })
       },
-      30000,
+      SUMMARY_REQUEST_TIMEOUT_MS,
       1
     );
     if (!res.ok) return null;
@@ -357,7 +360,7 @@ const runSummaryCompletion = async (
         max_tokens: outputTokens
       })
     },
-    30000, // 30 second timeout (longer for summary updates)
+    SUMMARY_REQUEST_TIMEOUT_MS,
     1 // 1 retry
   );
   if (!res.ok) return null;

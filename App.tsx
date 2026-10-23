@@ -57,7 +57,8 @@ const ARCHIVE_BATCH_MAX = 150;
 const ARCHIVE_FAIL_BACKOFF_MS = 60 * 1000;
 // 群组共同往事提炼的超时（GROUP_MEMORY_PLAN.md §2.2）。Gemini 分支的 SDK 调用自身没有超时，
 // 不兜这一层的话，提炼卡住会把整次归档（含公共总结的提交）一起拖住。
-const GROUP_MEMORY_DISTILL_TIMEOUT_MS = 90 * 1000;
+// 要盖住 summaryService 单次请求超时（180s）加一次重试。
+const GROUP_MEMORY_DISTILL_TIMEOUT_MS = 400 * 1000;
 
 /** 给 promise 加一个超时；超时 reject，原 promise 照常在后台跑完（结果被丢弃）。 */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
