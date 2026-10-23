@@ -366,13 +366,28 @@ export function sliceAfterCutoff(
  *
  * `privateSummary` 为空（或全是空白）时输出与 HEAD 逐字节一致——没有私讯的 agent 的
  * memory 层不能因为这次改造多出任何一个 byte，否则白白打断缓存前缀。
+ * `groupMemory`（群组共同往事）同一条规矩：为空时不输出 `[GROUP HISTORY]` 段。
  */
-export function buildMemoryContext(summary?: string, adminNotes?: string[], privateSummary?: string): string {
-  const shared = `
+export function buildMemoryContext(
+  summary?: string,
+  adminNotes?: string[],
+  privateSummary?: string,
+  groupMemory?: string
+): string {
+  const sessionShared = `
     [SHARED MEMORY]
     Long-Term Summary: ${summary || "None"}
     Recent Admin Notes: ${adminNotes && adminNotes.length > 0 ? adminNotes.join('; ') : "None"}
   `;
+  // 群组共同往事（GROUP_MEMORY_PLAN.md §2.3）：跨会话、变化最慢，所以放在 memory 层最前，
+  // 排在本会话总结之前。为空（或全是空白）时一个 byte 都不加——没写过共同往事的群，
+  // memory 层与 HEAD 逐字节一致。
+  const shared = groupMemory && groupMemory.trim()
+    ? `
+    [GROUP HISTORY] (lasting facts from earlier sessions of this group; shared by all members)
+    ${groupMemory.trim()}
+${sessionShared}`
+    : sessionShared;
   if (!privateSummary || !privateSummary.trim()) return shared;
   return `${shared}
     [PRIVATE MEMORY] (only you can see this; other members do not know its contents)

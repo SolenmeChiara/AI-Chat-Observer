@@ -78,6 +78,9 @@ export interface ViewGroup {
   adminIds?: string[];
   mentionOnlyIds?: string[];
   scenario?: string;
+  /** 群组共同往事（跨会话记忆，只含公开内容）。老服务端不出这个字段，读的地方一律 `?? ''`。 */
+  sharedMemory?: string;
+  sharedMemoryUpdatedAt?: number;
 }
 
 export interface ViewSessionIndex {

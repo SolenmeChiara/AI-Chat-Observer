@@ -14,6 +14,7 @@ import ChatBubble from '../components/ChatBubble';
 import {
   AlertCircle,
   ArrowDown,
+  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -52,6 +53,7 @@ import AgentEditPanel from './panels/AgentEditPanel';
 import AgentCreatePanel from './panels/AgentCreatePanel';
 import SessionsPanel from './panels/SessionsPanel';
 import ProfilesPanel from './panels/ProfilesPanel';
+import GroupMemoryPanel from './panels/GroupMemoryPanel';
 import { SidebarRow, SidebarSection, SidebarSwitch, type RunActionOptions } from './panels/shared';
 import {
   BootstrapData,
@@ -134,7 +136,7 @@ interface Toast {
  * 用「推入子页」而不是三期那种顶部 tab 栏：tab 栏一行挤四个，每个只有 ~80×44，
  * 而子页的返回栏是整条 44px 的行，指头点哪儿都算。
  */
-type SidebarPage = 'home' | 'members' | 'edit' | 'create' | 'profiles';
+type SidebarPage = 'home' | 'members' | 'edit' | 'create' | 'profiles' | 'groupMemory';
 
 /** 系统 / 搜索结果消息自成一段，不参与分组（它们走 ChatBubble 的另一条渲染分支） */
 function isStandaloneMessage(m: Message): boolean {
@@ -1643,7 +1645,9 @@ const ViewerApp: React.FC = () => {
           ? t('新建角色')
           : sidebarPage === 'profiles'
             ? t('我的身份')
-            : t('菜单');
+            : sidebarPage === 'groupMemory'
+              ? t('共同往事')
+              : t('菜单');
 
   const themeOptions: Array<{ value: ViewerTheme | null; label: string; Icon: typeof Sun }> = [
     { value: 'light', label: t('浅色'), Icon: Sun },
@@ -2382,6 +2386,14 @@ const ViewerApp: React.FC = () => {
                       trailing={<ChevronRight size={16} />}
                       onClick={() => setSidebarPage('profiles')}
                     />
+                    <SidebarRow
+                      icon={<BookOpen size={16} />}
+                      title={t('共同往事')}
+                      subtitle={activeGroup?.name}
+                      disabled={!desktopReachable || !activeGroup}
+                      trailing={<ChevronRight size={16} />}
+                      onClick={() => setSidebarPage('groupMemory')}
+                    />
 
                     {/* 侧边栏开着时头部被盖住了，状态在这儿再说一遍 */}
                     <div className="mt-3 px-4 py-4 border-t border-gray-100 dark:border-zinc-800 text-[11px] leading-snug break-words text-gray-400 dark:text-gray-500">
@@ -2459,6 +2471,16 @@ const ViewerApp: React.FC = () => {
                     activeProfileId={activeProfileId}
                     selectedId={editProfileId}
                     onSelect={setEditProfileId}
+                  />
+                )}
+                {sidebarPage === 'groupMemory' && (
+                  <GroupMemoryPanel
+                    t={t}
+                    lang={lang}
+                    runAction={runAction}
+                    isPending={isPending}
+                    disabled={!desktopReachable}
+                    group={activeGroup}
                   />
                 )}
               </div>

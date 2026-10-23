@@ -16,6 +16,14 @@ const en: Record<string, string> = {
   '当前群组配置': 'Current Group Config',
   '群组剧本 / 世界观': 'Group Scenario / World Setting',
   '例如：现在你们都在一艘即将沉没的泰坦尼克号上...': 'e.g.: You are all on the Titanic, which is about to sink...',
+  '共同往事': 'Shared History',
+  '跨会话保留的群组记忆：每次归档时自动从公开对话提炼，也可以手动编辑。私讯不会进来。': 'Group memory kept across sessions: distilled from public messages on every archive, and editable by hand. DMs never go in.',
+  '还没有共同往事。开启长期记忆后，每次归档会自动提炼。': 'No shared history yet. With long-term memory on, each archive distills it automatically.',
+  '从当前对话提炼': 'Distill from this chat',
+  '提炼中…': 'Distilling…',
+  '需要先在长期记忆里选好总结模型': 'Pick a summary model under Long-term Memory first',
+  '确定清空本群的共同往事？': 'Clear this group\'s shared history?',
+  '清空': 'Clear',
 
   // Sidebar - memory
   '长期记忆系统': 'Long-term Memory System',

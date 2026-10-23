@@ -467,6 +467,10 @@ interface SidebarProps {
   onDeleteGroup: (id: string) => void;
   onRenameGroup: (id: string, name: string) => void;
   onUpdateGroupScenario: (id: string, scenario: string) => void;
+  // 群组共同往事（跨会话记忆，GROUP_MEMORY_PLAN.md）
+  onUpdateGroupSharedMemory: (groupId: string, text: string) => void;
+  onDistillGroupMemoryNow: () => void;
+  isDistillingGroupMemory: boolean;
   onUpdateGroupMemoryConfig: (groupId: string, updates: any) => void;
   onUpdateGroupEntertainmentConfig: (groupId: string, updates: any) => void;
   // 会话相关
@@ -498,7 +502,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   settings, setSettings,
   ttsProviders, setTTSProviders,
   groups, activeGroupId,
-  onCreateGroup, onSwitchGroup, onDeleteGroup, onRenameGroup, onUpdateGroupScenario, onUpdateGroupMemoryConfig, onUpdateGroupEntertainmentConfig,
+  onCreateGroup, onSwitchGroup, onDeleteGroup, onRenameGroup, onUpdateGroupScenario, onUpdateGroupSharedMemory, onDistillGroupMemoryNow, isDistillingGroupMemory, onUpdateGroupMemoryConfig, onUpdateGroupEntertainmentConfig,
   sessions, activeSessionId,
   onCreateSession, onSwitchSession, onDeleteSession, onRenameSession,
   onUpdateSummary,
@@ -1092,6 +1096,40 @@ const Sidebar: React.FC<SidebarProps> = ({
                       value={activeGroup.scenario || ''}
                       onChange={(e) => onUpdateGroupScenario(activeGroup.id, e.target.value)}
                     />
+                 </div>
+
+                 {/* 群组共同往事：跨会话记忆。归档时自动提炼，也可手改 */}
+                 <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-gray-200 dark:border-zinc-700">
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
+                        <Sparkles size={12}/> {t('共同往事')}
+                      </div>
+                      {activeGroup.sharedMemory && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm(t('确定清空本群的共同往事？'))) onUpdateGroupSharedMemory(activeGroup.id, '');
+                          }}
+                          className="text-[10px] text-gray-400 hover:text-red-500 transition-colors flex items-center gap-0.5"
+                        >
+                          <Trash2 size={10}/> {t('清空')}
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mb-2">{t('跨会话保留的群组记忆：每次归档时自动从公开对话提炼，也可以手动编辑。私讯不会进来。')}</div>
+                    <textarea
+                      className="w-full text-xs bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-2 text-gray-600 dark:text-gray-300 h-32 resize-y focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-500 custom-scrollbar"
+                      placeholder={t('还没有共同往事。开启长期记忆后，每次归档会自动提炼。')}
+                      value={activeGroup.sharedMemory || ''}
+                      onChange={(e) => onUpdateGroupSharedMemory(activeGroup.id, e.target.value)}
+                    />
+                    <button
+                      onClick={onDistillGroupMemoryNow}
+                      disabled={isDistillingGroupMemory || !activeGroup.memoryConfig?.summaryModelId}
+                      title={!activeGroup.memoryConfig?.summaryModelId ? t('需要先在长期记忆里选好总结模型') : undefined}
+                      className="mt-2 w-full text-[10px] py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isDistillingGroupMemory ? t('提炼中…') : t('从当前对话提炼')}
+                    </button>
                  </div>
 
                  {/* 群组记忆配置 */}

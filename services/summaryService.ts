@@ -515,3 +515,117 @@ export const updatePrivateSummary = async (
     return null;
   }
 };
+
+// ---- 群组共同往事（GROUP_MEMORY_PLAN.md） ----
+
+/**
+ * 共同往事的目标长度上限（中文字数；英文约 GROUP_MEMORY_MAX_WORDS 词）。只写进 prompt 约束模型，
+ * 不在客户端截断：截断会切在半句话上，而手写内容本来就允许更长（硬上限见 actionContract 的
+ * ACTION_LIMITS.groupMemory，那是请求体能装下的量）。
+ */
+export const GROUP_MEMORY_MAX_CHARS = 1500;
+export const GROUP_MEMORY_MAX_WORDS = 800;
+/** 提炼结果超过这个长度视为模型失控（复述了整段对话），丢弃不写。 */
+export const GROUP_MEMORY_REJECT_CHARS = 16000;
+/** 模型认为「没有任何值得跨会话记住的东西」且原来也是空的时候，约定输出这个词。 */
+const GROUP_MEMORY_EMPTY_SENTINEL = 'NONE';
+
+/** 提炼的输出 token 下限：1500 中文字约 1500–2250 token，再给思考模型留余量。 */
+export const GROUP_MEMORY_MIN_OUTPUT_TOKENS = 6000;
+
+/**
+ * 把一批**公开**消息提炼进群组共同往事，返回更新后的全文。
+ *
+ * 输入只有：该群现有的共同往事 + 本批公开消息（可选再加一份「本会话的公开总结」作背景，
+ * 仅手动提炼用，且调用方保证它不含私讯）。**私讯与私人记忆一律不进来**：调用方负责先把
+ * `pmTargetId` 消息滤掉，这里再滤一遍兜底。
+ *
+ * 返回：
+ *   - `{ text }`：新的共同往事（可能与原文相同）；
+ *   - `{ text: '' }`：原来为空、这批也没有值得记的内容；
+ *   - `null`：调用失败 / 输出异常。调用方必须保持原有共同往事不动。
+ *
+ * prompt 里的 `[GROUP MEMORY TASK]` 是这条路径的标识。
+ */
+export const distillGroupMemory = async (
+  existingMemory: string | undefined,
+  publicMessages: Message[],
+  provider: ApiProvider,
+  modelId: string,
+  allAgents: any[], // to resolve names
+  maxTokens?: number,
+  sessionSummary?: string
+): Promise<SummaryResult | null> => {
+  // 共同往事跨会话累积，被截断的输出会整段覆盖旧记忆；给一个不低于 GROUP_MEMORY_MIN_OUTPUT_TOKENS 的下限（含思考模型的思考预算）。
+  const outputTokens = Math.max(maxTokens || 2000, GROUP_MEMORY_MIN_OUTPUT_TOKENS);
+
+  // 兜底：就算调用方忘了滤，私讯也不能进群组共享记忆
+  const msgs = publicMessages.filter(m => !m.pmTargetId && !m.isStreaming);
+  const bg = sessionSummary && sessionSummary.trim() ? sessionSummary.trim() : '';
+  if (msgs.length === 0 && !bg) return null;
+
+  const transcript = msgs.map(m => {
+    const sender = allAgents.find((a: any) => a.id === m.senderId);
+    const name = sender ? sender.name : (m.senderId === USER_ID ? 'User' : 'System');
+    return `[${formatMessageTime(m.timestamp)}] ${name}: ${m.text}`;
+  }).join('\n');
+
+  const existing = existingMemory && existingMemory.trim() ? existingMemory.trim() : '';
+  const bgBlock = bg ? `
+    [CURRENT SESSION SUMMARY (BACKGROUND)]
+    ${bg}
+` : '';
+
+  const prompt = `
+    [GROUP MEMORY TASK]
+    You maintain the long-term GROUP MEMORY of a group chat. The group has many separate conversation
+    sessions; this memory is the only thing carried from one session to the next. Every member sees it.
+
+    [EXISTING GROUP MEMORY]
+    ${existing || "None yet."}
+${bgBlock}
+    [NEW CONVERSATION]
+    ${transcript || "None"}
+
+    [WHAT BELONGS HERE]
+    Only things that should still be true or relevant in a FUTURE, separate session:
+    - Lasting facts about members (habits, preferences, quirks, appearance, possessions), e.g. "Astra wears a glove when eating so feathers don't fall in".
+    - Running jokes, nicknames, catchphrases, recurring bits.
+    - Relationship developments between members, and between members and the User.
+    - Shared history worth referring back to (memorable events, decisions, promises, unresolved plans).
+    Do NOT include: the moment-to-moment plot of this conversation, small talk, one-off details,
+    anything said in private messages (PM/私讯), or instructions to the members.
+
+    [RULES]
+    1. Merge the new conversation into the existing memory. Keep every existing item that is still valid;
+       update items that changed; drop items only if they were explicitly contradicted.
+    2. De-duplicate: one item per fact. Rephrase rather than repeat.
+    3. Format: a short bullet list, one fact per line, each line starting with "- ". Name who each item is about.
+    4. Write in the language the conversation is (mainly) written in.
+    5. Keep the whole memory under ${GROUP_MEMORY_MAX_WORDS} words (approximately ${GROUP_MEMORY_MAX_CHARS} Chinese characters).
+       If it would grow longer, merge or shorten the least important items.
+
+    [OUTPUT]
+    Output ONLY the complete updated group memory, with no additional commentary.
+    If the existing memory is empty AND nothing in the new conversation is worth keeping, output exactly: ${GROUP_MEMORY_EMPTY_SENTINEL}
+  `;
+
+  try {
+    const res = await runSummaryCompletion(prompt, provider, modelId, outputTokens);
+    if (!res || !res.text) return null;
+    let text = res.text.trim();
+    if (text === GROUP_MEMORY_EMPTY_SENTINEL) {
+      // 原来有内容却回了 NONE：等于要清空，不可信，当失败处理，原文不动
+      if (existing) return null;
+      text = '';
+    }
+    if (text.length > GROUP_MEMORY_REJECT_CHARS) {
+      console.warn(`[GroupMemory] distill output too long (${text.length} chars), discarded`);
+      return null;
+    }
+    return { text, usage: res.usage };
+  } catch (e) {
+    console.error("Group memory distill failed", e);
+    return null;
+  }
+};

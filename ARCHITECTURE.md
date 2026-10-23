@@ -106,6 +106,8 @@ interface ChatGroup {
   name: string;
   memberIds: string[];     // Shared member list
   scenario?: string;       // Shared scenario (World View)
+  sharedMemory?: string;   // Shared history across sessions (GROUP_MEMORY_PLAN.md)
+  sharedMemoryUpdatedAt?: number;
   memoryConfig: MemoryConfig; // Shared memory configuration
   entertainmentConfig?: EntertainmentConfig; // Entertainment tool config (V5.3)
   createdAt: number;
@@ -279,10 +281,23 @@ To allow AI to operate UI features (such as muting, note-taking, searching), we 
 3.  **Synthesis**: `Prompt = Old Summary + Admin Notes + Recent Messages`.
 4.  **Update**: Generates a new summary, saves to DB, clears admin notes.
 5.  **Closed loop**: The new summary is injected as System Prompt in the next API call, completing the memory loop.
+6.  **Group shared history** (`ChatGroup.sharedMemory`, see `GROUP_MEMORY_PLAN.md`): on every archive, after the
+    session summary, `summaryService.distillGroupMemory` merges the just-archived **public** messages into the group's
+    cross-session memory (lasting facts, running jokes, relationships; capped by `GROUP_MEMORY_MAX_CHARS`). PMs and
+    private summaries never go in. Failure is isolated: the archive still commits, the old shared memory stays.
+
+Memory layers as the model sees them (stable first, for prompt-cache friendliness):
+
+| Layer | Scope | Source | Where in the prompt |
+|---|---|---|---|
+| `scenario` | group, static | hand-written | `[SCENARIO]`, head of the stable tier |
+| `sharedMemory` | group, cross-session | distilled on archive / hand-edited | `[GROUP HISTORY]`, head of the memory tier (omitted when empty) |
+| `summary` + `adminNotes` | session | archive | `[SHARED MEMORY]` |
+| `privateSummaries[agentId]` | session, per agent | archive of PMs | `[PRIVATE MEMORY]` (omitted when empty) |
 
 ### 4.6 Group Hierarchy (Group Hierarchy) - Added in V5.1
 ```
-Group                    -> Shared: members, scenario, memory config
+Group                    -> Shared: members, scenario, shared history (sharedMemory), memory config
 ├── Session 1            -> Independent: messages, summary, notes, mutes
 ├── Session 2
 └── Session 3

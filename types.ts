@@ -165,6 +165,11 @@ export interface ChatGroup {
   adminIds?: string[];        // 该群的管理员列表
   mentionOnlyIds?: string[];  // 仅@时发言的成员列表（分群管理）
   scenario?: string;          // 共享的场景设定
+  // 共同往事（GROUP_MEMORY_PLAN.md）：跨会话的群组共享记忆。每次会话归档时由总结模型把刚归档的
+  // 公开消息提炼进来（滚动合并、去重、有长度上限），也可以手写。只含公开内容，从不含私讯 / 私人记忆。
+  // 空或缺省时注入给模型的 memory 层与没有这个字段时逐字节一致。
+  sharedMemory?: string;
+  sharedMemoryUpdatedAt?: number; // 最后一次写入（自动提炼或手动编辑）的时间
   memoryConfig: MemoryConfig; // 共享的记忆配置
   entertainmentConfig?: EntertainmentConfig; // 娱乐功能配置
   createdAt: number;

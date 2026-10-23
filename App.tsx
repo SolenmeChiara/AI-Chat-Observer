@@ -10,7 +10,7 @@ import StatsPanel from './components/StatsPanel';
 import { streamGeminiReply, isGemini3Model } from './services/geminiService';
 import { streamOpenAIReply, streamOpenAIResponsesReply, streamImageGeneration, isImageGenModel } from './services/openaiService';
 import { streamAnthropicReply } from './services/anthropicService';
-import { generateSessionName, updateSessionSummary, updatePrivateSummary } from './services/summaryService';
+import { generateSessionName, updateSessionSummary, updatePrivateSummary, distillGroupMemory } from './services/summaryService';
 import { AgentType } from './types';
 import { parseFile, compressImage, getBase64Size } from './services/fileParser';
 import { initDB, loadAllData, saveCollection, saveSettings, exportSnapshot, importSnapshot, getStorageMode } from './services/db';
@@ -36,6 +36,7 @@ import {
   type MessageSendPayload,
   type ProfileCreatePayload,
   type ProfileIdPayload,
+  type GroupMemoryUpdatePayload,
   type ProfileSwitchPayload,
   type ProfileUpdatePayload,
   type SessionCreatePayload,
@@ -54,6 +55,20 @@ const formatErrorTimestamp = () => {
 const ARCHIVE_BATCH_MAX = 150;
 // 归档失败后的重试冷却：不加这个，每来一条新消息就撞一次失败的模型。
 const ARCHIVE_FAIL_BACKOFF_MS = 60 * 1000;
+// 群组共同往事提炼的超时（GROUP_MEMORY_PLAN.md §2.2）。Gemini 分支的 SDK 调用自身没有超时，
+// 不兜这一层的话，提炼卡住会把整次归档（含公共总结的提交）一起拖住。
+const GROUP_MEMORY_DISTILL_TIMEOUT_MS = 90 * 1000;
+
+/** 给 promise 加一个超时；超时 reject，原 promise 照常在后台跑完（结果被丢弃）。 */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
 
 // 行首伪日志标签的三种 token（都不带 g 标志，test/replace 无 lastIndex 状态）
 const LOG_LABEL_ID = /^\[ID:[^\]\n]*\]\s*/i;
@@ -314,6 +329,26 @@ const App: React.FC = () => {
   const memoryGenRef = useRef<Map<string, number>>(new Map());
   const bumpMemoryGen = useCallback((sessionId: string) => {
     memoryGenRef.current.set(sessionId, (memoryGenRef.current.get(sessionId) || 0) + 1);
+  }, []);
+  // 手动「立即提炼共同往事」在跑的群（按钮禁用用）。自动提炼跟着归档走，用 archivingSessionIds 就够。
+  const [distillingGroupIds, setDistillingGroupIds] = useState<Set<string>>(new Set());
+
+  // 群组共同往事的提交：比较再交换。提炼要几秒到几十秒，期间用户可能手改了共同往事，或者同群
+  // 另一个会话的归档先提交了一版——那时 base 已经对不上，本次结果作废（不覆盖手写 / 不丢别人那版）。
+  // 返回值只用于日志。
+  const commitGroupMemory = useCallback((groupId: string, base: string | undefined, text: string) => {
+    let logged = false; // StrictMode 会重跑 updater，日志只打一次
+    setGroups(prev => {
+      const g = prev.find(x => x.id === groupId);
+      if (!g) return prev;
+      if ((g.sharedMemory || '') !== (base || '')) {
+        if (!logged) { logged = true; console.warn(`[GroupMemory] discarded: group ${groupId} memory changed during distill`); }
+        return prev;
+      }
+      if ((g.sharedMemory || '') === text) return prev; // 没变化就不写，免得白白打断缓存
+      if (!logged) { logged = true; console.log(`[GroupMemory] updated: group ${groupId}, ${text.length} chars`); }
+      return prev.map(x => x.id === groupId ? { ...x, sharedMemory: text, sharedMemoryUpdatedAt: Date.now() } : x);
+    });
   }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -733,6 +768,58 @@ const App: React.FC = () => {
   // 失败退避一概不变。
   const handleArchiveNow = () => {
     runArchive(activeSessionId, { force: true });
+  };
+
+  // 群组共同往事：手写。函数式更新，和归档提交的比较再交换互不覆盖（手写先落地的话，
+  // 在途提炼提交时发现 base 变了就作废）。空串存成 undefined（清空）；只有空白的内容照存（否则
+  // 在空框里先敲的空格 / 换行会被吞掉），注入层 trim 后为空同样不输出，逐字节回到 HEAD。
+  const handleUpdateGroupSharedMemory = (groupId: string, text: string) => {
+    setGroups(prev => prev.map(g => g.id === groupId ? {
+      ...g,
+      sharedMemory: text ? text : undefined,
+      sharedMemoryUpdatedAt: Date.now()
+    } : g));
+  };
+
+  // 「从当前对话提炼」：不等归档，把当前会话边界之后的公开消息（最多 ARCHIVE_BATCH_MAX 条）
+  // 提炼进共同往事；本会话的公开总结作背景，但只在 excludePM 为真时给——excludePM 关掉时
+  // 公共总结里本来就混着私讯，不能进群组记忆。不动归档边界，不动会话记忆。
+  const handleDistillGroupMemoryNow = async () => {
+    const session = sessions.find(s => s.id === activeSessionId);
+    const group = session ? groups.find(g => g.id === session.groupId) : undefined;
+    const conf = group?.memoryConfig;
+    if (!session || !group || !conf?.summaryModelId) return;
+    const provider = providers.find(p => p.id === conf.summaryProviderId);
+    if (!provider) { console.warn('[GroupMemory] summary provider not found'); return; }
+    if (distillingGroupIds.has(group.id)) return;
+    const msgs = sliceAfterCutoff(session.messages, { id: session.summaryCutoffId, ts: session.summaryCutoffTs })
+      .filter(m => !m.isStreaming && !m.pmTargetId)
+      .slice(-ARCHIVE_BATCH_MAX);
+    const bg = conf.excludePM ? session.summary : undefined;
+    if (msgs.length === 0 && !(bg && bg.trim())) return;
+    const base = group.sharedMemory;
+    setDistillingGroupIds(prev => new Set(prev).add(group.id));
+    try {
+      const gm = await withTimeout(
+        distillGroupMemory(base, msgs, provider, conf.summaryModelId, agents, conf.summaryMaxTokens, bg),
+        GROUP_MEMORY_DISTILL_TIMEOUT_MS,
+        'group memory distill'
+      );
+      if (!gm) { console.warn('[GroupMemory] manual distill returned nothing usable'); return; }
+      if (gm.usage) {
+        const c = calculateCost(gm.usage, provider, conf.summaryModelId);
+        if (c > 0) setTotalCost(prev => prev + c);
+      }
+      commitGroupMemory(group.id, base, gm.text);
+    } catch (err) {
+      console.warn('[GroupMemory] manual distill failed:', err);
+    } finally {
+      setDistillingGroupIds(prev => {
+        const next = new Set(prev);
+        next.delete(group.id);
+        return next;
+      });
+    }
   };
 
   const handleStopAll = () => {
@@ -1518,6 +1605,31 @@ const App: React.FC = () => {
         }
       }
 
+      // 2.5 群组共同往事（GROUP_MEMORY_PLAN.md §2.2）。失败隔离：这一步无论失败、超时还是返回
+      //     异常，都只打一条 warning，绝不 throw——归档本身照常提交，原有共同往事保持不动。
+      //     输入只有「本批公开消息」：私讯（pmTargetId）不管 excludePM 怎么设一律滤掉，
+      //     privateSummaries 与本会话 summary 都不进来。
+      let groupMemoryNext: string | null = null;
+      const groupMemoryBase = group?.sharedMemory;
+      const distillRange = range.filter(m => !m.pmTargetId);
+      if (group && distillRange.length > 0) {
+        try {
+          const gm = await withTimeout(
+            distillGroupMemory(groupMemoryBase, distillRange, provider, conf.summaryModelId, agents, conf.summaryMaxTokens),
+            GROUP_MEMORY_DISTILL_TIMEOUT_MS,
+            'group memory distill'
+          );
+          if (gm) {
+            groupMemoryNext = gm.text;
+            if (gm.usage) cost += calculateCost(gm.usage, provider, conf.summaryModelId);
+          } else {
+            console.warn('[GroupMemory] distill returned nothing usable; keeping existing group memory');
+          }
+        } catch (gmErr) {
+          console.warn('[GroupMemory] distill failed; archive continues, group memory unchanged:', gmErr);
+        }
+      }
+
       // 3. 世代校验。归档期间用户改过这个会话的记忆（重置 / 编辑摘要 / 编辑私人记忆 / 清空
       //    记录）就整轮作废：一个字段都不写、边界不推进。用户的手写优先于机器总结。
       //    这不是失败，所以**不记失败退避**——下一条消息就能重跑；但费用照记，钱已经花了。
@@ -1558,6 +1670,10 @@ const App: React.FC = () => {
         } : s);
       });
 
+      // 共同往事和归档同一刻提交（同一次渲染批处理），一次归档只打断一次缓存前缀。
+      // 归档在世代校验处作废时走不到这里，提炼结果一起丢掉——那批消息下次会重新归档、重新提炼。
+      if (group && groupMemoryNext !== null) commitGroupMemory(group.id, groupMemoryBase, groupMemoryNext);
+
       if (cost > 0) setTotalCost(prev => prev + cost);
       lastArchiveFailAtRef.current.delete(sessionId);
       return 'ok';
@@ -1574,7 +1690,7 @@ const App: React.FC = () => {
         return next;
       });
     }
-  }, [sessions, groups, providers, agents]);
+  }, [sessions, groups, providers, agents, commitGroupMemory]);
 
   // --- MEMORY ARCHIVE TRIGGER ---
   // 归档完成后若未归档条数仍 ≥ threshold（老会话追赶），summaryCutoffId 变化会让本 effect
@@ -1769,6 +1885,8 @@ const App: React.FC = () => {
       // 该 agent 自己的私人记忆（归档私讯的产物）。只进它自己的 memory 层，没有就是 undefined，
       // 此时 buildMemoryContext 的输出与 HEAD 逐字节一致。
       const privateSummary = activeSession.privateSummaries?.[agent.id];
+      // 群组共同往事（跨会话，GROUP_MEMORY_PLAN.md）。只含公开内容，所有成员同一份；为空时同样逐字节不变。
+      const groupMemory = currentGroup?.sharedMemory;
 
       // 辩论模式：注入角色阵营信息到 scenario
       const debateCfg = activeSession.debateConfig;
@@ -1952,6 +2070,7 @@ const App: React.FC = () => {
         let header = '';
         if (agent.systemPrompt) header += `[System] ${agent.systemPrompt}\n`;
         if (scenario) header += `[Scenario] ${scenario}\n`;
+        if (groupMemory && groupMemory.trim()) header += `[Group History] ${groupMemory.trim()}\n`;
         if (summary) header += `[Summary] ${summary}\n`;
         const msgLines: string[] = [];
         let msgLen = 0;
@@ -2073,7 +2192,7 @@ const App: React.FC = () => {
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool,
           agent.enableGoogleSearch, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint, privateSummary
+          abortController.signal, followupHint, privateSummary, groupMemory
         );
       } else if (provider.type === AgentType.ANTHROPIC) {
         console.log(`[${agent.name}] 📡 Using Anthropic API`);
@@ -2081,7 +2200,7 @@ const App: React.FC = () => {
           agent, provider.baseUrl || 'https://api.anthropic.com/v1', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint, privateSummary
+          abortController.signal, followupHint, privateSummary, groupMemory
         );
       } else if (provider.openaiApiMode === 'responses') {
         console.log(`[${agent.name}] 📡 Using OpenAI Responses API`);
@@ -2089,7 +2208,7 @@ const App: React.FC = () => {
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint, privateSummary
+          abortController.signal, followupHint, privateSummary, groupMemory
         );
       } else {
         console.log(`[${agent.name}] 📡 Using OpenAI-compatible API`);
@@ -2097,7 +2216,7 @@ const App: React.FC = () => {
           agent, provider.baseUrl || '', provider.apiKey || '', agent.modelId, processedMessages, currentSessionMembers, settings.visibilityMode, effectiveContextLimit,
           scenario, summary, adminNotes, settings.userName, settings.userPersona, hasSearchTool, groupAdminIds, entertainmentConfig, agentVisibility, humanDisguise,
           activeGroup?.mentionOnlyIds, activeSession.agentJoinedAt, activeSession.hidePreJoinMessages,
-          abortController.signal, followupHint, privateSummary
+          abortController.signal, followupHint, privateSummary, groupMemory
         );
       }
 
@@ -3372,12 +3491,12 @@ const App: React.FC = () => {
   const actionHandlersRef = useRef({
     appendUserMessage, handleSwitchSession, addAgentToActiveGroup, handleRemoveAgent,
     handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel,
-    handleCreateGroup, handleCreateSession
+    handleCreateGroup, handleCreateSession, handleUpdateGroupSharedMemory
   });
   actionHandlersRef.current = {
     appendUserMessage, handleSwitchSession, addAgentToActiveGroup, handleRemoveAgent,
     handleMuteAgent, handleUnmuteAgent, triggerAgentReply, applyRemoteAgentPatch, createAgentFromModel,
-    handleCreateGroup, handleCreateSession
+    handleCreateGroup, handleCreateSession, handleUpdateGroupSharedMemory
   };
 
   const handleActionEvent = useCallback((evt: ActionEvent) => {
@@ -3608,6 +3727,15 @@ const App: React.FC = () => {
           // 删的是当前身份时指针会挪到剩下的第一个，ref 也跟上
           activeProfileIdRef.current = r.settings.activeProfileId;
           reply(true, undefined, { profileId });
+          return;
+        }
+        // --- 群组共同往事（GROUP_MEMORY_PLAN.md §2.5）。整段覆盖写；与电脑端手写同一个 handler，
+        // 函数式 setGroups，在途的自动提炼提交时发现 base 变了会作废，不会盖掉手机这次写入。 ---
+        case 'group.memory.update': {
+          const payload = evt.payload as GroupMemoryUpdatePayload;
+          if (!st.groups.some(g => g.id === payload.groupId)) { reply(false, 'group-not-found'); return; }
+          h.handleUpdateGroupSharedMemory(payload.groupId, payload.text);
+          reply(true, undefined, { groupId: payload.groupId });
           return;
         }
         default:
@@ -4329,6 +4457,9 @@ const App: React.FC = () => {
         onCreateGroup={handleCreateGroup} onSwitchGroup={handleSwitchGroup}
         onDeleteGroup={handleDeleteGroup} onRenameGroup={handleRenameGroup}
         onUpdateGroupScenario={handleUpdateGroupScenario}
+        onUpdateGroupSharedMemory={handleUpdateGroupSharedMemory}
+        onDistillGroupMemoryNow={handleDistillGroupMemoryNow}
+        isDistillingGroupMemory={!!activeGroupId && distillingGroupIds.has(activeGroupId)}
         onUpdateGroupMemoryConfig={handleUpdateGroupMemoryConfig}
         onUpdateGroupEntertainmentConfig={handleUpdateGroupEntertainmentConfig}
         sessions={sessions} activeSessionId={activeSessionId}

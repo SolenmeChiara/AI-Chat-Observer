@@ -26,6 +26,7 @@ export const ACTION_TYPES = [
   'profile.create',
   'profile.update',
   'profile.delete',
+  'group.memory.update',
 ] as const;
 
 export type ActionType = (typeof ACTION_TYPES)[number];
@@ -60,6 +61,9 @@ export const ACTION_LIMITS = {
   // 用户身份的头像：手机端会把选的图压成 ≤192px 的小图 data URL（实测十几 KB），
   // 必须塞得进 64 KB 的 SMALL_BODY_BYTES 请求体。电脑端本地上传的原图可能更大，那条路不经过这里。
   profileAvatar: 48000,
+  // 群组共同往事（ChatGroup.sharedMemory）的手写上限。自动提炼的目标长度远小于此（约 1500 字）；
+  // 这里管的是请求体：中文 UTF-8 每字 3 字节，16000 字 ≈ 48 KB，塞得进 64 KB 的 SMALL_BODY_BYTES。
+  groupMemory: 16000,
 } as const;
 
 /** profile.switch 的 profileId 可以是这个特殊值：旁白模式（以系统消息样式发言，不带任何身份）。 */
@@ -212,6 +216,15 @@ export interface ProfileIdPayload {
   profileId: string;
 }
 
+/**
+ * 覆盖写某个群的共同往事（GROUP_MEMORY_PLAN.md §2.5）。不是会话级动作：群是 payload 显式给的。
+ * `text` 为空串 = 清空。整段覆盖，手机端编辑框必须以最新 bootstrap 里的原文为底稿。
+ */
+export interface GroupMemoryUpdatePayload {
+  groupId: string;
+  text: string;
+}
+
 export interface ActionPayloadMap {
   'message.send': MessageSendPayload;
   'session.switch': EmptyPayload;
@@ -228,6 +241,7 @@ export interface ActionPayloadMap {
   'profile.create': ProfileCreatePayload;
   'profile.update': ProfileUpdatePayload;
   'profile.delete': ProfileIdPayload;
+  'group.memory.update': GroupMemoryUpdatePayload;
 }
 
 // ---- 线上形状 ----

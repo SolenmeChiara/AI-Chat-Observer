@@ -64,7 +64,9 @@ export async function* streamAnthropicReply(
    * 该 agent 的私人记忆（归档私讯的产物）。位置参数表很长且相邻多为 string，在中间插参数
    * 会静默错位而 tsc 不报——所以一律追加在最末。为空时 memory 层与 HEAD 逐字节一致。
    */
-  privateSummary?: string
+  privateSummary?: string,
+  /** 群组共同往事（ChatGroup.sharedMemory）；同样追加在最末。为空时 memory 层与 HEAD 逐字节一致。 */
+  groupMemory?: string
 ): AsyncGenerator<StreamChunk> {
 
   if (!apiKey || !baseUrl) throw new Error("Missing Config");
@@ -95,7 +97,7 @@ export async function* streamAnthropicReply(
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
-  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary);
+  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary, groupMemory);
 
   // System Prompt Injection
   const systemParts = buildSystemPromptParts(

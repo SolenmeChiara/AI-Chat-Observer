@@ -145,7 +145,9 @@ export async function* streamGeminiReply(
   /** Per-turn quote-followup hint; rides the trigger turn only (see buildQuoteFollowupHint). */
   followupHint?: string,
   /** 该 agent 的私人记忆；一律追加在参数表最末（中间插参数会静默错位）。为空时 memory 层 byte 不变。 */
-  privateSummary?: string
+  privateSummary?: string,
+  /** 群组共同往事（ChatGroup.sharedMemory）；同样追加在最末。为空时 memory 层与 HEAD 逐字节一致。 */
+  groupMemory?: string
 ): AsyncGenerator<StreamChunk> {
   const ai = getClient(geminiConfig);
 
@@ -175,7 +177,7 @@ export async function* streamGeminiReply(
   const protocols = buildProtocols(agent, allAgents, groupAdminIds, hasSearchTool, entertainmentConfig, userName, commandMode);
 
   // Memory Context
-  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary);
+  const memoryContext = buildMemoryContext(summary, adminNotes, privateSummary, groupMemory);
 
   // System Instruction. Gemini's implicit caching matches on the request prefix
   // (systemInstruction first, then contents), so only the cacheable tiers go here:

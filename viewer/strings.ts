@@ -231,6 +231,18 @@ const en: Record<string, string> = {
   '至少要留一个身份': 'At least one profile must remain',
   '电脑端还没有任何身份': 'No profiles on the computer yet',
   '找不到这个身份': 'Profile not found',
+
+  // 群组共同往事（跨会话记忆）
+  '共同往事': 'Shared history',
+  '跨会话保留的群组记忆：每次归档时自动从公开对话提炼，也可以手动编辑。私讯不会进来。': 'Group memory kept across sessions: distilled from public messages on every archive, and editable by hand. DMs never go in.',
+  '还没有共同往事。开启长期记忆后，每次归档会自动提炼。': 'No shared history yet. With long-term memory on, each archive distills it automatically.',
+  '电脑端还没打开会话': 'No session is open on the computer',
+  '最后更新': 'Last updated',
+  '保存共同往事': 'Save shared history',
+  '共同往事太长（上限 16000 字）': 'Shared history is too long (16000 chars max)',
+  '电脑端有新版本，保存会覆盖它': 'The computer has a newer version; saving will overwrite it',
+  '确定清空本群的共同往事？': 'Clear this group\'s shared history?',
+  '清空': 'Clear',
 };
 
 export function makeViewerT(locale: ViewerLocale): (key: string) => string {

@@ -495,6 +495,7 @@ const ACTION_PAYLOAD_KEYS: Record<ActionType, string[]> = {
   'profile.create': ['name', 'avatar', 'persona'],
   'profile.update': ['profileId', 'patch'],
   'profile.delete': ['profileId'],
+  'group.memory.update': ['groupId', 'text'],
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -745,6 +746,11 @@ function validateActionPayload(type: ActionType, payload: Record<string, unknown
       if (badOptionalString(payload.name, ACTION_LIMITS.name)) return 'name';
       if (badOptionalProfileAvatar(payload.avatar)) return 'avatar';
       if (badOptionalString(payload.persona, ACTION_LIMITS.persona)) return 'persona';
+      return null;
+    case 'group.memory.update':
+      // 不是会话级动作：群在 payload 里显式给，存不存在交给电脑端。text 必填（空串 = 清空）。
+      if (badId(payload.groupId)) return 'groupId';
+      if (typeof payload.text !== 'string' || payload.text.length > ACTION_LIMITS.groupMemory) return 'text';
       return null;
     default:
       return 'type';
@@ -1219,6 +1225,9 @@ function projectGroup(g: any) {
     adminIds: Array.isArray(g?.adminIds) ? g.adminIds : [],
     mentionOnlyIds: Array.isArray(g?.mentionOnlyIds) ? g.mentionOnlyIds : [],
     scenario: typeof g?.scenario === 'string' ? g.scenario : '',
+    // 共同往事：只含公开内容（提炼时私讯与私人记忆一律不进），与 scenario 同一级可见性
+    sharedMemory: typeof g?.sharedMemory === 'string' ? g.sharedMemory : '',
+    sharedMemoryUpdatedAt: typeof g?.sharedMemoryUpdatedAt === 'number' ? g.sharedMemoryUpdatedAt : 0,
   };
 }
 
